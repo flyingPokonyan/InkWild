@@ -1,0 +1,107 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: inkwild
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/inkwild
+      REDIS_URL: redis://redis:6379/0
+    # 生产默认：迁移 + uvicorn（不带 --reload）。
+    # 本地 dev 通过 docker-compose.dev.yml 覆盖。
+    command: sh -c "pip install -q beautifulsoup4 lxml && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+    environment:
+      INTERNAL_API_URL: http://backend:8000
+      NODE_ENV: production
+    # 生产默认走 Dockerfile 的 CMD = npm start（已 build 好的产物）。
+    restart: unless-stopped
+
+  admin-frontend:
+    build:
+      context: ./admin-frontend
+    depends_on:
+      - backend
+    environment:
+      INTERNAL_API_URL: http://backend:8000
+      NODE_ENV: production
+    restart: unless-stopped
+
+  # Phase 2.D.4 — daily Postgres backup. Sleeps until 03:00 then runs
+  # /scripts/backup.sh, which dumps inkwild into the `backups` named
+  # volume and prunes archives older than 7 days.
+  backup:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: inkwild
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: "7"
+    volumes:
+      - ./ops:/scripts:ro
+      - backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "[backup] scheduler started; targeting 03:00 local time daily"
+        while true; do
+          h=$$(date +%H); m=$$(date +%M); s=$$(date +%S)
+          h=$${h#0}; m=$${m#0}; s=$${s#0}
+          : "$${h:=0}"; : "$${m:=0}"; : "$${s:=0}"
+          now_secs=$$(( h * 3600 + m * 60 + s ))
+          target=$$(( 3 * 3600 ))
+          if [ "$$now_secs" -lt "$$target" ]; then
+            sleep_for=$$(( target - now_secs ))
+          else
+            sleep_for=$$(( 86400 - now_secs + target ))
+          fi
+          echo "[backup] sleeping $${sleep_for}s until next 03:00"
+          sleep "$$sleep_for"
+          /scripts/backup.sh || echo "[backup] run failed, will retry tomorrow"
+        done
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  backups:

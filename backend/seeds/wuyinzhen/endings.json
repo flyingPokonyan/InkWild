@@ -1,0 +1,38 @@
+[
+  {
+    "ending_type": "perfect",
+    "title": "真相大白",
+    "description": "你成功揭露了管家王福的罪行，保护了李婉的安全。正义得到伸张。",
+    "priority": 10,
+    "hard_conditions": null,
+    "soft_conditions": "玩家正确指认管家王福为凶手，并给出了合理的动机（遗嘱修改）和证据（泥土、不在场证明破裂、目击证人）",
+    "mode": "script_only"
+  },
+  {
+    "ending_type": "good",
+    "title": "部分真相",
+    "description": "你找到了一些关键证据，虽然没有完全揭露真相，但足以引起官府注意。王福最终被缉拿归案。",
+    "priority": 7,
+    "hard_conditions": null,
+    "soft_conditions": "玩家指认了王福但证据不够充分，或找到了大部分线索但未能完整拼凑真相",
+    "mode": "script_only"
+  },
+  {
+    "ending_type": "bad",
+    "title": "李婉遇害",
+    "description": "你未能及时阻止王福。调查陷入停滞后，王福对李婉下了毒手，真相被永远掩埋。",
+    "priority": 8,
+    "hard_conditions": {"type": "rounds_without_progress", "min_rounds": 20, "after_round": 40},
+    "soft_conditions": null,
+    "mode": "script_only"
+  },
+  {
+    "ending_type": "timeout",
+    "title": "不了了之",
+    "description": "你在镇上待了太久却一无所获。官府催促你返回，案件成为悬案。",
+    "priority": 5,
+    "hard_conditions": {"type": "max_rounds", "max_rounds": 100},
+    "soft_conditions": null,
+    "mode": "script_only"
+  }
+]

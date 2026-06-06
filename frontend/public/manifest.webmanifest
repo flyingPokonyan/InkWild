@@ -1,0 +1,39 @@
+{
+  "name": "InkWild",
+  "short_name": "InkWild",
+  "description": "AI 驱动的互动叙事引擎，每一个选择塑造独一无二的故事。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["entertainment", "games", "books"],
+  "shortcuts": [
+    {
+      "name": "发现世界",
+      "url": "/discover",
+      "description": "浏览所有可玩世界"
+    },
+    {
+      "name": "我的历史",
+      "url": "/history",
+      "description": "查看玩过的世界"
+    }
+  ]
+}

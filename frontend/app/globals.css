@@ -1,0 +1,3777 @@
+@import "tailwindcss";
+@source "../components";
+
+/* ==========================================================================
+   兼容别名层 (Stage 5e — 2026-05-09)
+   旧 token 名字保留，但**值全部对齐 .lv-theme 下的 --lv-* 体系**。
+   消费方（admin workshop / play page / 各种用 bg-bg-primary text-gold 类的组件）
+   不需要改任何代码——视觉自动统一到暖金 / 新灰阶 / 新圆角。
+   新代码：直接用 --lv-* 或 .lv-t-* 工具类。
+   ========================================================================== */
+
+@theme inline {
+  /* 背景色 */
+  --color-bg-primary: #0a0a0c;          /* 旧 #0c0c10 → 对齐 --lv-bg */
+  --color-bg-surface: #111114;          /* 旧 #16161c → 对齐 --lv-bg-1 */
+  --color-bg-surface-hover: #18181c;    /* 旧 #1e1e26 → 对齐 --lv-bg-2 */
+  --color-bg-elevated: #18181c;         /* 旧 #22222c → 折叠到 --lv-bg-2 */
+
+  /* 边线 */
+  --color-border: rgba(255, 255, 255, 0.07);          /* 对齐 --lv-line */
+  --color-border-active: rgba(255, 255, 255, 0.12);   /* 对齐 --lv-line-2 */
+
+  /* 文字 */
+  --color-text-primary: #ffffff;        /* 纯白 → 对齐 --lv-ink */
+  --color-text-secondary: #e2e8f0;      /* Slate 200 → 对齐 --lv-ink-2 */
+  --color-text-muted: #94a3b8;          /* Slate 400 → 对齐 --lv-ink-3 */
+
+  /* Accent — Champagne Gold (v2.3) */
+  --color-accent: #dfc290;              /* 对齐暖金 --lv-accent */
+  --color-accent-hover: #ebd6b3;        /* 亮金 */
+  --color-accent-soft: rgba(223, 194, 144, 0.10);     /* 暖金透明 */
+
+  /* Gold — Champagne Gold */
+  --color-gold: #dfc290;                
+
+
+  /* 状态色 */
+  --color-danger: #b85c5c;              /* 旧 #e05252 → --lv-danger */
+  --color-success: #7fb091;             /* 旧 #4caf50 → --lv-success */
+
+  /* 字体栈 — 对齐 --lv-font-* */
+  --font-sans: "Inter", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --font-serif: "Cormorant Garamond", "Noto Serif SC", "Source Han Serif SC", "Songti SC", ui-serif, serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  /* 排版 token — 旧 7 档保留作 alias，值不动（少量组件用 text-display / text-heading 等 Tailwind 类） */
+  --font-size-display: 2.5rem;
+  --font-size-display--line-height: 1.2;
+  --font-size-heading: 1.5rem;
+  --font-size-heading--line-height: 1.35;
+  --font-size-subheading: 1.25rem;
+  --font-size-subheading--line-height: 1.4;
+  --font-size-body: 0.9375rem;          /* 15px → 对齐 --lv-t-body */
+  --font-size-body--line-height: 1.6;
+  --font-size-body-sm: 0.75rem;         /* 12px → 对齐 --lv-t-meta */
+  --font-size-body-sm--line-height: 1.5;
+  --font-size-caption: 0.6875rem;       /* 11px → 对齐 --lv-t-caps */
+  --font-size-caption--line-height: 1.4;
+  --font-size-narrative: 1rem;
+  --font-size-narrative--line-height: 1.85;
+
+  /* 圆角 token — 旧 5 档保留作 alias */
+  --radius-sm: 0.5rem;     /* 8px */
+  --radius-md: 0.625rem;   /* 10px → 对齐 --lv-r-input */
+  --radius-lg: 1rem;       /* 16px → 对齐 --lv-r-card */
+  --radius-xl: 1rem;       /* 折叠到 lg/card */
+  --radius-full: 9999px;   /* → 对齐 --lv-r-pill */
+
+  /* 选中态 token — 对齐暖金 */
+  --color-state-selected-border: rgba(201, 180, 138, 0.4);
+  --color-state-selected-bg: #18181c;
+  --color-state-selected-glow: 0 0 32px rgba(201, 180, 138, 0.1);
+  --color-state-hover-border: rgba(255, 255, 255, 0.12);
+  --color-state-hover-bg: #18181c;
+  --color-state-hover-glow: 0 0 32px rgba(201, 180, 138, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* 动效 token alias —— 对齐 --lv-dur-* / --lv-ease */
+:root {
+  --duration-fast: 200ms;       /* 对齐 --lv-dur-fast（200ms） */
+  --duration-normal: 200ms;     /* 折叠到 fast */
+  --duration-slow: 400ms;       /* 对齐 --lv-dur-page */
+  --ease-default: cubic-bezier(0.2, 0.7, 0.2, 1);   /* 对齐 --lv-ease */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+html {
+  background: var(--lv-bg, #08080a);
+}
+
+body {
+  min-height: 100dvh;
+  /* 背景与字体由 .lv-theme 接管（layout.tsx 中 body 挂了 lv-theme class）。
+     旧 @theme inline 块仍存在，老页面通过 Tailwind utility class 自取 token，互不干扰。 */
+}
+
+/* ── App-feel：移动端原生触感 ──
+   1) 去掉点按时的灰/蓝高亮闪 —— 这是最像「网页」的 tell。
+   2) touch-action: manipulation —— 消除 ~300ms 点击延迟、禁双击缩放。
+   3) 触屏按下回弹 —— 仅 coarse pointer，且尊重 reduced-motion。 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+button,
+a,
+[role="button"],
+summary,
+label {
+  touch-action: manipulation;
+}
+@media (hover: none) and (pointer: coarse) {
+  .lv-theme .lv-btn:active:not(:disabled),
+  .lv-theme .credit-chip:active,
+  .lv-theme .credit-chip-plain:active,
+  .lv-theme .lv-tab-bar a:active,
+  .lv-theme [data-pressable]:active {
+    transform: scale(0.96);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lv-theme .lv-btn:active,
+  .lv-theme .credit-chip:active,
+  .lv-theme .credit-chip-plain:active,
+  .lv-theme .lv-tab-bar a:active,
+  .lv-theme [data-pressable]:active {
+    transform: none;
+  }
+}
+
+/* History page renders dedicated desktop and mobile surfaces. Keep this split
+   in global CSS so it survives production/Docker builds without styled-jsx. */
+@media (max-width: 768px) {
+  .lv-history-desktop { display: none !important; }
+}
+
+@media (min-width: 769px) {
+  .lv-history-mobile { display: none !important; }
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(223, 194, 144, 0.24);
+}
+
+/* -- Components -- */
+
+.card {
+  background: #16161c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--duration-fast) var(--ease-default),
+              background var(--duration-fast) var(--ease-default),
+              box-shadow var(--duration-fast) var(--ease-default);
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #18181c;
+  box-shadow: 0 0 40px rgba(201, 180, 138, 0.06);
+}
+
+.display-type {
+  font-family: var(--lv-font-serif);
+}
+
+.narrative-text {
+  font-family: var(--lv-font-serif);
+  font-size: 16px;
+  line-height: 1.9;
+  color: #e8e4de;
+}
+
+/* -- Animations -- */
+
+.fade-up {
+  animation: fade-up var(--duration-slow) var(--ease-out) both;
+}
+
+.fade-up-delay-1 {
+  animation-delay: 0.08s;
+}
+
+.fade-up-delay-2 {
+  animation-delay: 0.16s;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.6s var(--ease-out) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes admin-loading-fade {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+    filter: blur(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes admin-loading-stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes admin-loading-orbit-a {
+  0%, 100% {
+    transform: translate(-66%, -54%) scale(0.96);
+    opacity: 0.32;
+  }
+  50% {
+    transform: translate(-61%, -58%) scale(1.06);
+    opacity: 0.5;
+  }
+}
+
+@keyframes admin-loading-orbit-b {
+  0%, 100% {
+    transform: translate(-2%, -8%) scale(0.98);
+    opacity: 0.22;
+  }
+  50% {
+    transform: translate(4%, -14%) scale(1.08);
+    opacity: 0.42;
+  }
+}
+
+@keyframes admin-loading-dot {
+  0%, 100% {
+    transform: scale(0.88);
+    opacity: 0.82;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
+@keyframes admin-loading-line {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scaleX(0.92);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes admin-loading-grain {
+  0% { transform: translate3d(0, 0, 0); }
+  25% { transform: translate3d(-1.5%, 1%, 0); }
+  50% { transform: translate3d(1.2%, -1.2%, 0); }
+  75% { transform: translate3d(-0.8%, -1%, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes glow-breathe {
+  0%, 100% { opacity: 0.4; transform: translate(-50%, -50%) scale(0.9); }
+  50% { opacity: 0.8; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+.slide-in-right {
+  animation: slide-in-right var(--duration-normal) var(--ease-out) both;
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.admin-loading-current {
+  animation: admin-loading-fade 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.admin-loading-stage-current {
+  animation: admin-loading-stage-in 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity, filter;
+}
+
+.admin-loading-dot {
+  animation: admin-loading-dot 2.8s ease-in-out infinite;
+}
+
+.admin-loading-line {
+  animation: admin-loading-line 4.5s ease-in-out infinite;
+}
+
+.admin-loading-orb {
+  will-change: transform, opacity;
+}
+
+.admin-loading-orb-a {
+  animation: admin-loading-orbit-a 14s ease-in-out infinite;
+}
+
+.admin-loading-orb-b {
+  animation: admin-loading-orbit-b 18s ease-in-out infinite;
+}
+
+.admin-loading-grain {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.015), rgba(255,255,255,0.015)),
+    radial-gradient(circle at 20% 30%, rgba(255,255,255,0.03) 0, transparent 35%),
+    radial-gradient(circle at 80% 70%, rgba(255,255,255,0.02) 0, transparent 32%);
+  animation: admin-loading-grain 20s linear infinite;
+}
+
+/* 退出动画 */
+@keyframes slide-out-right {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(100%); }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes slide-down {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(100%); }
+}
+
+/* -- Scrollbar -- */
+
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ==========================================================================
+   Play page — v2.2 lv-* token system (§12 visual-principles.md)
+   暖金 accent (#c9b48a) 替换原 teal (#00a693)。字号走 .lv-t-* 工具类。
+   ========================================================================== */
+
+.play-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--lv-bg-stage);
+  isolation: isolate;
+}
+
+/* v2.2: 氛围层 —— 跟 GameLoadingScreen 视觉延续，alpha 砍半 / 周期拉到 10s
+   让 "loading 屏 → 游戏屏" 过场连贯：呼吸光从聚光留到环境氛围 */
+.play-stage-aura {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    ellipse 80% 60% at 50% 50%,
+    rgba(223, 194, 144, 0.04) 0%,
+    rgba(223, 194, 144, 0.012) 35%,
+    rgba(0, 0, 0, 0) 65%
+  );
+  animation: play-stage-aura-breathe 10000ms cubic-bezier(0.4, 0, 0.4, 1) infinite;
+}
+@keyframes play-stage-aura-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(0.98); }
+  50%      { opacity: 0.95; transform: scale(1.02); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .play-stage-aura { animation: none; opacity: 0.7; }
+}
+
+/* Header */
+
+.play-header {
+  position: relative;
+  z-index: var(--lv-z-sticky);
+  flex-shrink: 0;
+  padding: calc(env(safe-area-inset-top) + var(--lv-s-3)) var(--lv-s-4) var(--lv-s-1);
+}
+
+/* v2.2: 半透条而非卡片 chrome —— 让 UI 让位给故事
+   去 border / 去 backdrop-blur / 去 background；icon 默认半透，hover 浮现 */
+.play-header-inner {
+  display: flex;
+  width: 100%;
+  max-width: var(--lv-max-w-read);
+  height: 44px;
+  margin: 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lv-s-3);
+}
+
+.play-header-left,
+.play-header-right,
+.play-header-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-2);
+  min-width: 0;
+}
+
+/* v2.2: ghost icon button —— 默认透明 + ink-3，hover 浮现一层弱 bg */
+.play-header-button {
+  display: inline-flex;
+  min-width: 40px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lv-s-2);
+  border-radius: var(--lv-r-pill);
+  border: 0;
+  background: transparent;
+  padding: 0 var(--lv-s-3);
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  cursor: pointer;
+  transition: background var(--lv-dur-fast) var(--lv-ease),
+              color var(--lv-dur-fast) var(--lv-ease);
+}
+
+.play-header-icon-button {
+  width: 40px;
+  padding: 0;
+}
+
+.play-header-board-button {
+  min-width: 64px;
+  border: 1px solid var(--lv-line);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 0 var(--lv-s-3);
+  color: var(--lv-ink-2);
+}
+
+.play-header-button:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--lv-ink);
+}
+
+.play-header-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+/* v2.2: 修字体违规 —— worldName 是中文，不能走 mono caps；改 sans meta ink-3 */
+.play-header-label {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  letter-spacing: 0.04em;
+}
+
+.play-header-title {
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  max-width: 148px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play-header-meta {
+  color: var(--lv-ink-4);
+  font-family: var(--lv-font-sans);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play-header-clue-badge {
+  display: inline-flex;
+  height: 18px;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-accent-soft);
+  color: var(--lv-accent);
+  padding: 0 6px;
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-micro);
+  font-weight: 500;
+  line-height: 1;
+}
+
+/* Timeline (sole scroll container) */
+
+.play-timeline {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding: var(--lv-s-2) var(--lv-s-4) 0;
+}
+
+.play-timeline-inner {
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--lv-s-8);
+  width: 100%;
+  max-width: var(--lv-max-w-read);
+}
+
+/* Identity strip */
+
+.play-identity,
+.play-identity-strip {
+  padding: var(--lv-s-4) 0 var(--lv-s-6);
+  border-bottom: 1px solid var(--lv-line);
+  margin-bottom: var(--lv-s-1);
+  text-align: center;
+}
+
+/* v2.2: 修字体违规 —— "身份" 中文不能走 mono caps；改 sans meta ink-3 */
+.play-identity-label {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  letter-spacing: 0.06em;
+  margin-bottom: var(--lv-s-2);
+}
+
+.play-identity-name {
+  color: var(--lv-ink);
+  font-family: var(--lv-font-serif);
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 1.15;
+  margin-bottom: var(--lv-s-2);
+}
+
+.play-identity-desc,
+.play-identity-summary {
+  color: var(--lv-ink-2);
+  font-family: var(--lv-font-sans);
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: var(--lv-max-w-read);
+  margin: 0 auto;
+}
+
+/* Empty state */
+
+.play-empty-state {
+  max-width: 36rem;
+  padding: var(--lv-s-4);
+  text-align: left;
+}
+
+/* Messages — continuous narrative flow (§12.2 / §12.3) */
+
+.play-message-block {
+  max-width: var(--lv-max-w-read);
+}
+
+/* §12.2: 叙事段落改 sans，clamp 15→17，行高 1.85（不可改） */
+.play-message-narrator {
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-narrative);
+  line-height: 1.85;
+  letter-spacing: 0.005em;
+  color: var(--lv-ink);
+  white-space: pre-wrap;
+}
+
+.play-message-narrator-writing {
+  border-left: 2px solid var(--lv-accent-soft);
+  padding-left: var(--lv-s-3);
+}
+
+/* §12.3: 玩家消息 —— italic 缩进，不做 IM 气泡
+   v2.2: 删 border-left（让 UI 让位故事）；mode 编码移到上方 caps eyebrow
+   accent 颜色由 MessageBubble 通过 --play-accent CSS var 注入（剧本 / 自由 不同色） */
+.play-message-player {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: min(92%, 30rem);
+  margin-left: auto;
+}
+
+.play-message-player-eyebrow {
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-micro);
+  letter-spacing: 0.22em;
+  font-weight: 500;
+  color: var(--play-accent, var(--lv-accent));
+  margin-bottom: var(--lv-s-2);
+  text-transform: uppercase;
+}
+
+.play-message-player-body {
+  font-family: var(--lv-font-sans);
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--lv-ink-2);
+  font-style: italic;
+  text-align: right;
+}
+
+.play-message-cursor {
+  display: inline-block;
+  height: 1em;
+  width: 0.38rem;
+  margin-left: var(--lv-s-1);
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-ink);
+  vertical-align: -0.12em;
+  animation: play-cursor-blink 1s ease-in-out infinite;
+}
+
+@keyframes play-cursor-blink {
+  0%, 100% { opacity: 0.2; transform: scaleY(0.85); }
+  50% { opacity: 1; transform: scaleY(1); }
+}
+
+/* Message enter animation */
+
+.play-message-enter {
+  animation: play-msg-enter var(--lv-dur-fast) var(--lv-ease) both;
+}
+
+@keyframes play-msg-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Processing rail (§12.4) */
+
+.play-processing-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-2);
+  width: fit-content;
+  max-width: min(100%, 42rem);
+  margin: 0 auto;
+  border-radius: var(--lv-r-pill);
+  border: 1px dashed var(--lv-line-2);
+  background: rgba(255, 255, 255, 0.02);
+  padding: var(--lv-s-2) var(--lv-s-3);
+  animation: play-rail-in var(--lv-dur-fast) var(--lv-ease) both;
+}
+
+@keyframes play-rail-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.play-processing-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-1);
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-caps);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.play-processing-dot {
+  height: 6px;
+  width: 6px;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-accent);
+  animation: play-dot-pulse 1.8s ease-out infinite;
+}
+
+@keyframes play-dot-pulse {
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }
+}
+
+.play-processing-flavor {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.5;
+}
+
+/* 思考态进度行（v2）：小号 Branch logo（金）+ 左对齐小字过程反馈。
+   非斜体、--lv-ink-3、meta 字号，和 narrative 正文区分开。 */
+.play-thinking-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-2);
+  width: fit-content;
+  max-width: min(100%, 42rem);
+  animation: play-rail-in var(--lv-dur-fast) var(--lv-ease) both;
+}
+
+.play-thinking-glyph {
+  display: inline-flex;
+  align-items: center;
+  color: var(--lv-accent);
+}
+
+.play-thinking-label {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+}
+
+/* Retry */
+
+.play-retry-button {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  transition: color var(--lv-dur-fast) var(--lv-ease);
+}
+
+.play-retry-button:hover:not(:disabled) {
+  color: var(--lv-accent);
+}
+
+.play-retry-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+/* Jump to latest */
+
+.play-jump-latest {
+  position: absolute;
+  right: var(--lv-s-4);
+  bottom: 142px;
+  z-index: var(--lv-z-toast);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-1);
+  border-radius: var(--lv-r-pill);
+  border: 1px solid var(--lv-line-2);
+  background: rgba(6, 6, 10, 0.85);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  padding: var(--lv-s-2) var(--lv-s-3);
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  animation: play-msg-enter var(--lv-dur-fast) var(--lv-ease) both;
+  transition: border-color var(--lv-dur-fast) var(--lv-ease);
+}
+
+.play-jump-latest:hover {
+  border-color: var(--lv-line-2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Inline error */
+
+.play-inline-error {
+  max-width: var(--lv-max-w-read);
+  margin: 0 auto;
+  border-radius: var(--lv-r-card);
+  border: 1px solid var(--lv-danger);
+  background: rgba(184, 92, 92, 0.08);
+  padding: var(--lv-s-3) var(--lv-s-4);
+  color: var(--lv-danger);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-body);
+  text-align: center;
+}
+
+/* Composer (§12.7 — 底部固定 / 56px / pill 圆角) */
+
+.play-composer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--lv-z-sticky);
+  padding: var(--lv-s-3) var(--lv-s-4) calc(var(--lv-s-4) + var(--lv-s-1) + env(safe-area-inset-bottom));
+  background: linear-gradient(
+    180deg,
+    rgba(5, 5, 7, 0),
+    rgba(5, 5, 7, 0.86) 24%,
+    rgba(5, 5, 7, 0.98)
+  );
+  pointer-events: none;
+}
+
+/* v2.2: 去卡片 chrome —— shell 是 chat-style 容器，不需要外层 card 包一层 */
+.play-composer-inner {
+  width: 100%;
+  max-width: var(--lv-max-w-read);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lv-s-2);
+  pointer-events: auto;
+}
+
+.play-composer-label {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-caps);
+  letter-spacing: 0.04em;
+}
+
+.play-composer-status {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.5;
+}
+
+.play-quick-actions {
+  display: flex;
+  gap: 7px;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* v2.2: 跟 textarea 字号一致（lv-t-body），高度提升到 36 让点击更舒适 */
+.play-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 var(--lv-s-3);
+  border-radius: var(--lv-r-pill);
+  border: 1px solid var(--lv-line);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--lv-ink-2);
+  font-family: var(--lv-font-sans);
+  font-size: 13px;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--lv-dur-fast) var(--lv-ease),
+              background var(--lv-dur-fast) var(--lv-ease),
+              color var(--lv-dur-fast) var(--lv-ease);
+}
+
+.play-quick-chip:hover:not(:disabled) {
+  border-color: var(--lv-line-2);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--lv-ink);
+}
+
+.play-quick-chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* v2.2: chat 风格 shell —— 透明 bg + border 1px 划区，跟 stage 同层
+   圆角 24px 是输入框视觉惯例区间（§3 圆角钉死 16/10/9999，此处单独破例）
+   mode-aware accent 由 component 用 inline `--play-accent` CSS var 注入 */
+.play-compose-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--lv-s-2);
+  min-height: 56px;
+  padding: 6px 6px 6px 18px;
+  background: rgba(5, 5, 7, 0.24);
+  border: 1px solid var(--lv-line-2);
+  border-radius: 24px;
+  transition: border-color var(--lv-dur-fast) var(--lv-ease);
+}
+
+.play-compose-row:hover {
+  border-color: var(--lv-line-2);
+}
+
+.play-compose-row:focus-within {
+  border-color: var(--lv-line-2);
+}
+
+.play-compose-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  resize: none;
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-body);
+  line-height: 1.5;
+  min-height: 42px;
+  padding: 9px 0;
+  max-height: 200px;
+  overflow-y: auto;
+  caret-color: var(--play-accent, var(--lv-accent));
+}
+
+.play-compose-input::placeholder {
+  color: var(--lv-ink-4);
+}
+
+.play-compose-input:disabled {
+  color: var(--lv-ink-3);
+  cursor: not-allowed;
+}
+
+.play-compose-submit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 9999px;
+  background: var(--play-accent, var(--lv-accent));
+  border: 0;
+  color: var(--lv-bg);
+  cursor: pointer;
+  transition: opacity var(--lv-dur-fast) var(--lv-ease),
+              transform var(--lv-dur-fast) var(--lv-ease);
+}
+
+.play-compose-submit:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.play-compose-submit:disabled {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--lv-ink-4);
+  cursor: not-allowed;
+}
+
+.play-composer-spacer {
+  height: 162px;
+  flex-shrink: 0;
+}
+
+.play-composer-submit-loading {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  animation: play-submit-spin 0.6s linear infinite;
+}
+
+@keyframes play-submit-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Context drawer (§12.8 — 移动端单栏 + 底部抽屉) */
+
+.play-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--lv-z-drawer);
+  background: rgba(6, 6, 10, 0.55);
+  backdrop-filter: blur(12px) saturate(120%);
+  -webkit-backdrop-filter: blur(12px) saturate(120%);
+}
+
+.play-drawer {
+  position: fixed;
+  z-index: var(--lv-z-drawer);
+  display: flex;
+  flex-direction: column;
+  gap: var(--lv-s-3);
+  border: 1px solid var(--lv-line);
+  background: rgba(17, 17, 20, 0.78);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  animation: slide-in-right var(--lv-dur-fast) var(--lv-ease) both;
+}
+
+.play-drawer-floating {
+  top: 72px;
+  right: var(--lv-s-4);
+  bottom: var(--lv-s-4);
+  width: min(22rem, calc(100vw - 32px));
+  border-radius: var(--lv-r-card);
+  padding: var(--lv-s-4);
+}
+
+.play-drawer-modal {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 70dvh;
+  border-radius: var(--lv-r-card) var(--lv-r-card) 0 0;
+  padding: var(--lv-s-4) var(--lv-s-4) calc(env(safe-area-inset-bottom) + var(--lv-s-4));
+  animation: play-drawer-up var(--lv-dur-fast) var(--lv-ease) both;
+}
+
+@keyframes play-drawer-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.play-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.play-drawer-label {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-caps);
+  letter-spacing: 0.04em;
+}
+
+.play-drawer-title {
+  margin-top: 2px;
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-h3);
+  font-weight: 600;
+}
+
+.play-drawer-body {
+  display: grid;
+  gap: var(--lv-s-3);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.play-drawer-card {
+  border-radius: var(--lv-r-card);
+  border: 1px solid var(--lv-line);
+  background: var(--lv-bg-1);
+  padding: var(--lv-s-3) var(--lv-s-4);
+}
+
+.play-drawer-card h2,
+.play-drawer-section-title {
+  margin: 0 0 var(--lv-s-2);
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-caps);
+  letter-spacing: 0.04em;
+}
+
+.play-drawer-section {
+  padding-bottom: var(--lv-s-3);
+  border-bottom: 1px solid var(--lv-line);
+}
+
+.play-drawer-section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* Context panel inner styles */
+
+.ctx-empty {
+  margin: 0;
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+}
+
+/* Timeline */
+
+.ctx-timeline {
+  position: relative;
+  padding-left: var(--lv-s-3);
+}
+
+.ctx-timeline::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--lv-line-2);
+}
+
+.ctx-timeline-group {
+  position: relative;
+  padding-bottom: var(--lv-s-3);
+}
+
+.ctx-timeline-group:last-child {
+  padding-bottom: 0;
+}
+
+.ctx-timeline-dot {
+  position: absolute;
+  left: -12px;
+  top: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-accent);
+  box-shadow: 0 0 0 2px var(--lv-bg-1);
+}
+
+.ctx-timeline-time {
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-micro);
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.ctx-timeline-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ctx-timeline-item {
+  color: var(--lv-ink-2);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.5;
+}
+
+/* NPC compact list */
+
+.ctx-npc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lv-s-1) var(--lv-s-3);
+}
+
+.ctx-npc {
+  color: var(--lv-ink-2);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+}
+
+.ctx-npc-att {
+  margin-left: 4px;
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-micro);
+}
+
+/* Tags */
+
+.ctx-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--lv-s-1);
+}
+
+.ctx-tag {
+  border-radius: var(--lv-r-pill);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px var(--lv-s-2);
+  color: var(--lv-ink-2);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+}
+
+/* Mobile (§12.8) */
+
+@media (max-width: 768px) {
+  .play-header {
+    padding: calc(env(safe-area-inset-top) + var(--lv-s-2)) 14px var(--lv-s-1);
+  }
+
+  .play-header-inner {
+    gap: var(--lv-s-2);
+  }
+
+  .play-header-title {
+    max-width: 148px;
+  }
+
+  .play-header-back span {
+    display: none;
+  }
+
+  .play-timeline {
+    padding: var(--lv-s-2) 18px 0;
+  }
+
+  .play-composer {
+    padding: var(--lv-s-3) 12px calc(var(--lv-s-4) + var(--lv-s-1) + env(safe-area-inset-bottom));
+  }
+
+  .play-composer-inner {
+    padding: 0;
+  }
+
+  .play-compose-row {
+    gap: var(--lv-s-2);
+  }
+
+  .play-compose-input,
+  .play-compose-submit {
+    min-height: 42px;
+  }
+
+  .play-compose-submit {
+    min-width: 42px;
+    padding: 0;
+  }
+
+  .play-message-player {
+    max-width: 92%;
+  }
+
+  .play-drawer-floating {
+    top: 56px;
+    width: min(20rem, calc(100vw - 24px));
+  }
+}
+
+/* ==========================================================================
+   兼容别名层 (Stage 5e — 2026-05-09)
+   --ta-* token 名字保留，但**值全部对齐 .lv-theme 下的 --lv-* 体系**。
+   .ta-pill .ta-card .ta-btn .ta-input 等 class 在 admin workshop 还在用，
+   不需要改 className，视觉自动统一到暖金 / 新灰阶。
+   ========================================================================== */
+
+:root {
+  /* 背景 */
+  --ta-bg: #0a0a0c;             /* 旧 #0c0c10 → --lv-bg */
+  --ta-bg-1: #111114;           /* 旧 #111116 → --lv-bg-1 */
+  --ta-bg-2: #18181c;           /* 旧 #17171d → --lv-bg-2 */
+  --ta-bg-3: #18181c;           /* 旧 #1e1e26 → 折叠到 bg-2 */
+
+  /* 边线 */
+  --ta-line: rgba(255, 255, 255, 0.07);          /* → --lv-line */
+  --ta-line-soft: rgba(255, 255, 255, 0.07);     /* 折叠到 line */
+  --ta-line-strong: rgba(255, 255, 255, 0.12);   /* → --lv-line-2 */
+
+  /* 文字 */
+  --ta-ink: #f5f3ee;            /* 旧 #ececec → --lv-ink */
+  --ta-ink-2: #c8c5bc;          /* 旧 #c2c6cc → --lv-ink-2 */
+  --ta-ink-3: #8a8678;          /* 旧 #8a8f97 → --lv-ink-3 */
+  --ta-ink-4: #56534a;          /* 旧 #5a5f67 → --lv-ink-4 */
+  --ta-ink-5: #2f2d28;          /* 旧 #3a3e44 → --lv-ink-5 */
+
+  /* Accent — Champagne Gold (v2.3 cinematic) */
+  --ta-accent: #dfc290;                          /* legacy 别名，新代码请用 --lv-accent */
+  --ta-accent-ink: #08080a;                      /* hover 上的文字底色 */
+  --ta-accent-soft: rgba(223, 194, 144, 0.10);
+
+  /* 状态色 */
+  --ta-ok: #7fb091;             /* 旧 #7fbf8a → --lv-success */
+  --ta-warn: #c9a36a;           /* 旧 #d9b36c → --lv-warn */
+  --ta-err: #b85c5c;            /* 旧 #d98b7c → --lv-danger */
+
+  /* 圆角 — 收敛到 lv 3 档 */
+  --ta-r-sm: 10px;              /* 旧 6 → --lv-r-input */
+  --ta-r-md: 10px;              /* 旧 10 → --lv-r-input */
+  --ta-r-lg: 16px;              /* 旧 14 → --lv-r-card */
+  --ta-r-xl: 16px;              /* 旧 20 → --lv-r-card */
+
+  /* 动效 */
+  --ta-t-fast: 200ms;           /* 旧 150 → --lv-dur-fast */
+  --ta-ease: cubic-bezier(0.2, 0.7, 0.2, 1);     /* → --lv-ease（不变） */
+}
+
+.ta-serif { font-family: var(--font-serif); font-weight: 500; letter-spacing: -0.01em; }
+.ta-mono { font-family: var(--font-mono); }
+.ta-caps {
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  color: var(--ta-ink-3);
+}
+
+.ta-dot {
+  display: inline-block;
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--ta-ink-5);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.03);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.ta-dot.ok   { background: var(--ta-ok);   box-shadow: 0 0 0 3px rgba(127, 191, 138, 0.12); }
+.ta-dot.warn { background: var(--ta-warn); box-shadow: 0 0 0 3px rgba(217, 179, 108, 0.12); }
+.ta-dot.err  { background: var(--ta-err);  box-shadow: 0 0 0 3px rgba(217, 139, 124, 0.12); }
+
+.ta-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 10px;
+  border: 1px solid var(--ta-line);
+  border-radius: var(--ta-r-lg);
+  font: 500 11px/1 var(--font-sans);
+  color: var(--ta-ink-2);
+  background: transparent;
+}
+.ta-pill.solid { background: var(--ta-bg-2); }
+.ta-pill.accent {
+  color: var(--ta-accent);
+  border-color: rgba(201, 180, 138, 0.35);
+  background: var(--ta-accent-soft);
+}
+
+.ta-cap {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: var(--ta-r-sm);
+  background: var(--ta-bg-2);
+  border: 1px solid var(--ta-line);
+  color: var(--ta-ink-3);
+}
+.ta-cap svg { width: 12px; height: 12px; }
+.ta-cap.on {
+  color: var(--ta-accent);
+  border-color: rgba(201, 180, 138, 0.35);
+  background: var(--ta-accent-soft);
+}
+.ta-cap.fail {
+  color: var(--ta-err);
+  border-color: rgba(217, 139, 124, 0.35);
+  background: rgba(217, 139, 124, 0.12);
+}
+
+.ta-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 32px; padding: 0 14px;
+  border: 1px solid var(--ta-line);
+  border-radius: var(--ta-r-md);
+  background: var(--ta-bg-2);
+  color: var(--ta-ink);
+  font: 500 12.5px/1 var(--font-sans);
+  cursor: pointer;
+  transition: all var(--ta-t-fast) var(--ta-ease);
+  white-space: nowrap;
+}
+.ta-btn:hover:not(:disabled) { border-color: var(--ta-line-strong); background: var(--ta-bg-3); }
+.ta-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ta-btn.ghost { background: transparent; }
+.ta-btn.primary {
+  background: var(--ta-accent);
+  color: var(--ta-accent-ink);
+  border-color: transparent;
+}
+.ta-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.ta-btn.sm { height: 26px; padding: 0 10px; font-size: 11.5px; gap: 6px; }
+.ta-btn.danger { color: var(--ta-err); }
+.ta-btn.danger:hover:not(:disabled) {
+  border-color: rgba(217, 139, 124, 0.4);
+  background: rgba(217, 139, 124, 0.08);
+}
+
+.ta-card {
+  background: linear-gradient(180deg, var(--ta-bg-1), var(--ta-bg-1) 60%, var(--ta-bg-2));
+  border: 1px solid var(--ta-line);
+  border-radius: var(--ta-r-lg);
+}
+
+.ta-hr { height: 1px; background: var(--ta-line); border: 0; }
+
+.ta-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
+  background: var(--ta-bg-1);
+  border: 1px solid var(--ta-line);
+  border-radius: var(--ta-r-md);
+  color: var(--ta-ink);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--ta-t-fast) var(--ta-ease), background var(--ta-t-fast) var(--ta-ease);
+}
+.ta-input:focus { border-color: rgba(201, 180, 138, 0.5); background: var(--ta-bg-2); }
+.ta-input.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.ta-input.textarea { height: auto; min-height: 88px; padding: 10px 12px; resize: vertical; }
+
+/* Subtle film grain overlay for the workshop stage (no animation) */
+.ta-stage {
+  position: relative;
+  background:
+    radial-gradient(1200px 600px at 20% -10%, rgba(201, 180, 138, 0.05), transparent 60%),
+    radial-gradient(900px 500px at 110% 110%, rgba(201, 180, 138, 0.03), transparent 60%),
+    var(--ta-bg);
+  isolation: isolate;
+}
+
+/* ==========================================================================
+   InkWild · v2.2 视觉系统 — canonical token source (scoped to .lv-theme)
+   规范：docs/design/visual-principles.md v2.2
+   值：docs/design/frontend-spec.md v2.2
+   参考实现：InkWild-Landing-V2.html
+   ========================================================================== */
+
+.lv-theme {
+  /* ===== palette (v2.3 cinematic gold) ===== */
+  --lv-bg: #08080a;                /* 暗影底色 */
+  --lv-bg-stage: #050507;          /* 游戏页舞台背景，比 lv-bg 再深一档 */
+  --lv-bg-1: #0d1014;
+  --lv-bg-2: #15181c;
+  --lv-line: rgba(255, 255, 255, 0.06);
+  --lv-line-2: rgba(255, 255, 255, 0.10);
+  --lv-ink: #f5f2eb;               /* 暖象牙 — 主文本 */
+  --lv-ink-2: #c4bcae;             /* 砂色次级文本 */
+  --lv-ink-3: #8c8273;             /* 烟青铜 — 元数据 */
+  --lv-ink-4: #4a4338;             /* 暗金炭 — 边框/占位 */
+  --lv-ink-5: #1f1c18;             /* 深色块/卡片深描边 */
+  --lv-accent: #dfc290;            /* 香槟金 — 主色 */
+  --lv-accent-2: #aeb4b8;          /* 银雾 — 自由模式辅助色 */
+  --lv-accent-soft: rgba(223, 194, 144, 0.10);
+
+  /* ===== GOLD USE WHITELIST（2026-05 去油腻收敛）=====
+     金色只允许出现在以下语义位：
+       ✅ 品牌标识：ProductNav T 字母 / 品牌点、MobileTopBar 品牌点
+       ✅ Spotlight eyebrow「本周精选」、运营标签
+       ✅ Active selected indicator：filter chip 选中、active nav tab、tab/section underline、active pagination
+       ✅ Focus ring（a11y outline 2px）
+       ✅ Perfect ending（剧本完美结局语义专属）
+     禁止：
+       ❌ 任意 hover-paint-gold（hover 把 bg/border/text/shadow 切金）
+       ❌ 普通卡片 / 按钮的 border / shadow 带金渍
+       ❌ 装饰性金 line / gradient / glow
+       ❌ default button bg 金 或 hover bg 金（CTA 用 var(--lv-ink) ivory）
+     违反请改成中性白系（rgba(255,255,255,*)）或 var(--lv-ink-*)
+  */
+
+  /* ===== card / surface tokens (新增 2026-05) =====
+     全站卡片用这套，禁止每页自己写 rgba 数字。 */
+  --lv-card-bg:        rgba(255, 255, 255, 0.01);
+  --lv-card-bg-hover:  rgba(255, 255, 255, 0.025);
+  --lv-card-border:        1px solid rgba(255, 255, 255, 0.06);
+  --lv-card-border-hover:  1px solid rgba(255, 255, 255, 0.12);
+  --lv-card-shadow:        0 6px 15px rgba(0, 0, 0, 0.2);
+  --lv-card-shadow-hover:  0 16px 32px rgba(0, 0, 0, 0.45);
+
+  /* ===== cover overlay tokens (新增 2026-05) =====
+     light: 普通封面网格卡，最小化压底（保亮）
+     cinematic: 全屏 hero / spotlight 海报，底部更重支撑 metadata 文字 */
+  --lv-cover-overlay-light:
+    linear-gradient(to top, rgba(8, 8, 10, 0.28) 0%, transparent 35%);
+  --lv-cover-overlay-cinematic:
+    linear-gradient(180deg, rgba(8, 8, 10, 0) 0%, rgba(8, 8, 10, 0) 38%,
+                            rgba(8, 8, 10, 0.55) 72%, rgba(8, 8, 10, 0.92) 94%,
+                            var(--lv-bg) 100%);
+
+  /* ===== CTA 尺寸 tokens (新增 2026-05) ===== */
+  --lv-cta-h-sm: 32px;
+  --lv-cta-h-md: 40px;
+  --lv-cta-h-lg: 52px;
+
+  /* ===== status colors (§2.4) — 仅状态反馈，不参与装饰 ===== */
+  --lv-danger: #ef8276;            /* 暖珊瑚红 — 错误文本/描边用，不作填充 */
+  --lv-warn: #c9a36a;
+  --lv-success: #7fb091;
+  /* 通知未读计数 badge 专用：深暖红填充，承载白字（白字对比 4.4:1）。
+     与 --lv-danger 区分：danger 是描边/文本，这个是 fill。 */
+  --lv-badge: #db3f34;
+
+  /* ===== fonts (§1.1) ===== */
+  --lv-font-serif: "Cormorant Garamond", "Noto Serif SC", "Source Han Serif SC", "Songti SC", ui-serif, serif;
+  --lv-font-sans: "Inter", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
+  --lv-font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  /* ===== font-size scale (v2 — 9 档 clamp，移动→桌面平滑过渡) =====
+     设计逻辑：标题档（display/h1/h2/h3）随视口变化；正文/UI 档（body/meta/caps/micro）固定。
+     正文不响应式是有意——移动端读 17px body 比 15px 累，UI 档保持锚点。
+  */
+  --lv-t-display:   clamp(48px, 9vw,   112px);   /* Hero 大标题（landing/ending），每页 ≤1 个 */
+  --lv-t-h1:        clamp(28px, 4vw,    48px);   /* 页面主标题（world 名、admin 页头） */
+  --lv-t-h2:        clamp(20px, 2.4vw,  28px);   /* 区块/section 标题 */
+  --lv-t-h3:        clamp(16px, 1.4vw,  18px);   /* 卡片/小区块标题（PosterCard、history card） */
+  --lv-t-narrative: clamp(15px, 1vw,    17px);   /* 叙事正文（play 页 narrator、world detail desc）—— line-height 1.85 */
+  --lv-t-body:      15px;                        /* UI 正文：按钮、表单、消息气泡 */
+  --lv-t-compact:   13px;                        /* 紧凑正文：移动端密集卡片/流水/列表行（body 与 meta 之间） */
+  --lv-t-meta:      12px;                        /* 辅助/时间戳/状态文字 */
+  --lv-t-caps:      11px;                        /* 大写小标签 — 配套 uppercase + ls 0.2em */
+  --lv-t-micro:     10px;                        /* 极小标记 — 每页 ≤3 处，逃生舱不是常规档 */
+
+  /* legacy aliases — 仅过渡期保留，新代码请用 --lv-t-* */
+  --lv-h1: var(--lv-t-display);     /* 旧 .lv-h1 当 hero 用，映射到 display */
+  --lv-h2: var(--lv-t-h1);          /* 旧 .lv-h2 当 section 标题用，映射到 h1 */
+  --lv-h3: var(--lv-t-h2);
+  --lv-lead: var(--lv-t-body);
+  --lv-body: var(--lv-t-body);
+
+  /* ===== radius (§3 — 钉死 3 档) ===== */
+  --lv-r-card: 16px;                /* 卡片、面板、modal、徽章、角标 */
+  --lv-r-input: 10px;               /* 仅 input/select/textarea */
+  --lv-r-pill: 9999px;              /* 按钮、chip、tag、nav 胶囊 */
+
+  /* ===== spacing (§4 — 钉死 9 档) ===== */
+  --lv-s-1: 4px;
+  --lv-s-2: 8px;
+  --lv-s-3: 12px;
+  --lv-s-4: 16px;
+  --lv-s-6: 24px;
+  --lv-s-8: 32px;
+  --lv-s-12: 48px;
+  --lv-s-16: 64px;
+  --lv-s-24: 96px;
+
+  /* ===== z-index (§5 — 钉死 6 档) ===== */
+  --lv-z-base: 1;
+  --lv-z-sticky: 50;
+  --lv-z-drawer: 100;
+  --lv-z-modal: 200;
+  --lv-z-toast: 300;
+  --lv-z-overlay: 400;
+
+  /* ===== layout ===== */
+  --lv-pad-x: 48px;                 /* §4 桌面硬切，移动端 @media 覆盖 */
+  --lv-pad-y: 96px;
+  --lv-max-w: 1320px;
+  --lv-max-w-read: 760px;           /* 长文阅读 / 游戏页 (§8.3 §12.1) */
+
+  /* ===== motion (§6) ===== */
+  --lv-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --lv-dur-fast: 200ms;
+  --lv-dur-page: 400ms;
+  --lv-dur-cinematic-a: 1800ms;     /* 例外 A: hero crossfade / Ken Burns */
+  --lv-dur-cinematic-b: 1200ms;     /* 例外 B: 游戏页结局 fade-in */
+
+  background: var(--lv-bg);
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-body);
+}
+
+/* mobile padding overrides (§4) — 字号已用 clamp 平滑过渡，不再 media query 跳变 */
+@media (max-width: 768px) {
+  .lv-theme {
+    --lv-pad-x: 16px;     /* s-4，对齐间距 9 档（旧值 20px 是破例值，2026-05-09 audit P0-5 修正） */
+    --lv-pad-y: 64px;     /* s-16 */
+    --lv-s-24: 64px;      /* s-24 在移动端折叠到 s-16，避免章节间距过大 */
+  }
+}
+
+/* prefers-reduced-motion (§6 §13) */
+@media (prefers-reduced-motion: reduce) {
+  .lv-theme {
+    --lv-dur-cinematic-a: 200ms;
+    --lv-dur-cinematic-b: 200ms;
+  }
+}
+
+.landing-v2 {
+  /* Game-style Full Page Scroll Snap */
+  height: 100dvh;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+.landing-v2::-webkit-scrollbar {
+  display: none;
+}
+.landing-v2 > div,
+.landing-v2 > section {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.landing-v2 > footer {
+  scroll-snap-align: end;
+}
+
+.lv-theme .lv-serif { font-family: var(--lv-font-serif); font-weight: 400; }
+.lv-theme .lv-display {
+  font-family: var(--lv-font-serif);
+  font-weight: 300;
+  letter-spacing: -0.02em;
+}
+.lv-theme .lv-mono { font-family: var(--lv-font-mono); }
+.lv-theme .lv-caps {
+  font-family: var(--lv-font-mono);
+  letter-spacing: 0.04em;
+  font-size: 10.5px;
+  color: var(--lv-ink-3);
+}
+
+.lv-theme .lv-section { padding: var(--lv-pad-y) var(--lv-pad-x); position: relative; }
+.lv-theme .lv-inner { max-width: var(--lv-max-w); margin: 0 auto; }
+
+.lv-theme .lv-h1 {
+  font-family: var(--lv-font-serif);
+  font-weight: 300;
+  font-size: var(--lv-h1);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.lv-theme .lv-h2 {
+  font-family: var(--lv-font-serif);
+  font-weight: 300;
+  font-size: var(--lv-h2);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  margin: 14px 0 16px;
+}
+.lv-theme .lv-lead {
+  color: var(--lv-ink-2);
+  font-size: var(--lv-lead);
+  line-height: 1.7;
+  max-width: 580px;
+}
+
+/* ==========================================================================
+   v2.2 排版工具类 (§1.2 §1.4) — 新代码请用这一套，老的 .lv-h1/.lv-h2/.lv-lead
+   保留作过渡 alias。一页字号 ≤ 4 档（§1.3，9 档体系下放宽到 4，micro 不计）。
+   ========================================================================== */
+
+.lv-theme .lv-t-display {
+  font-family: var(--lv-font-serif);
+  font-weight: 400;
+  font-size: var(--lv-t-display);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.lv-theme .lv-t-h1 {
+  font-family: var(--lv-font-serif);
+  font-weight: 500;
+  font-size: var(--lv-t-h1);
+  line-height: 1.1;
+  letter-spacing: -0.015em;
+  margin: 0;
+}
+.lv-theme .lv-t-h2 {
+  font-family: var(--lv-font-serif);
+  font-weight: 500;
+  font-size: var(--lv-t-h2);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.lv-theme .lv-t-h3 {
+  font-family: var(--lv-font-sans);
+  font-weight: 600;
+  font-size: var(--lv-t-h3);
+  line-height: 1.35;
+  letter-spacing: 0;
+  color: var(--lv-ink);
+  margin: 0;
+}
+.lv-theme .lv-t-narrative {
+  font-family: var(--lv-font-sans);
+  font-weight: 400;
+  font-size: var(--lv-t-narrative);
+  line-height: 1.85;
+  letter-spacing: 0.005em;
+  color: var(--lv-ink);
+}
+.lv-theme .lv-t-body {
+  font-family: var(--lv-font-sans);
+  font-weight: 400;
+  font-size: var(--lv-t-body);
+  line-height: 1.6;
+  color: var(--lv-ink);
+}
+.lv-theme .lv-t-body-long {
+  font-family: var(--lv-font-sans);
+  font-weight: 400;
+  font-size: var(--lv-t-body);
+  line-height: 1.7;
+  color: var(--lv-ink-2);
+}
+.lv-theme .lv-t-compact {
+  font-family: var(--lv-font-sans);
+  font-weight: 400;
+  font-size: var(--lv-t-compact);
+  line-height: 1.45;
+  color: var(--lv-ink);
+}
+.lv-theme .lv-t-meta {
+  font-family: var(--lv-font-sans);
+  font-weight: 400;
+  font-size: var(--lv-t-meta);
+  line-height: 1.5;
+  color: var(--lv-ink-3);
+}
+.lv-theme .lv-t-caps {
+  font-family: var(--lv-font-mono);
+  font-weight: 500;
+  font-size: var(--lv-t-caps);
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  color: var(--lv-ink-3);
+}
+.lv-theme .lv-t-micro {
+  font-family: var(--lv-font-mono);
+  font-weight: 500;
+  font-size: var(--lv-t-micro);
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  color: var(--lv-ink-4);
+}
+
+.lv-theme .lv-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 38px; padding: 0 20px;
+  border: 1px solid var(--lv-line-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--lv-ink);
+  font: 500 13px/1 var(--lv-font-sans);
+  cursor: pointer;
+  transition: all 200ms var(--lv-ease);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.lv-theme .lv-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.2); }
+.lv-theme .lv-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.lv-theme .lv-btn-primary {
+  background: var(--lv-ink); color: var(--lv-bg); border-color: var(--lv-ink);
+}
+.lv-theme .lv-btn-primary:hover:not(:disabled) {
+  /* 不再切金。统一 ivory + 中性 lift + 加深 shadow，符合 GOLD WHITELIST §default-button */
+  /* 必须显式声明 background/border-color——否则会被前面 .lv-btn:hover 的 alpha 白覆盖（看上去变黑）*/
+  background: var(--lv-ink);
+  border-color: var(--lv-ink);
+  transform: translateY(-1px);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}
+.lv-theme .lv-btn-lg { height: 44px; padding: 0 26px; font-size: var(--lv-t-body); }
+.lv-theme .lv-btn-sm { height: 32px; padding: 0 14px; font-size: var(--lv-t-meta); }
+
+/* Modifier: 用在纯黑 panel 上（modal 等）的 secondary 按钮
+   极轻白 alpha overlay + 顶部 1px inner highlight，"被光照"立体感 */
+.lv-theme .lv-btn--on-black {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.lv-theme .lv-btn--on-black:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* ==========================================================================
+   v2.2 表单控件基线 (§11) — input/select/textarea 用这一套
+   ========================================================================== */
+
+.lv-theme .lv-input {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--lv-line-2);
+  border-radius: var(--lv-r-input);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-body);
+  outline: none;
+  transition: box-shadow var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-input::placeholder { color: var(--lv-ink-4); }
+.lv-theme .lv-input:focus {
+  box-shadow: 0 0 0 2px var(--lv-accent-soft);
+}
+.lv-theme .lv-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lv-theme .lv-input--textarea {
+  height: auto;
+  min-height: 96px;
+  padding: 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+.lv-theme .lv-input--readonly {
+  background: rgba(255, 255, 255, 0.04);
+  cursor: default;
+}
+
+.lv-theme .lv-quiet-input {
+  border-radius: var(--lv-r-pill);
+  border-color: rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.045);
+  padding-inline: 16px;
+  font-size: 13px;
+  box-shadow: none;
+  transition:
+    border-color var(--lv-dur-fast) var(--lv-ease),
+    background var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme textarea.lv-quiet-input,
+.lv-theme .lv-quiet-input.lv-input--textarea {
+  border-radius: var(--lv-r-input);
+  padding: 12px 14px;
+}
+.lv-theme .lv-quiet-input::placeholder {
+  color: var(--lv-ink-3);
+}
+.lv-theme .lv-quiet-input:focus {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: none;
+}
+
+@media (max-width: 768px) {
+  .lv-theme .lv-input {
+    height: 46px;
+    border-radius: var(--lv-r-pill);
+    border-color: rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.045);
+    padding-inline: 16px;
+    font-size: 13px;
+    box-shadow: none;
+  }
+  .lv-theme .lv-input::placeholder {
+    color: var(--lv-ink-3);
+  }
+  .lv-theme .lv-input:focus {
+    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow: none;
+  }
+  .lv-theme textarea.lv-input,
+  .lv-theme .lv-input--textarea {
+    height: auto;
+    border-radius: var(--lv-r-input);
+    padding: 12px 14px;
+  }
+  .lv-theme .lv-form-label {
+    font-family: var(--lv-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--lv-ink-3);
+    margin-bottom: 8px;
+    padding-left: 14px;
+  }
+}
+
+/* ===== 象牙色主 CTA（全宽实心）—— PromptComposer / 生成页 options 步等共用 =====
+   语义同 AuthorsNotePrompt 提交键：ivory 实心，非金色（金只用于 §13 白名单语义位）。 */
+.lv-theme .lv-cta-ivory {
+  height: 48px;
+  border-radius: var(--lv-r-pill);
+  background: rgba(245, 242, 235, 0.94);
+  color: var(--lv-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--lv-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  width: 100%;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background var(--lv-dur-fast) var(--lv-ease),
+    transform var(--lv-dur-fast) var(--lv-ease),
+    opacity var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-cta-ivory:hover:not(:disabled) { background: rgba(245, 242, 235, 1); }
+.lv-theme .lv-cta-ivory:active:not(:disabled) { transform: translateY(1px); }
+.lv-theme .lv-cta-ivory:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ===== 媒体卡 carousel 容器（start 选择页 + 工坊生成页共用）===== */
+.lv-theme .lv-media-grid {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 4px 6px;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  justify-content: safe center;
+}
+.lv-theme .lv-media-grid::-webkit-scrollbar { display: none; }
+.lv-theme .lv-media-grid > * {
+  flex: 0 0 200px;
+  scroll-snap-align: center;
+}
+@media (max-width: 768px) {
+  .lv-theme .lv-media-grid {
+    gap: 10px;
+    padding: 2px 4px 4px;
+  }
+  .lv-theme .lv-media-grid > * {
+    flex: 0 0 176px;
+  }
+}
+
+.lv-theme .lv-form-label {
+  display: block;
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.4;
+  color: var(--lv-ink-2);
+  margin-bottom: var(--lv-s-2);
+}
+.lv-theme .lv-form-label--required::after {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--lv-accent);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.lv-theme .lv-form-help {
+  display: block;
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.4;
+  color: var(--lv-ink-3);
+  margin-top: var(--lv-s-2);
+}
+.lv-theme .lv-form-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  line-height: 1.4;
+  color: var(--lv-danger);
+  margin-top: var(--lv-s-2);
+}
+.lv-theme .lv-form-error::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lv-danger);
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   v2.2 加载脉冲 (§10.1) — 唯二允许的循环动画 (§6)
+   ========================================================================== */
+
+.lv-theme .lv-loading-pulse {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--lv-accent);
+  animation: lv-loading-pulse 1800ms var(--lv-ease) infinite;
+}
+@keyframes lv-loading-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.05); }
+}
+
+/* --------------------------------------------------------------------------
+   v2.4 加载分支 — Branch + Grow 2.5s
+   品牌入场动效，用在全屏 / 页面级 loading（GameLoadingScreen、worlds 详情等）
+   配套组件 components/ui/LoadingPulse.tsx 的 block 变体。
+   -------------------------------------------------------------------------- */
+
+.lv-theme .lv-loading-branch .lv-grow-trunk {
+  stroke-dasharray: 130;
+  stroke-dashoffset: 130;
+  animation: lv-grow-trunk 2.5s cubic-bezier(.45, .05, .55, .95) infinite;
+}
+.lv-theme .lv-loading-branch .lv-grow-b1 {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: lv-grow-b1 2.5s cubic-bezier(.4, 0, .4, 1) infinite;
+}
+.lv-theme .lv-loading-branch .lv-grow-b2 {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: lv-grow-b2 2.5s cubic-bezier(.4, 0, .4, 1) infinite;
+}
+.lv-theme .lv-loading-branch .lv-grow-b3 {
+  stroke-dasharray: 22;
+  stroke-dashoffset: 22;
+  animation: lv-grow-b3 2.5s cubic-bezier(.4, 0, .4, 1) infinite;
+}
+.lv-theme .lv-loading-branch .lv-grow-tip {
+  stroke-dasharray: 8;
+  stroke-dashoffset: 8;
+  animation: lv-grow-tip 2.5s cubic-bezier(.4, 0, .4, 1) infinite;
+}
+
+@keyframes lv-grow-trunk {
+  0%   { stroke-dashoffset: 130; }
+  35%  { stroke-dashoffset: 0; }
+  78%  { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes lv-grow-b1 {
+  0%, 35%  { stroke-dashoffset: 30; }
+  45%      { stroke-dashoffset: 0; }
+  78%      { stroke-dashoffset: 0; opacity: 1; }
+  100%     { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes lv-grow-b2 {
+  0%, 45%  { stroke-dashoffset: 30; }
+  55%      { stroke-dashoffset: 0; }
+  78%      { stroke-dashoffset: 0; opacity: 1; }
+  100%     { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes lv-grow-b3 {
+  0%, 55%  { stroke-dashoffset: 22; }
+  65%      { stroke-dashoffset: 0; }
+  78%      { stroke-dashoffset: 0; opacity: 1; }
+  100%     { stroke-dashoffset: 0; opacity: 0; }
+}
+@keyframes lv-grow-tip {
+  0%, 60%  { stroke-dashoffset: 8; }
+  70%      { stroke-dashoffset: 0; }
+  78%      { stroke-dashoffset: 0; opacity: 1; }
+  100%     { stroke-dashoffset: 0; opacity: 0; }
+}
+
+/* Reduced motion: fall back to simple pulse, no per-path animation */
+@media (prefers-reduced-motion: reduce) {
+  .lv-theme .lv-loading-branch .lv-grow-trunk,
+  .lv-theme .lv-loading-branch .lv-grow-b1,
+  .lv-theme .lv-loading-branch .lv-grow-b2,
+  .lv-theme .lv-loading-branch .lv-grow-b3,
+  .lv-theme .lv-loading-branch .lv-grow-tip {
+    stroke-dashoffset: 0;
+    animation: lv-grow-fallback 2s ease-in-out infinite;
+  }
+  @keyframes lv-grow-fallback {
+    0%, 100% { opacity: 0.45; }
+    50%      { opacity: 1; }
+  }
+}
+
+/* ==========================================================================
+   v2.2 焦点环 (§13) — 全局可访问性默认
+   ========================================================================== */
+
+.lv-theme :focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 2px;
+}
+
+/* 文本录入控件不吃硬金框（点击即触发 :focus-visible，且裸 textarea 会画成直角矩形）。
+   它们各自已有柔性聚焦反馈：.lv-input:focus 柔光 box-shadow、play 边框色变化等。 */
+.lv-theme input:focus-visible,
+.lv-theme textarea:focus-visible,
+.lv-theme select:focus-visible,
+.lv-theme [contenteditable]:focus-visible,
+.lv-theme [contenteditable="true"]:focus-visible {
+  outline: none;
+  outline-offset: 0;
+}
+
+/* Generate hero 输入框 — focus 不显示金框（焦点已通过底部渐变线变粗指示） */
+.lv-theme .lv-naked-focus,
+.lv-theme .lv-naked-focus:focus,
+.lv-theme .lv-naked-focus:focus-visible,
+.lv-theme .lv-naked-focus:focus-within {
+  outline: none !important;
+  box-shadow: none !important;
+  border: 0 !important;
+}
+
+/* ==========================================================================
+   全站 hover 统一规则（2026-05-09）
+   ─ 卡片 (poster / history)：translateY(-2px) + 轻 box-shadow + 内层封面 scale 1.02
+   ─ tab / chip：朝选中态走半步（背景 + 边框）
+   ─ §2.1 accent ≤1/屏：hover 不再把标题刷成 accent（避免鼠标扫过像彩灯）
+   ─ §6 时长 200ms 通过 --lv-dur-fast
+   ========================================================================== */
+
+.lv-theme .lv-poster-card {
+  transition:
+    transform var(--lv-dur-fast) var(--lv-ease),
+    box-shadow var(--lv-dur-fast) var(--lv-ease),
+    border-color var(--lv-dur-fast) var(--lv-ease);
+  will-change: transform;
+}
+
+.lv-theme .lv-poster-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* PosterCard 内层封面（第一个 div 是 16:10 cover）—— 极轻 scale 给"被关注"信号 */
+.lv-theme .lv-poster-card > div:first-child {
+  transition: transform var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-poster-card:hover > div:first-child {
+  transform: scale(1.02);
+}
+
+/* tab / chip 未选中态 hover：朝选中态走半步 */
+.lv-theme .lv-chip:not(.lv-chip--selected):hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--lv-line-2);
+  color: var(--lv-ink);
+}
+
+/* ==========================================================================
+   v2.2 Discover 网格 (§8.2) — 4 列桌面 / 2 列平板 / 1 列移动
+   ========================================================================== */
+
+.lv-theme .lv-discover-grid { --cols: 4; }
+@media (max-width: 1023px) { .lv-theme .lv-discover-grid { --cols: 2; } }
+@media (max-width: 639px)  { .lv-theme .lv-discover-grid { --cols: 1; } }
+
+/* ==========================================================================
+   History 页 (§7.2 重写) — Active 2 列紧凑卡 + Ended 紧凑行
+   ========================================================================== */
+
+/* Active grid：桌面 2 列 / 移动 1 列 */
+.lv-theme .lv-history-active-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--lv-s-3);
+}
+@media (max-width: 639px) {
+  .lv-theme .lv-history-active-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Active card：默认状态 + hover 时 accent 边 + CTA 显出 */
+.lv-theme .lv-history-active-card {
+  transition:
+    border-color var(--lv-dur-fast) var(--lv-ease),
+    background var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-history-active-card:hover {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--lv-bg-2);
+}
+
+/* hover CTA：默认隐藏，桌面 hover 时显示；移动端始终可见（不依赖 hover） */
+.lv-theme .lv-history-active-cta {
+  opacity: 0;
+  transition: opacity var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-history-active-card:hover .lv-history-active-cta,
+.lv-theme .lv-history-active-card:focus-within .lv-history-active-cta {
+  opacity: 1;
+}
+@media (max-width: 639px) {
+  .lv-theme .lv-history-active-cta { opacity: 1; }
+}
+
+/* Ended row：5 列桌面 / 4 列平板 / 3 列移动（隐藏箭头 + 日期换行到 sub） */
+.lv-theme .lv-history-ended-row {
+  grid-template-columns: 48px 1fr 96px 56px 24px;
+  border-radius: var(--lv-r-input);
+  transition: background var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-history-ended-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.lv-theme .lv-history-ended-arrow {
+  opacity: 0;
+  transition: opacity var(--lv-dur-fast) var(--lv-ease);
+}
+.lv-theme .lv-history-ended-row:hover .lv-history-ended-arrow,
+.lv-theme .lv-history-ended-row:focus-within .lv-history-ended-arrow {
+  opacity: 1;
+  color: var(--lv-ink-2);
+}
+@media (max-width: 639px) {
+  .lv-theme .lv-history-ended-row {
+    grid-template-columns: 48px 1fr auto;
+  }
+  .lv-theme .lv-history-ended-result {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: left !important;
+  }
+  .lv-theme .lv-history-ended-date {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+  .lv-theme .lv-history-ended-arrow {
+    display: none;
+  }
+}
+
+/* ==========================================================================
+   Skeleton shimmer（2026-05-09）— Netflix/Apple TV+ 式柔光扫过
+   用法：占位 div className="lv-skel"，背景渐变从 bg-1 ↔ line-2 来回扫
+   2s 周期 ease-in-out，缓而非快，prefers-reduced-motion 时静止
+   ========================================================================== */
+
+.lv-theme .lv-skel {
+  background: linear-gradient(
+    90deg,
+    var(--lv-bg-1) 0%,
+    var(--lv-line-2) 50%,
+    var(--lv-bg-1) 100%
+  );
+  background-size: 200% 100%;
+  animation: lv-skel-shimmer 2s ease-in-out infinite;
+}
+
+@keyframes lv-skel-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lv-theme .lv-skel {
+    animation: none;
+    background: var(--lv-line);
+  }
+}
+
+/* Crossfade for swapped panels (used by admin model-binding stage) */
+.lv-stage-fade {
+  animation: lv-stage-fade-in 180ms ease-out both;
+}
+
+@keyframes lv-stage-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lv-stage-fade { animation: none; }
+}
+
+/* ==========================================================================
+   v2.2 移动端底部 tab bar (§15.2) + safe-area helpers (§15.4)
+   ========================================================================== */
+
+/* 桌面端隐藏 tab bar（≥ 769px）。
+   注意：边界必须与各页「移动/桌面」切换点（min-width:769 / max-width:768）一致，
+   否则 768px 整点（iPad 竖屏）会落进「移动内容却无 tab bar」的死角。 */
+@media (min-width: 769px) {
+  .lv-tab-bar { display: none !important; }
+}
+
+/* 移动端为 BottomTabBar 留出底部 padding，避免内容被 56px tab bar 覆盖。
+   主要影响 main / content 容器；page 内可通过 .lv-content-mobile-pad 主动补 padding。 */
+@media (max-width: 768px) {
+  .lv-theme {
+    --lv-tab-bar-h: calc(78px + env(safe-area-inset-bottom));
+  }
+  .lv-content-mobile-pad {
+    padding-bottom: var(--lv-tab-bar-h);
+  }
+}
+@media (min-width: 769px) {
+  .lv-theme {
+    --lv-tab-bar-h: 0px;
+  }
+}
+
+/* 100dvh helper —— 移动端 Safari 工具栏占用动态视口时仍正确 */
+.lv-h-dvh {
+  min-height: 100dvh;
+}
+
+/* safe-area helpers */
+.lv-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.lv-safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* ==========================================================================
+   v2.2 Drawer 移动端从底部弹出（§5 z-drawer）
+   ========================================================================== */
+
+/* Navbar 移动端：隐藏中央 nav，靠 Logo + 右侧 auth 即可 */
+@media (max-width: 639px) {
+  .lv-theme .lv-navbar-center { display: none !important; }
+}
+
+@media (max-width: 768px) {
+  .lv-theme .lv-drawer-panel--mobile-bottom {
+    width: 100vw !important;
+    max-height: 80dvh;
+    align-self: flex-end;
+    border-left: none;
+    border-top: 1px solid var(--lv-line);
+    border-top-left-radius: var(--lv-r-card);
+    border-top-right-radius: var(--lv-r-card);
+    transform: translateY(0);
+  }
+}
+
+.lv-theme .lv-frame {
+  position: relative; width: 100%; height: 100%;
+  background: var(--lv-bg);
+  color: var(--lv-ink);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.lv-theme .lv-grain::before {
+  content: ""; position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .25 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes lv-kenburns {
+  0%   { transform: scale(1.02) translate(0, 0); }
+  50%  { transform: scale(1.12) translate(-2%, -2%); }
+  100% { transform: scale(1.02) translate(0, 0); }
+}
+@keyframes lv-fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes lv-pulse-dot {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 1; }
+}
+
+/* ==========================================================================
+   Admin Workshop — v2.2（visual-principles §8 §10 / cover-art-spec §3）
+   - 卡片封面 16:10（v1.2），下挂式标题
+   - 状态徽章左上唯一信号位
+   - hover 200ms 上推 / cover 微缩放 1.03（800ms）
+   ========================================================================== */
+
+.workshop-page {
+  min-height: 100dvh;
+  background: var(--lv-bg);
+  color: var(--lv-ink);
+}
+
+.workshop-shell {
+  max-width: var(--lv-max-w);
+  margin: 0 auto;
+  padding-inline: var(--lv-pad-x);
+}
+
+.workshop-header {
+  position: relative;
+  border-bottom: 1px solid var(--lv-line);
+  padding-top: var(--lv-s-16);
+}
+
+.workshop-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--lv-s-6);
+  padding-bottom: var(--lv-s-8);
+}
+
+.workshop-eyebrow {
+  display: block;
+  margin-bottom: var(--lv-s-3);
+  color: var(--lv-ink-3);
+}
+
+.workshop-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-2);
+  height: 44px;
+  padding: 0 var(--lv-s-6);
+  border-radius: var(--lv-r-pill);
+  border: 1px solid var(--lv-line-2);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--lv-ink);
+  font-family: var(--lv-font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--lv-dur-fast) var(--lv-ease),
+              border-color var(--lv-dur-fast) var(--lv-ease);
+  white-space: nowrap;
+}
+.workshop-cta:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.workshop-cta:focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 2px;
+}
+.workshop-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.workshop-cta-plus {
+  color: var(--lv-accent);
+  font-size: 18px;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.workshop-tabs {
+  display: flex;
+  gap: 36px;
+  padding-bottom: var(--lv-s-4);
+  margin-top: -1px;
+}
+
+.workshop-tab {
+  position: relative;
+  padding: 0 0 14px 0;
+  background: none;
+  border: 0;
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-caps);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--lv-dur-fast) var(--lv-ease);
+}
+.workshop-tab:hover { color: var(--lv-ink-2); }
+.workshop-tab[aria-selected="true"] { color: var(--lv-ink); }
+.workshop-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: var(--lv-ink);
+}
+.workshop-tab:focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+.workshop-main {
+  padding: var(--lv-s-12) 0 var(--lv-s-24);
+}
+
+/* Toolbar */
+.workshop-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lv-s-4);
+  margin-bottom: var(--lv-s-8);
+  flex-wrap: wrap;
+}
+.workshop-toolbar-left {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lv-s-4);
+  color: var(--lv-ink-3);
+}
+.workshop-toolbar-count { color: var(--lv-ink-2); }
+
+.workshop-filters {
+  display: flex;
+  gap: var(--lv-s-1);
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--lv-line);
+  border-radius: var(--lv-r-pill);
+}
+.workshop-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--lv-r-pill);
+  background: transparent;
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--lv-dur-fast) var(--lv-ease),
+              background var(--lv-dur-fast) var(--lv-ease);
+}
+.workshop-chip:hover { color: var(--lv-ink-2); }
+.workshop-chip[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--lv-ink);
+}
+.workshop-chip:focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 2px;
+}
+
+/* World pillbar (scripts tab world selector) */
+.workshop-pillbar {
+  display: flex;
+  gap: var(--lv-s-2);
+  padding: 4px 0 var(--lv-s-6);
+  margin-bottom: var(--lv-s-6);
+  border-bottom: 1px solid var(--lv-line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.workshop-pillbar::-webkit-scrollbar { display: none; }
+
+.workshop-pill {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-2);
+  height: 36px;
+  padding: 0 var(--lv-s-4);
+  background: transparent;
+  border: 1px solid var(--lv-line);
+  border-radius: var(--lv-r-pill);
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--lv-dur-fast) var(--lv-ease),
+              border-color var(--lv-dur-fast) var(--lv-ease),
+              background var(--lv-dur-fast) var(--lv-ease);
+}
+.workshop-pill:hover {
+  color: var(--lv-ink-2);
+  border-color: var(--lv-line-2);
+}
+.workshop-pill[aria-pressed="true"] {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--lv-ink);
+}
+.workshop-pill-count {
+  font-family: var(--lv-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--lv-ink-3);
+}
+.workshop-pill[aria-pressed="true"] .workshop-pill-count { color: var(--lv-ink-2); }
+
+/* Grid — 与 demo 一致：4 列等宽，gap 24px */
+.workshop-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--lv-s-6);
+}
+@media (max-width: 1024px) {
+  .workshop-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 540px) {
+  .workshop-grid { grid-template-columns: 1fr; }
+}
+
+/* Card (世界 / 剧本通用结构) */
+.workshop-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--lv-s-3);
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* 兜底：button 默认会按内容撑大，grid 里要锁满列宽不溢出 */
+  width: 100%;
+  min-width: 0;
+}
+.workshop-card:focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 4px;
+  border-radius: var(--lv-r-card);
+}
+
+/* Confirm dialog buttons */
+.lv-btn-confirm-cancel,
+.lv-btn-confirm-primary {
+  appearance: none;
+  font: inherit;
+  font-family: var(--lv-font-sans);
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 8px 18px;
+  min-height: 36px;
+  border-radius: var(--lv-r-pill);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+.lv-btn-confirm-cancel {
+  background: transparent;
+  border: 1px solid var(--lv-line);
+  color: var(--lv-ink-2);
+}
+.lv-btn-confirm-cancel:hover {
+  background: var(--lv-bg-2);
+  color: var(--lv-ink-1);
+}
+.lv-btn-confirm-primary {
+  background: var(--lv-ink-1);
+  color: var(--lv-bg-0);
+  border: 1px solid var(--lv-ink-1);
+}
+.lv-btn-confirm-primary:hover {
+  transform: translateY(-1px);
+}
+.lv-btn-confirm-primary.is-danger {
+  background: rgba(220, 38, 38, 0.92);
+  border-color: rgba(220, 38, 38, 0.92);
+  color: #fff;
+}
+.lv-btn-confirm-primary.is-danger:hover {
+  background: rgba(185, 28, 28, 0.95);
+  border-color: rgba(185, 28, 28, 0.95);
+}
+.lv-btn-confirm-cancel:focus-visible,
+.lv-btn-confirm-primary:focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 2px;
+}
+
+/* 卡片右上角删除按钮 — desktop hover 显示，mobile 半透明可见 */
+.workshop-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0.55;
+  transition: opacity 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+@media (hover: hover) {
+  .workshop-card-delete { opacity: 0; }
+  .workshop-card:hover .workshop-card-delete { opacity: 1; }
+}
+.workshop-card-delete:hover {
+  background: rgba(220, 38, 38, 0.92);
+  opacity: 1;
+  transform: scale(1.06);
+}
+.workshop-card-delete:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 2px;
+}
+
+.workshop-cover {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: var(--lv-r-card);
+  background: var(--lv-bg-1);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  transition: transform var(--lv-dur-fast) var(--lv-ease),
+              border-color var(--lv-dur-fast) var(--lv-ease);
+}
+.workshop-card:hover .workshop-cover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.10);
+}
+.workshop-cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 800ms var(--lv-ease);
+}
+.workshop-card:hover .workshop-cover-img { transform: scale(1.03); }
+
+/* 已发布封面底部渐隐（让封面与下方文字气质连贯，不叠字） */
+.workshop-cover.is-published::after {
+  content: "";
+  position: absolute;
+  inset: 50% 0 0 0;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.35));
+  pointer-events: none;
+}
+
+/* 状态徽章（左上角，唯一状态位） */
+.workshop-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--lv-r-pill);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  color: var(--lv-ink-2);
+  z-index: 2;
+  font-family: var(--lv-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.workshop-status.is-generating {
+  color: var(--lv-accent);
+  border-color: rgba(201, 180, 138, 0.35);
+}
+.workshop-status.is-generating::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-accent);
+  animation: lv-pulse-dot 1.8s var(--lv-ease) infinite;
+}
+.workshop-status.is-failed {
+  color: var(--lv-danger);
+  border-color: rgba(184, 92, 92, 0.40);
+}
+.workshop-status.is-failed::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-danger);
+}
+
+/* 草稿封面三态 */
+.workshop-cover.is-draft.is-static  { background: var(--lv-bg-1); }
+.workshop-cover.is-draft.is-failed  { background: var(--lv-bg-stage); }
+
+.workshop-draft-mark {
+  position: absolute;
+  inset: var(--lv-s-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--lv-s-2);
+  border: 1px dashed var(--lv-line-2);
+  border-radius: 10px;
+  color: var(--lv-ink-3);
+  z-index: 1;
+}
+.workshop-draft-skel {
+  position: absolute;
+  inset: 0;
+}
+.workshop-draft-mark-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--lv-r-pill);
+  border: 1px solid var(--lv-line-2);
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-mono);
+  font-size: 14px;
+  line-height: 1;
+}
+.workshop-cover.is-draft.is-failed .workshop-draft-mark-icon {
+  color: var(--lv-danger);
+  border-color: rgba(184, 92, 92, 0.30);
+}
+.workshop-draft-mark-icon.is-spinner {
+  position: relative;
+  color: var(--lv-accent);
+  border-color: rgba(201, 180, 138, 0.30);
+}
+.workshop-draft-mark-icon.is-spinner::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: var(--lv-r-pill);
+  border: 1px solid transparent;
+  border-top-color: var(--lv-accent);
+  animation: lv-spin 1.2s linear infinite;
+}
+@keyframes lv-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workshop-draft-mark-icon.is-spinner::before { animation: none; }
+  .workshop-status.is-generating::before { animation: none; }
+}
+
+/* 卡片下方文字区 */
+.workshop-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 2px;
+}
+.workshop-card-title {
+  color: var(--lv-ink);
+  /* 标题统一 1 行 ellipsis，避免长名字撑高一行从而拉高整行 grid 行高 */
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.workshop-card-meta {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--lv-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.workshop-card-meta > span:not(.workshop-card-meta-sep) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.workshop-card-meta-sep { color: var(--lv-ink-5); }
+
+/* 空态 */
+.workshop-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--lv-s-4);
+  padding: var(--lv-s-16) var(--lv-s-4);
+  text-align: center;
+  border: 1px dashed var(--lv-line);
+  border-radius: var(--lv-r-card);
+  background: rgba(255, 255, 255, 0.012);
+}
+
+/* 错误条 */
+.workshop-error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lv-s-2);
+  padding: var(--lv-s-3) var(--lv-s-4);
+  margin-bottom: var(--lv-s-6);
+  border-radius: var(--lv-r-pill);
+  background: rgba(184, 92, 92, 0.08);
+  border: 1px solid rgba(184, 92, 92, 0.30);
+  color: var(--lv-danger);
+}
+.workshop-error::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-danger);
+}
+
+/* ==========================================================================
+   Product-Grade Game Portal Refactor (Demo Style)
+   ========================================================================== */
+
+/* 1. 环境光晕 (Ambient Glow) */
+.lv-ambient-glow {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.lv-ambient-glow::before {
+  content: "";
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  width: 50%;
+  height: 50%;
+  background: radial-gradient(circle, rgba(201, 180, 138, 0.035) 0%, rgba(201, 180, 138, 0) 70%);
+  filter: blur(80px);
+  animation: glow-drift-1 25s ease-in-out infinite alternate;
+}
+
+.lv-ambient-glow::after {
+  content: "";
+  position: absolute;
+  bottom: -10%;
+  right: -10%;
+  width: 60%;
+  height: 60%;
+  background: radial-gradient(circle, rgba(127, 176, 145, 0.03) 0%, rgba(127, 176, 145, 0) 70%);
+  filter: blur(100px);
+  animation: glow-drift-2 30s ease-in-out infinite alternate;
+}
+
+@keyframes glow-drift-1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(10%, 15%) scale(1.1); }
+}
+
+@keyframes glow-drift-2 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-10%, -10%) scale(1.05); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lv-ambient-glow::before, .lv-ambient-glow::after { animation: none; }
+}
+
+/* 2. 实体卡片重铸 (Container Poster Card) */
+.lv-premium-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--lv-s-3);
+  background: rgba(17, 17, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1),
+              border-color 0.25s cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 0.25s cubic-bezier(0.2, 0.8, 0.2, 1),
+              background 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.lv-premium-card:hover {
+  transform: translateY(-5px);
+  background: rgba(22, 22, 28, 0.85);
+  border-color: rgba(201, 180, 138, 0.25);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 
+              0 0 24px rgba(201, 180, 138, 0.08), 
+              inset 0 1px 1px rgba(255, 255, 255, 0.05);
+}
+
+/* 卡片封面图 */
+.lv-premium-card-cover-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: var(--lv-s-3);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.lv-premium-card-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.lv-premium-card:hover .lv-premium-card-cover {
+  transform: scale(1.04);
+}
+
+/* 毛玻璃角标 */
+.lv-premium-card-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(10, 10, 12, 0.65);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: var(--lv-font-mono);
+  font-size: var(--lv-t-micro);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--lv-accent);
+  letter-spacing: 0.02em;
+}
+
+/* 剧本与自由模式微标色 */
+.lv-premium-card-badge.is-free {
+  color: var(--lv-accent-2);
+}
+
+/* 卡片右下角常驻/悬浮 PLAY 按钮 */
+.lv-premium-card-play-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--lv-r-pill);
+  background: var(--lv-accent);
+  color: #0c0c10;
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  transform: scale(0.95);
+  transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  box-shadow: 0 2px 8px rgba(201, 180, 138, 0.3);
+}
+
+.lv-premium-card:hover .lv-premium-card-play-btn {
+  opacity: 1;
+  transform: scale(1.05);
+  background: #fdfaf2;
+}
+
+/* 3. 我的存档 (Saves Carousel) */
+.lv-saves-section {
+  position: relative;
+  background: radial-gradient(ellipse at 50% 0%, rgba(201, 180, 138, 0.06) 0%, rgba(0, 0, 0, 0) 70%);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 20px;
+  padding: var(--lv-s-6);
+  margin-bottom: var(--lv-s-8);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.lv-saves-carousel {
+  display: flex;
+  gap: var(--lv-s-4);
+  overflow-x: auto;
+  padding: var(--lv-s-2) 0;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.lv-saves-carousel::-webkit-scrollbar {
+  height: 4px;
+}
+
+.lv-saves-carousel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--lv-r-pill);
+}
+
+.lv-saves-carousel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.lv-save-premium-card {
+  flex: 0 0 340px;
+  position: relative;
+  display: flex;
+  gap: var(--lv-s-3);
+  padding: var(--lv-s-3);
+  background: rgba(24, 24, 28, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  transition: all 0.25s ease;
+  cursor: pointer;
+}
+
+.lv-save-premium-card:hover {
+  background: rgba(30, 30, 36, 0.85);
+  border-color: rgba(201, 180, 138, 0.3);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(201, 180, 138, 0.05);
+}
+
+/* 4. 商业化搜索框 */
+.lv-nav-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  width: 240px;
+  padding: 0 12px;
+  border-radius: var(--lv-r-pill);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-size: var(--lv-t-meta);
+  transition: all 0.25s ease;
+}
+
+.lv-nav-search-bar:focus-within {
+  width: 280px;
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(201, 180, 138, 0.4);
+  color: var(--lv-ink);
+  box-shadow: 0 0 15px rgba(201, 180, 138, 0.08);
+}
+
+.lv-nav-search-input {
+  width: 100%;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  font: inherit;
+}
+
+.lv-nav-search-input::placeholder {
+  color: var(--lv-ink-4);
+}
+
+/* ==========================================================================
+   5. 极佳电影感海报卡片 (Cinematic Game Poster Card)
+   ========================================================================== */
+
+.lv-cinematic-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 11;
+  border-radius: 20px;
+  overflow: hidden;
+  background: #0d0d10;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-cinematic-card:hover {
+  transform: translateY(-8px) scale(1.02);
+  border-color: rgba(201, 180, 138, 0.35);
+  box-shadow: 0 20px 40px -10px rgba(201, 180, 138, 0.15), 
+              0 0 25px rgba(201, 180, 138, 0.04), 
+              0 12px 30px rgba(0, 0, 0, 0.6);
+}
+
+.lv-cinematic-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-cinematic-card:hover .lv-cinematic-cover {
+  transform: scale(1.06);
+}
+
+.lv-cinematic-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 12, 0.98) 0%,
+    rgba(10, 10, 12, 0.8) 32%,
+    rgba(10, 10, 12, 0.2) 65%,
+    transparent 100%
+  );
+  z-index: 1;
+  transition: all 0.4s ease;
+}
+
+.lv-cinematic-card:hover .lv-cinematic-overlay {
+  background: linear-gradient(
+    to top,
+    rgba(10, 10, 12, 0.99) 0%,
+    rgba(10, 10, 12, 0.88) 42%,
+    rgba(10, 10, 12, 0.3) 70%,
+    transparent 100%
+  );
+}
+
+.lv-cinematic-content {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: var(--lv-s-5);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: var(--lv-s-2);
+  transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-cinematic-card:hover .lv-cinematic-content {
+  transform: translateY(-2px);
+}
+
+.lv-cinematic-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.lv-cinematic-title {
+  font-family: var(--lv-font-sans);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--lv-ink);
+  margin: 0;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.lv-cinematic-desc {
+  font-size: 13px;
+  color: var(--lv-ink-3);
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  height: 0;
+  transform: translateY(8px);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-cinematic-card:hover .lv-cinematic-desc {
+  opacity: 0.8;
+  height: 3em;
+  transform: translateY(0);
+  margin-top: 2px;
+}
+
+.lv-cinematic-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--lv-accent);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.lv-cinematic-tags-item {
+  background: rgba(201, 180, 138, 0.08);
+  border: 1px solid rgba(201, 180, 138, 0.15);
+  padding: 1px 8px;
+  border-radius: 4px;
+}
+
+.lv-cinematic-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  padding: 3px 10px;
+  border-radius: var(--lv-r-pill);
+  background: rgba(10, 10, 12, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--lv-ink-2);
+  font-size: 10px;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.lv-cinematic-mode-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  padding: 3px 10px;
+  border-radius: var(--lv-r-pill);
+  background: rgba(201, 180, 138, 0.12);
+  border: 1px solid rgba(201, 180, 138, 0.25);
+  color: var(--lv-accent);
+  font-size: 10px;
+  font-weight: 600;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.lv-cinematic-mode-badge.is-free {
+  background: rgba(127, 176, 145, 0.1);
+  border-color: rgba(127, 176, 145, 0.25);
+  color: var(--lv-accent-2);
+}
+
+.lv-cinematic-play-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-cinematic-card:hover .lv-cinematic-play-overlay {
+  opacity: 1;
+}
+
+.lv-cinematic-play-icon {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: var(--lv-accent);
+  color: #0c0c10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 25px rgba(201, 180, 138, 0.5), 0 4px 15px rgba(0, 0, 0, 0.4);
+  transform: scale(0.85);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-cinematic-card:hover .lv-cinematic-play-icon {
+  transform: scale(1);
+}
+
+.lv-cinematic-play-icon:hover {
+  background: #ffffff;
+  box-shadow: 0 0 35px rgba(255, 255, 255, 0.7), 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+.lv-cinematic-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--lv-ink-4);
+  margin-top: 2px;
+}
+
+/* ==========================================================================
+   6. 极简无界感电影级卡片 (Borderless Cinematic Card)
+   ========================================================================== */
+
+.lv-clean-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  height: 100%;
+}
+
+.lv-clean-card-image-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #111113;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  transition: all 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-clean-card:hover .lv-clean-card-image-wrapper {
+  transform: translateY(-6px);
+  border-color: rgba(201, 180, 138, 0.35);
+  box-shadow: 0 20px 40px -10px rgba(201, 180, 138, 0.18), 
+              0 12px 30px rgba(0, 0, 0, 0.6);
+}
+
+.lv-clean-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-clean-card:hover .lv-clean-card-image {
+  transform: scale(1.05);
+}
+
+.lv-clean-card-play-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 12, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: all 0.35s ease;
+  z-index: 2;
+}
+
+.lv-clean-card:hover .lv-clean-card-play-overlay {
+  opacity: 1;
+}
+
+.lv-clean-card-play-btn {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: var(--lv-accent);
+  color: #0c0c10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 25px rgba(201, 180, 138, 0.5), 0 4px 12px rgba(0,0,0,0.3);
+  transform: scale(0.85);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-clean-card:hover .lv-clean-card-play-btn {
+  transform: scale(1);
+}
+
+.lv-clean-card-play-btn:hover {
+  background: #ffffff;
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.8);
+}
+
+.lv-clean-card-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(184, 92, 92, 0.9);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+}
+
+.lv-clean-card-mode-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(10, 10, 12, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--lv-accent);
+  font-size: 10px;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.lv-clean-card-mode-badge.is-free {
+  color: var(--lv-accent-2);
+}
+
+.lv-clean-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-clean-card-genre {
+  font-size: 11px;
+  color: var(--lv-accent);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.lv-clean-card-title {
+  font-family: var(--lv-font-serif);
+  font-size: 19px;
+  font-weight: 400;
+  color: var(--lv-ink);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+  transition: color 0.3s ease;
+}
+
+.lv-clean-card:hover .lv-clean-card-title {
+  color: var(--lv-accent);
+}
+
+.lv-clean-card-meta {
+  font-size: 12px;
+  color: var(--lv-ink-3);
+  font-family: var(--lv-font-sans);
+}
+
+/* ==========================================================================
+   8. 极奢游戏门户优化：电影感推荐与星云氛围
+   ========================================================================== */
+
+/* 增强环境光晕，使其更丰富、更有生命力 (星云飘移感) */
+.lv-theme .lv-ambient-glow::before {
+  background: radial-gradient(circle, rgba(201, 180, 138, 0.07) 0%, rgba(201, 180, 138, 0) 75%) !important;
+  filter: blur(100px) !important;
+}
+
+.lv-theme .lv-ambient-glow::after {
+  background: radial-gradient(circle, rgba(127, 176, 145, 0.06) 0%, rgba(127, 176, 145, 0) 75%) !important;
+  filter: blur(120px) !important;
+}
+
+/* 电影级杰作推荐展位 (Featured Widescreen Hero Banner) */
+.lv-discover-hero {
+  position: relative;
+  width: 100%;
+  min-height: 380px;
+  border-radius: 20px;
+  overflow: hidden;
+  background: #0e0e11;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  margin-bottom: 36px;
+  transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-discover-hero:hover {
+  transform: translateY(-2px);
+  border-color: rgba(201, 180, 138, 0.25);
+  box-shadow: 0 40px 90px -10px rgba(201, 180, 138, 0.08), 0 30px 70px rgba(0, 0, 0, 0.9);
+}
+
+.lv-discover-hero-bg-wrapper {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.lv-discover-hero-bg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 35%;
+  transition: transform 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.lv-discover-hero:hover .lv-discover-hero-bg {
+  transform: scale(1.04);
+}
+
+/* 双重渐变黑幕遮罩，使图片与内容及背景天然融合 */
+.lv-discover-hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    #0a0a0c 0%,
+    rgba(10, 10, 12, 0.96) 30%,
+    rgba(10, 10, 12, 0.7) 60%,
+    rgba(10, 10, 12, 0.1) 85%,
+    transparent 100%
+  );
+  z-index: 1;
+}
+
+.lv-discover-hero-overlay-vertical {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    #0a0a0c 0%,
+    rgba(10, 10, 12, 0.4) 50%,
+    transparent 100%
+  );
+  z-index: 1.5;
+}
+
+@media (max-width: 991px) {
+  .lv-discover-hero {
+    flex-direction: column;
+    align-items: stretch;
+    min-height: auto;
+  }
+  .lv-discover-hero-bg-wrapper {
+    position: relative;
+    height: 240px;
+  }
+  .lv-discover-hero-overlay {
+    background: linear-gradient(
+      to top,
+      #0a0a0c 0%,
+      rgba(10, 10, 12, 0.8) 100%
+    );
+  }
+}
+
+.lv-discover-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 580px;
+  padding: 48px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 991px) {
+  .lv-discover-hero-content {
+    padding: 32px 24px;
+    max-width: 100%;
+  }
+}
+
+.lv-discover-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: rgba(201, 180, 138, 0.12);
+  border: 1px solid rgba(201, 180, 138, 0.25);
+  color: var(--lv-accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.lv-discover-hero-title {
+  font-family: var(--lv-font-serif);
+  font-size: 34px;
+  font-weight: 400;
+  color: #ffffff;
+  line-height: 1.25;
+  margin: 0;
+  text-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.lv-discover-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--lv-accent-2);
+  font-family: var(--lv-font-sans);
+  font-weight: 500;
+}
+
+.lv-discover-hero-desc {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--lv-ink-3);
+  margin: 0;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lv-discover-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.lv-discover-hero-play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 22px;
+  border-radius: 21px;
+  background: linear-gradient(135deg, var(--lv-accent), #e7d1ab);
+  color: #0c0c10;
+  border: 0;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 4px 15px rgba(201, 180, 138, 0.25);
+  transition: all 0.3s ease;
+  text-decoration: none;
+}
+
+.lv-discover-hero-play-btn:hover {
+  background: #ffffff;
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.lv-discover-hero-info-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 22px;
+  border-radius: 21px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--lv-ink-2);
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+}
+
+.lv-discover-hero-info-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+/* 提升分类控制台样式，更具殿堂级界面的极简科技感 */
+.lv-theme .lv-chip {
+  background: rgba(255, 255, 255, 0.02) !important;
+  border: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: var(--lv-ink-3) !important;
+  font-weight: 500 !important;
+  min-height: 38px !important;
+  height: 38px !important;
+  padding: 0 20px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important; /* 经典方直角微圆角，比圆润 pill 更具专业感 */
+}
+
+.lv-theme .lv-chip:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: var(--lv-ink) !important;
+}
+
+.lv-theme .lv-chip--selected {
+  background: rgba(201, 180, 138, 0.1) !important;
+  border-color: rgba(201, 180, 138, 0.3) !important;
+  color: var(--lv-accent) !important;
+  box-shadow: 0 0 15px rgba(201, 180, 138, 0.05);
+}
+
+/* 极简无界卡片封面内层暗角微调，统一封面图像风格 */
+.lv-clean-card-image-wrapper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 30%, rgba(10, 10, 12, 0.15) 100%);
+  pointer-events: none;
+  z-index: 1;
+}

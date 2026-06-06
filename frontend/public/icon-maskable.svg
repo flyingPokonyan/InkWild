@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable: Android adaptive icon · safe zone is center ~61% -->
+  <rect width="512" height="512" fill="#0a0a0c"/>
+  <svg x="170" y="136" width="172" height="206" viewBox="0 0 100 120" fill="none">
+    <g stroke="#f5f2eb" stroke-width="7" stroke-linecap="round">
+      <path d="M 50 112 Q 50 84, 52 56 Q 54 32, 52 12"/>
+      <path d="M 51 84 Q 62 80, 76 70"/>
+      <path d="M 52 58 Q 40 52, 28 46"/>
+      <path d="M 52 28 Q 62 24, 72 18"/>
+      <path d="M 76 70 L 81 66"/>
+    </g>
+  </svg>
+</svg>

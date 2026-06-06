@@ -1,0 +1,30 @@
+{
+ "out_dir": "eval/runs/playability_s5_rerun",
+ "concurrency": 1,
+ "turns": 20,
+ "stagger": 0.0,
+ "world_id": "e9c87a8e-cde7-4229-9c4f-02d764c2a197",
+ "sessions": [
+  {
+   "id": "S5-free-houhou-goal",
+   "mode": "free",
+   "script_id": null,
+   "character_id": "9a97c72d-3256-43fa-8fb1-fe95c459aad7",
+   "persona": "goal_driven",
+   "turns": 20,
+   "tags": [
+    "free",
+    "反派POV",
+    "无轨"
+   ],
+   "session_id": null,
+   "opening_ttft": null,
+   "ttft_med": null,
+   "turn_ttfts": [],
+   "errors": 2,
+   "dur_s": 23.2,
+   "disconnects": 1,
+   "player_fallbacks": null
+  }
+ ]
+}

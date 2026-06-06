@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+node_modules/
+.next/
+*.egg-info/
+dist/
+.DS_Store
+.superpowers/
+
+# 本地 IDE / 缓存 / 临时与评测产物
+.idea/
+.kiro/
+.pytest_cache/
+.ruff_cache/
+.restore-tmp/
+test_outputs/
+.claude/settings.local.json
+
+# 生成图走 OSS，本地 static/images 不入库（保留目录占位）
+backend/static/images/*
+!backend/static/images/.gitkeep
+
+# 设计走查截图 / 临时图，别再进库
+/.codex/
+.codex-home-*.png
+/img.png

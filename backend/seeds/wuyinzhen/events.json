@@ -1,0 +1,56 @@
+[
+  {
+    "name": "发现老爷失踪",
+    "trigger_type": "time",
+    "trigger_condition": {"min_time_index": 0},
+    "description": "镇上传言刘府老爷已经两天没有出现。",
+    "effects": {"add_clues": ["刘府老爷已失踪两日，无人知其去向"]},
+    "mode": "script_only",
+    "priority": 1
+  },
+  {
+    "name": "管家的谎言被拆穿",
+    "trigger_type": "clue_count",
+    "trigger_condition": {"min_clues_found": 3},
+    "description": "随着线索增多，管家的不在场证明出现了漏洞。",
+    "effects": {"npc_updates": {"管家王福": {"trust_change": -2, "mood": "慌张"}}},
+    "mode": "script_only",
+    "priority": 3
+  },
+  {
+    "name": "李婉求助",
+    "trigger_type": "clue_count",
+    "trigger_condition": {"min_clues_found": 5},
+    "description": "李婉鼓起勇气找到玩家，欲言又止。",
+    "effects": {"add_clues": ["李婉似乎知道什么，但她很害怕"]},
+    "mode": "script_only",
+    "priority": 5
+  },
+  {
+    "name": "NPC 主动搭话（节奏保底）",
+    "trigger_type": "rounds_without_progress",
+    "trigger_condition": {"min_rounds": 8},
+    "description": "一个路过的NPC注意到你在调查，主动透露了一些信息。",
+    "effects": {"add_clues": ["有人说曾在深夜看到管家从后门离开刘府"]},
+    "mode": "script_only",
+    "priority": 2
+  },
+  {
+    "name": "关键NPC找上门（强制推进）",
+    "trigger_type": "rounds_without_progress",
+    "trigger_condition": {"min_rounds": 15},
+    "description": "药铺老板匆匆找到你，说有重要的事要告诉你。",
+    "effects": {"add_clues": ["药铺老板证实管家当晚并未来买药，他在说谎"]},
+    "mode": "script_only",
+    "priority": 6
+  },
+  {
+    "name": "王福的杀机",
+    "trigger_type": "clue_count",
+    "trigger_condition": {"min_clues_found": 7},
+    "description": "王福发现玩家掌握了太多线索，决定铤而走险。",
+    "effects": {"add_clues": ["药铺后院传来挣扎声"]},
+    "mode": "script_only",
+    "priority": 8
+  }
+]
