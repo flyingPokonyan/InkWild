@@ -4,7 +4,6 @@ import { getLocale, getMessages } from "next-intl/server";
 
 import { AuthBootstrap } from "@/components/AuthBootstrap";
 import { BottomTabBar } from "@/components/BottomTabBar";
-import { InstallPrompt } from "@/components/InstallPrompt";
 import { OpeningLoadingOverlay } from "@/components/OpeningLoadingOverlay";
 import { QueryProvider } from "@/components/QueryProvider";
 import { ConfirmProvider } from "@/components/ui/ConfirmDialog";
@@ -65,7 +64,6 @@ export default async function RootLayout({
                 <AuthBootstrap />
                 {children}
                 <BottomTabBar />
-                <InstallPrompt />
                 <OpeningLoadingOverlay />
               </ConfirmProvider>
             </QueryProvider>

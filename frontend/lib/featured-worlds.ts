@@ -1,24 +1,31 @@
 /**
  * 精选世界挑选逻辑 —— 登录页左栏 + discover spotlight 共用，保证两处口径一致。
- * 默认按 play_count 降序，并把运营置顶世界固定排在第一位。
+ *
+ * 「每周精选」：按「自纪元起的周序号」对所有已发布世界做确定性轮播。
+ * 同一周内稳定（全站一致），跨周自动换一批 / 换顺序，无需后台手动维护置顶。
  */
 
-// 运营临时置顶：把「后宫·甄嬛传」钉在精选第一位（用户拍板 2026-06-02）。
-// TODO: 长期应由后台「运营位 / featured 标记」配置，而非前端硬编码 world id。
-export const FEATURED_PIN_WORLD_ID = "e9c87a8e-cde7-4229-9c4f-02d764c2a197";
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-export function pickFeaturedWorlds<T extends { id: string; play_count?: number | null }>(
+/** 自 epoch 起的周序号（确定性整数，跨周递增）。 */
+export function currentWeekIndex(now: number = Date.now()): number {
+  return Math.floor(now / WEEK_MS);
+}
+
+/**
+ * 取本周精选世界：以 id 稳定排序得到基序，再按周序号旋转起点取前 count 个。
+ * 世界多于 count 时每周展示不同子集；少于等于 count 时则每周轮换顺序。
+ */
+export function pickFeaturedWorlds<T extends { id: string }>(
   worlds: readonly T[] | undefined | null,
   count: number,
-  pinId: string | null = FEATURED_PIN_WORLD_ID,
+  weekIndex: number = currentWeekIndex(),
 ): T[] {
   if (!worlds || worlds.length === 0) return [];
-  const ranked = [...worlds].sort((a, b) => (b.play_count ?? 0) - (a.play_count ?? 0));
-  const limit = Math.min(count, ranked.length);
-  if (!pinId) return ranked.slice(0, limit);
-
-  const pinned = ranked.find((w) => w.id === pinId);
-  if (!pinned) return ranked.slice(0, limit);
-
-  return [pinned, ...ranked.filter((w) => w.id !== pinId)].slice(0, limit);
+  const ordered = [...worlds].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const n = ordered.length;
+  const limit = Math.min(count, n);
+  const offset = ((weekIndex % n) + n) % n;
+  const rotated = [...ordered.slice(offset), ...ordered.slice(0, offset)];
+  return rotated.slice(0, limit);
 }
