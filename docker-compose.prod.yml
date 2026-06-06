@@ -1,4 +1,4 @@
-# 生产部署覆盖（inkwild.pokonyan.com）。
+# 生产部署覆盖（inkwild.app + admt.inkwild.app）。
 # 用法：
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
@@ -23,31 +23,32 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/inkwild
       REDIS_URL: redis://redis:6379/0
       DEBUG: "false"
-      SESSION_COOKIE_DOMAIN: .pokonyan.com
-      CORS_EXTRA_ORIGINS: https://inkwild.pokonyan.com,https://admt.pokonyan.com
+      SESSION_COOKIE_DOMAIN: .inkwild.app
+      CORS_EXTRA_ORIGINS: https://inkwild.app,https://admt.inkwild.app
 
   frontend:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: https://inkwild.pokonyan.com
+        NEXT_PUBLIC_API_URL: https://inkwild.app
+    # 宿主 3000 被同机 chatgpt2api 占用，改用 3100，nginx 上游指向它
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3100:3000"
     environment:
-      NEXT_PUBLIC_API_URL: https://inkwild.pokonyan.com
+      NEXT_PUBLIC_API_URL: https://inkwild.app
       INTERNAL_API_URL: http://backend:8000
 
   admin-frontend:
     build:
       context: ./admin-frontend
       args:
-        NEXT_PUBLIC_API_URL: https://admt.pokonyan.com
-        NEXT_PUBLIC_MAIN_SITE_URL: https://inkwild.pokonyan.com
+        NEXT_PUBLIC_API_URL: https://admt.inkwild.app
+        NEXT_PUBLIC_MAIN_SITE_URL: https://inkwild.app
         NEXT_PUBLIC_USE_MOCK_EXPERIMENT_DATA: "false"
     ports:
       - "127.0.0.1:3001:3001"
     environment:
-      NEXT_PUBLIC_API_URL: https://admt.pokonyan.com
-      NEXT_PUBLIC_MAIN_SITE_URL: https://inkwild.pokonyan.com
+      NEXT_PUBLIC_API_URL: https://admt.inkwild.app
+      NEXT_PUBLIC_MAIN_SITE_URL: https://inkwild.app
       NEXT_PUBLIC_USE_MOCK_EXPERIMENT_DATA: "false"
       INTERNAL_API_URL: http://backend:8000
