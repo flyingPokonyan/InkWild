@@ -10,7 +10,7 @@ from config import settings
 logger = structlog.get_logger()
 
 TAVILY_SEARCH_URL = "https://api.tavily.com/search"
-DEFAULT_TIMEOUT = 10.0
+DEFAULT_TIMEOUT = 100.0
 MAX_CONTENT_LENGTH = 300
 
 

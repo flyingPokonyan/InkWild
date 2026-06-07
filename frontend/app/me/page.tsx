@@ -11,7 +11,6 @@ import { useTranslations } from "next-intl";
 import { AccountShell } from "@/components/account/AccountShell";
 import { AccountProfile } from "@/components/account/AccountProfile";
 import { ChangePasswordForm } from "@/components/account/ChangePasswordForm";
-import { MobileTopBar } from "@/components/MobileTopBar";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ProductNav } from "@/components/ProductNav";
 import { Modal } from "@/components/ui/Modal";
@@ -209,7 +208,9 @@ export default function MePage() {
       <div aria-hidden className="me-glow" />
 
       <ProductNav variant="solid" />
-      <MobileTopBar brand={tNav("me")} right={<NotificationBell />} />
+      <div className="me-mobile-notify">
+        <NotificationBell />
+      </div>
 
       {/* 桌面：账户中心 */}
       <AccountShell active="account">
@@ -424,6 +425,13 @@ export default function MePage() {
           pointer-events: none;
           background: radial-gradient(ellipse 50% 50% at 50% 50%, rgba(223, 194, 144, 0.06), transparent 70%);
         }
+        .me-mobile-notify {
+          position: absolute;
+          top: calc(env(safe-area-inset-top, 0px) + 14px);
+          right: 20px;
+          z-index: 5;
+          display: none;
+        }
         .me-wrap {
           position: relative;
           z-index: 2;
@@ -433,6 +441,14 @@ export default function MePage() {
           display: flex;
           flex-direction: column;
           gap: 24px;
+        }
+        @media (max-width: 768px) {
+          .me-mobile-notify {
+            display: block;
+          }
+          .me-wrap {
+            padding-top: calc(env(safe-area-inset-top, 0px) + 34px);
+          }
         }
         .me-profile {
           display: flex;

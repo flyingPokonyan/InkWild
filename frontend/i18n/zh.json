@@ -617,7 +617,7 @@
     "engineOnline": "世界引擎在线",
     "heroTitle": "你落笔，",
     "heroTitleAccent": "世界便回应",
-    "heroBody": "在 <scripted>剧本模式</scripted> 里追查真相，在 <free>自由模式</free> 里扮演自己。写下行动，角色、线索与事件会持续向前。",
+    "heroBody": "<scripted>剧本模式</scripted>追查真相，<free>自由模式</free>扮演自己。写下行动，角色、线索与事件继续向前。",
     "ctaStart": "开始探索",
     "ctaWorkshop": "创建世界",
     "scrollCue": "继续",

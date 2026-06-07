@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 
 import { ProductNav } from "@/components/ProductNav";
-import { MobileTopBar, MobileIconButton } from "@/components/MobileTopBar";
 import { buildLoginHref } from "@/lib/auth-redirect";
 import { withReturn } from "@/lib/play-return";
 import { workshopFetch } from "@/lib/workshop-api";
@@ -2021,42 +2020,34 @@ function MobileWorkshopView({
         paddingBottom: "calc(76px + env(safe-area-inset-bottom))",
       }}
     >
-      <MobileTopBar
-        left={
-          <MobileIconButton aria-label="search">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M16.5 16.5 21 21" />
-            </svg>
-          </MobileIconButton>
-        }
-        right={
-          <button
-            type="button"
-            aria-label="profile"
-            onClick={() => setAvatarOpen(true)}
-            style={{
-              width: 42,
-              height: 42,
-              minWidth: 44,
-              minHeight: 44,
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.08)",
-              background:
-                "radial-gradient(circle at 34% 24%, rgba(245,242,235,0.88), transparent 18%), linear-gradient(135deg, #3e3325, #8d7b64 48%, #171412)",
-              color: "var(--lv-bg)",
-              fontWeight: 700,
-              fontSize: 13,
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
-              padding: 0,
-            }}
-          >
-            {initial}
-          </button>
-        }
-      />
+      <button
+        type="button"
+        aria-label="profile"
+        onClick={() => setAvatarOpen(true)}
+        style={{
+          position: "absolute",
+          top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+          right: 20,
+          zIndex: 5,
+          width: 42,
+          height: 42,
+          minWidth: 44,
+          minHeight: 44,
+          borderRadius: 999,
+          border: "1px solid rgba(255,255,255,0.08)",
+          background:
+            "radial-gradient(circle at 34% 24%, rgba(245,242,235,0.88), transparent 18%), linear-gradient(135deg, #3e3325, #8d7b64 48%, #171412)",
+          color: "var(--lv-bg)",
+          fontWeight: 700,
+          fontSize: 13,
+          display: "grid",
+          placeItems: "center",
+          cursor: "pointer",
+          padding: 0,
+        }}
+      >
+        {initial}
+      </button>
 
       {(notice || error) && (
         <div
@@ -2076,7 +2067,7 @@ function MobileWorkshopView({
         </div>
       )}
 
-      <div style={{ padding: "0 12px" }}>
+      <div style={{ padding: "calc(env(safe-area-inset-top, 0px) + 16px) 12px 0" }}>
         {/* create card —— 文案左、按钮右，垂直居中，避免叠加 */}
         <section
           style={{

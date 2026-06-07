@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { Play, Sparkles, Search, User, SlidersHorizontal, LayoutGrid, List as ListIcon } from "lucide-react";
+import { Play, Sparkles, Search, SlidersHorizontal, LayoutGrid, List as ListIcon } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { ProductNav } from "@/components/ProductNav";
-import { MobileTopBar, MobileIconButton } from "@/components/MobileTopBar";
 import { difficultyLevel } from "@/lib/difficulty";
 import { useWorldList } from "@/lib/api/worlds";
 import { useGameHistory } from "@/lib/api/history";
@@ -396,25 +395,9 @@ function MobileDiscoverView({
   void _worlds;
   const t = useTranslations("discoverPage");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
-  const [spotIdx, setSpotIdx] = useState(0);
 
   const showingSpotlight = !query && selectedCategory === "全部" && spotlightWorlds.length > 0;
 
-  // 9s 轮换；只在展示态下转，避免后台空转
-  useEffect(() => {
-    if (!showingSpotlight || spotlightWorlds.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setSpotIdx((i) => (i + 1) % spotlightWorlds.length);
-    }, 9000);
-    return () => window.clearInterval(timer);
-  }, [showingSpotlight, spotlightWorlds.length]);
-
-  // 切换数据源时 reset idx，避免越界
-  useEffect(() => {
-    if (spotIdx >= spotlightWorlds.length) setSpotIdx(0);
-  }, [spotlightWorlds.length, spotIdx]);
-
-  const spotlightWorld = spotlightWorlds[spotIdx];
   // 当 spotlight 展示中（非搜索、未筛选题材），从下方列表里剔除所有 spotlight 世界，避免同卡出现 2 次
   const spotlightIdSet = useMemo(() => new Set(spotlightWorlds.map((w) => w.id)), [spotlightWorlds]);
   const listedWorlds = showingSpotlight
@@ -430,18 +413,14 @@ function MobileDiscoverView({
         paddingBottom: "calc(76px + env(safe-area-inset-bottom))",
       }}
     >
-      <MobileTopBar
-        right={
-          <Link href="/login" aria-label="我的">
-            <MobileIconButton aria-label="我的" as="div">
-              <User size={20} />
-            </MobileIconButton>
-          </Link>
-        }
-      />
-
       {/* 搜索 + 筛选 */}
-      <div style={{ padding: "0 16px 12px", display: "flex", gap: 10 }}>
+      <div
+        style={{
+          padding: "calc(env(safe-area-inset-top, 0px) + 16px) 16px 12px",
+          display: "flex",
+          gap: 10,
+        }}
+      >
         <label
           style={{
             flex: 1,
@@ -541,184 +520,8 @@ function MobileDiscoverView({
         </div>
       )}
 
-      {/* Spotlight 卡 —— 多张轮换 (9s) + 横滑切换；与桌面 SpotlightSection 行为一致 */}
-      {showingSpotlight && spotlightWorld && (
-        <div style={{ margin: "0 16px 14px", position: "relative" }}>
-          <motion.div
-            drag={spotlightWorlds.length > 1 ? "x" : false}
-            dragConstraints={{ left: 0, right: 0 }}
-            dragElastic={0.18}
-            dragMomentum={false}
-            onDragEnd={(_, info) => {
-              const len = spotlightWorlds.length;
-              if (len <= 1) return;
-              if (info.offset.x < -50 || info.velocity.x < -300) {
-                setSpotIdx((i) => (i + 1) % len);
-              } else if (info.offset.x > 50 || info.velocity.x > 300) {
-                setSpotIdx((i) => (i - 1 + len) % len);
-              }
-            }}
-            style={{
-              position: "relative",
-              height: 188,
-              borderRadius: 22,
-              border: "1px solid rgba(255,255,255,0.08)",
-              overflow: "hidden",
-              background: "var(--lv-bg-1)",
-              touchAction: "pan-y",
-              cursor: spotlightWorlds.length > 1 ? "grab" : "default",
-            }}
-          >
-            {/* 多层背景叠放，靠 opacity 切换；和桌面同款 1.4s 渐隐 */}
-            {spotlightWorlds.map((w, i) => {
-              const img = ossThumb(w.hero_image || w.cover_image, 900);
-              return (
-                <div
-                  key={w.id}
-                  aria-hidden
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    backgroundImage: img
-                      ? `url(${img})`
-                      : "linear-gradient(135deg, var(--lv-bg-1), var(--lv-bg-2))",
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                    opacity: i === spotIdx ? 1 : 0,
-                    transition: "opacity 1100ms cubic-bezier(0.4, 0, 0.2, 1)",
-                    pointerEvents: "none",
-                  }}
-                />
-              );
-            })}
-
-            {/* chrome 渐变叠层（不随 idx 切换，避免闪烁）*/}
-            <div
-              aria-hidden
-              style={{
-                position: "absolute",
-                inset: 0,
-                background:
-                  "linear-gradient(180deg, rgba(5,5,7,0.10), rgba(5,5,7,0.72) 72%, rgba(5,5,7,0.92)), radial-gradient(circle at 70% 18%, rgba(223,194,144,0.16), transparent 32%)",
-                pointerEvents: "none",
-              }}
-            />
-
-            {/* 当前世界文字内容（key 变化触发淡入）*/}
-            <motion.div
-              key={spotlightWorld.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
-              style={{ position: "absolute", left: 18, right: 110, bottom: 16, zIndex: 2 }}
-            >
-              <div
-                style={{
-                  fontFamily: "var(--lv-font-mono)",
-                  fontSize: 9,
-                  letterSpacing: "0.04em",
-                  color: "var(--lv-accent)",
-                  marginBottom: 8,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                <Sparkles size={10} fill="currentColor" />
-                {t("weeklyPick")}
-              </div>
-              <h2
-                style={{
-                  fontFamily: "var(--lv-font-serif)",
-                  fontSize: 24,
-                  fontWeight: 500,
-                  lineHeight: 1.08,
-                  color: "white",
-                  marginBottom: 7,
-                }}
-              >
-                {spotlightWorld.name}
-              </h2>
-              {spotlightWorld.description && (
-                <p
-                  style={{
-                    fontSize: 12,
-                    lineHeight: 1.45,
-                    color: "rgba(245,242,235,0.72)",
-                    maxWidth: 260,
-                    display: "-webkit-box",
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden",
-                  }}
-                >
-                  {spotlightWorld.description}
-                </p>
-              )}
-            </motion.div>
-
-            {/* 进入按钮 —— 单独 Link，drag 容器是 div 不抢点击 */}
-            <Link
-              href={`/worlds/${spotlightWorld.id}`}
-              draggable={false}
-              style={{
-                position: "absolute",
-                right: 16,
-                bottom: 16,
-                zIndex: 3,
-                height: 40,
-                padding: "0 16px 0 14px",
-                borderRadius: 9999,
-                background: "rgba(245,242,235,0.95)",
-                color: "var(--lv-bg)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: "0.02em",
-                boxShadow: "0 6px 16px rgba(0,0,0,0.35)",
-                whiteSpace: "nowrap",
-                textDecoration: "none",
-              }}
-            >
-              <Play size={12} fill="currentColor" strokeWidth={0} />
-              {t("enter")}
-            </Link>
-          </motion.div>
-
-          {/* 点指示器 —— 仅 >1 时显示 */}
-          {spotlightWorlds.length > 1 && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                gap: 6,
-                marginTop: 10,
-              }}
-            >
-              {spotlightWorlds.map((w, i) => (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => setSpotIdx(i)}
-                  aria-label={`切换到 ${w.name}`}
-                  style={{
-                    width: i === spotIdx ? 22 : 6,
-                    height: 3,
-                    borderRadius: 999,
-                    background: i === spotIdx ? "var(--lv-accent)" : "rgba(255,255,255,0.22)",
-                    border: 0,
-                    padding: 0,
-                    cursor: "pointer",
-                    transition: "all 320ms cubic-bezier(0.2, 0.8, 0.2, 1)",
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Spotlight —— 横滑 scroll-snap 轨道：一屏一张、露出下一张边缘，原生惯性吸附 */}
+      {showingSpotlight && <MobileSpotlightRail worlds={spotlightWorlds} />}
 
       {/* section head + view toggle */}
       <div
@@ -824,6 +627,196 @@ function MobileDiscoverView({
   );
 }
 
+/**
+ * 移动端「本周精选」横滑轨道。
+ * 原生 scroll-snap（一屏一张、露出下一张边缘 + 惯性吸附），取代旧的 Framer drag 回弹方案；
+ * 整卡可点进入（横滑 touchmove 不触发点击，故不与滑动冲突），底部小圆点跟随滚动位置。
+ */
+function MobileSpotlightRail({ worlds }: { worlds: WorldListItem[] }) {
+  const t = useTranslations("discoverPage");
+  const railRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+  const multi = worlds.length > 1;
+
+  const stepOf = (rail: HTMLDivElement) => {
+    const first = rail.firstElementChild as HTMLElement | null;
+    return first ? first.offsetWidth : rail.clientWidth;
+  };
+  const handleScroll = () => {
+    const rail = railRef.current;
+    if (rail) setActive(Math.round(rail.scrollLeft / stepOf(rail)));
+  };
+  const goTo = (i: number) => {
+    const rail = railRef.current;
+    if (rail) rail.scrollTo({ left: i * stepOf(rail), behavior: "smooth" });
+  };
+
+  return (
+    <div style={{ margin: "0 0 14px" }}>
+      <div
+        ref={railRef}
+        onScroll={handleScroll}
+        className="carousel-track"
+        style={{
+          display: "flex",
+          overflowX: "auto",
+          scrollSnapType: "x mandatory",
+          scrollbarWidth: "none",
+          WebkitOverflowScrolling: "touch",
+        }}
+      >
+        {worlds.map((w) => {
+          const img = ossThumb(w.hero_image || w.cover_image, 900);
+          return (
+            <div
+              key={w.id}
+              style={{
+                // 每个 slide 占整屏宽，内 16px gutter，下一张完全在屏外 → 无露边、一次滑一整屏
+                flex: "0 0 100%",
+                scrollSnapAlign: "start",
+                boxSizing: "border-box",
+                padding: "0 16px",
+              }}
+            >
+            <Link
+              href={`/worlds/${w.id}`}
+              draggable={false}
+              style={{
+                position: "relative",
+                display: "block",
+                width: "100%",
+                height: 188,
+                borderRadius: 22,
+                border: "1px solid rgba(255,255,255,0.08)",
+                overflow: "hidden",
+                background: "var(--lv-bg-1)",
+                textDecoration: "none",
+                color: "inherit",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  backgroundImage: img
+                    ? `url(${img})`
+                    : "linear-gradient(135deg, var(--lv-bg-1), var(--lv-bg-2))",
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }}
+              />
+              <span
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background:
+                    "linear-gradient(180deg, rgba(5,5,7,0.10), rgba(5,5,7,0.72) 72%, rgba(5,5,7,0.92)), radial-gradient(circle at 70% 18%, rgba(223,194,144,0.16), transparent 32%)",
+                }}
+              />
+              <span style={{ position: "absolute", left: 18, right: 110, bottom: 16, zIndex: 2, display: "block" }}>
+                <span
+                  style={{
+                    fontFamily: "var(--lv-font-mono)",
+                    fontSize: 9,
+                    letterSpacing: "0.04em",
+                    color: "var(--lv-accent)",
+                    marginBottom: 8,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Sparkles size={10} fill="currentColor" />
+                  {t("weeklyPick")}
+                </span>
+                <span
+                  style={{
+                    fontFamily: "var(--lv-font-serif)",
+                    fontSize: 24,
+                    fontWeight: 500,
+                    lineHeight: 1.08,
+                    color: "white",
+                    marginBottom: 7,
+                    display: "block",
+                  }}
+                >
+                  {w.name}
+                </span>
+                {w.description && (
+                  <span
+                    style={{
+                      fontSize: 12,
+                      lineHeight: 1.45,
+                      color: "rgba(245,242,235,0.72)",
+                      maxWidth: 260,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 1,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {w.description}
+                  </span>
+                )}
+              </span>
+              <span
+                style={{
+                  position: "absolute",
+                  right: 16,
+                  bottom: 16,
+                  zIndex: 3,
+                  height: 40,
+                  padding: "0 16px 0 14px",
+                  borderRadius: 9999,
+                  background: "rgba(245,242,235,0.95)",
+                  color: "var(--lv-bg)",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  letterSpacing: "0.02em",
+                  boxShadow: "0 6px 16px rgba(0,0,0,0.35)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Play size={12} fill="currentColor" strokeWidth={0} />
+                {t("enter")}
+              </span>
+            </Link>
+            </div>
+          );
+        })}
+      </div>
+
+      {multi && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 10 }}>
+          {worlds.map((w, i) => (
+            <button
+              key={w.id}
+              type="button"
+              onClick={() => goTo(i)}
+              aria-label={`切换到 ${w.name}`}
+              style={{
+                width: i === active ? 22 : 6,
+                height: 3,
+                borderRadius: 999,
+                background: i === active ? "var(--lv-accent)" : "rgba(255,255,255,0.22)",
+                border: 0,
+                padding: 0,
+                cursor: "pointer",
+                transition: "all 320ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MobileWorldRow({ world }: { world: WorldListItem }) {
   const t = useTranslations("discoverPage");
   const cover = ossThumb(world.cover_image || world.hero_image, 520);
@@ -881,7 +874,7 @@ function MobileWorldRow({ world }: { world: WorldListItem }) {
               fontSize: 11.5,
               lineHeight: 1.42,
               display: "-webkit-box",
-              WebkitLineClamp: 2,
+              WebkitLineClamp: 1,
               WebkitBoxOrient: "vertical",
               overflow: "hidden",
               margin: 0,
@@ -1469,9 +1462,8 @@ function LobbyWorldCard({ world, index }: { world: WorldListItem; index: number 
               overflow: "hidden",
               textOverflow: "ellipsis",
               display: "-webkit-box",
-              WebkitLineClamp: 2,
+              WebkitLineClamp: 1,
               WebkitBoxOrient: "vertical",
-              height: "36px",
             }}
           >
             {world.description}

@@ -9,7 +9,6 @@ import { useTranslations } from "next-intl";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { ProductNav } from "@/components/ProductNav";
-import { MobileTopBar } from "@/components/MobileTopBar";
 import { LoadingPulse } from "@/components/ui/LoadingPulse";
 import { useConfirm } from "@/components/ui/ConfirmDialog";
 import { apiFetch, isUnauthorizedError } from "@/lib/api";
@@ -914,9 +913,7 @@ function MobileHistoryView({
         paddingBottom: "calc(76px + env(safe-area-inset-bottom))",
       }}
     >
-      <MobileTopBar brand={t("titleMain")} />
-
-      <div style={{ padding: "0 12px" }}>
+      <div style={{ padding: "calc(env(safe-area-inset-top, 0px) + 16px) 12px 0" }}>
         {/* search */}
         <div
           style={{
