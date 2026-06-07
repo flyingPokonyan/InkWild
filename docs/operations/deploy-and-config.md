@@ -12,6 +12,54 @@
 
 ---
 
+## 0. 生产运维速查（2026-06-06 上线 · 权威，先看这节）
+
+线上：主站 **https://inkwild.app**（+www）· 后台 **https://admin.inkwild.app**。
+
+**环境**
+- 服务器：AWS EC2 ap-northeast-1，`ssh inkwild`（ec2-user）。**共享机**——同机还跑 chatgpt2api / video-site-91 / gptimage / hermes，**只动 `inkwild` 项目，别碰别的**。
+- 代码：私有库 clone 到 `~/inkwild`（服务器 deploy key，SSH 别名 `github-inkwild`）。
+- 运行：compose 项目名 `inkwild`，命令前缀
+  `docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild`
+- 入口：host nginx（`/etc/nginx/conf.d/inkwild.conf`）反代 → frontend `127.0.0.1:3100`、admin `:3001`、backend `:8000`（`/api/` 路由到 backend）；certbot TLS 自动续期；域名走 Cloudflare（apex/admin 代理，www 直连源站）。
+- 密钥：`~/inkwild/backend/.env`（gitignore，**永不进库**）；LLM provider key 另存 DB（admin 后台管）。
+- 备份：每日 03:00 backup 容器；上线前全量备份留在 `~/inkwild_pre_wipe_*.sql.gz` + `~/inkwild_backend.env.bak`。
+
+**改动分三类 —— 关键原则：代码走 git，密钥/数据不走 git**
+
+**① 改代码（前端 / 后端 / 迁移）→ git + 重建镜像**
+> 生产把代码 COPY 进镜像（无源码挂载），所以 `git pull` 后**必须 rebuild 镜像、重建容器**才生效——restart 无效。
+```bash
+# 本地：改 → 验证 → 提交推送
+cd frontend && npx tsc --noEmit && npm run lint     # 后端改则 python -m pytest
+git add -A && git commit -m "..." && git push
+# 服务器：拉取 + 只重建改动的服务
+ssh inkwild 'cd ~/inkwild && git pull --ff-only && \
+  docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild up -d --build <服务>'
+```
+- 前端改 → `frontend`；后端 / `migrations/` 改 → `backend`（启动自动跑 `alembic upgrade head`）；后台改 → `admin-frontend`。
+- 只重建改动的服务；`db` / `redis` / 数据卷不动，数据安全。
+
+**② 改密钥 / 配置（`.env`）→ 不走 git，改完重启容器**
+> `.env` 是 gitignore 的；env_file 在容器启动时读，改完重启即可，不用 rebuild。
+```bash
+ssh inkwild   # 编辑 ~/inkwild/backend/.env
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild up -d backend
+```
+
+**③ 改线上数据（世界 / 封面 / provider / 管理员）→ 直接 psql 或一次性脚本，不进 git**
+```bash
+# 建/提升管理员：
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild \
+  run --rm --no-deps backend python -m cli.create_admin <email> --password <pw>
+```
+
+**验证**：`curl -s -o /dev/null -w '%{http_code}\n' https://inkwild.app/`（再测 `/login`、`/api/worlds`）。
+
+**已知坑**：① 全新空库首次迁移需库里先有 ≥1 admin（已修 `c45bcbdcd049`，但换库要记得）；② 前端宿主端口用 **3100**（3000 被同机 chatgpt2api 占）；③ 无蓝绿/零停机，重建期该服务短暂中断（几十秒）。
+
+---
+
 ## 1. 启动能力矩阵
 
 ### A. Docker Compose 服务编排
@@ -22,7 +70,7 @@
 |---|---|---|
 | `docker-compose.yml` | 生产基底（默认） | 6 个 service（db / redis / backend / frontend / admin-frontend / backup）。`npm start` + `uvicorn`（无 --reload），无源码 bind-mount，依赖镜像里 `npm run build` 产物 |
 | `docker-compose.dev.yml` | dev override | bind-mount 源码 + `npm run dev` + `uvicorn --reload` + `DEBUG=true`，端口绑 `0.0.0.0` |
-| `docker-compose.prod.yml` | prod override | 生产 URL（`https://inkwild.pokonyan.com` / `admt.pokonyan.com`）、`SESSION_COOKIE_DOMAIN`、`CORS_EXTRA_ORIGINS`、`NEXT_PUBLIC_*` build args、端口绑 `127.0.0.1`（由前置 nginx 终结 HTTPS） |
+| `docker-compose.prod.yml` | prod override | 生产 URL（`https://inkwild.app` / `admin.inkwild.app`）、`SESSION_COOKIE_DOMAIN`、`CORS_EXTRA_ORIGINS`、`NEXT_PUBLIC_*` build args、端口绑 `127.0.0.1`（由前置 nginx 终结 HTTPS） |
 
 > 历史上服务器上手写过一份 `docker-compose.override.yml`（Compose 默认会自动 merge），现已废弃——所有生产差异都进 `docker-compose.prod.yml` 跟仓库走，避免"隐式 override"导致 dev/prod 行为悄悄分叉。
 
@@ -370,7 +418,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 - 服务器：Linux + docker compose v2.20+（要支持 `-f file1 -f file2` 多文件合成）
 - nginx：HTTPS 入口，反代到 `127.0.0.1:3000` / `:3001` / `:8000`（见 §4.5）
-- DNS：`inkwild.pokonyan.com` 主站 / `admt.pokonyan.com` 后台（按需）
+- DNS：`inkwild.app` 主站 / `admin.inkwild.app` 后台（按需）
 - Cloudflare（可选但推荐）：CDN + 抗刷 + WS 直通
 
 ### 4.2 dev 跟 prod 的差异
@@ -381,9 +429,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 | 前端模式 | `next dev`（turbopack，HMR） | `next start`（构建产物） |
 | 后端 reload | `uvicorn --reload` | `uvicorn`（无 reload） |
 | 端口绑定 | `0.0.0.0:*`（host 直访） | `127.0.0.1:*`（nginx 反代） |
-| `NEXT_PUBLIC_API_URL` | 运行时 env，`http://localhost:8000` | **build arg**，`https://inkwild.pokonyan.com`（烤进客户端 bundle） |
+| `NEXT_PUBLIC_API_URL` | 运行时 env，`http://localhost:8000` | **build arg**，`https://inkwild.app`（烤进客户端 bundle） |
 | `SESSION_COOKIE_DOMAIN` | 空 | `.pokonyan.com`（跨子域共享 session） |
-| `CORS_EXTRA_ORIGINS` | 空 | `https://inkwild.pokonyan.com,https://admt.pokonyan.com` |
+| `CORS_EXTRA_ORIGINS` | 空 | `https://inkwild.app,https://admin.inkwild.app` |
 | `DEBUG` | `true` | `false` |
 | `ENABLE_DEV_AUTH` | 可 `true` | **必须 `false`** |
 | Sentry DSN | 通常空 | `BACKEND_SENTRY_DSN` + `NEXT_PUBLIC_SENTRY_DSN` 都填 |
@@ -420,8 +468,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml exec backend \
   python -m seeds.seed
 
 # 7. 验证
-curl -k https://inkwild.pokonyan.com/api/health
-curl -k https://inkwild.pokonyan.com/ | head -c 200   # 应该看到 <!DOCTYPE html>...
+curl -k https://inkwild.app/api/health
+curl -k https://inkwild.app/ | head -c 200   # 应该看到 <!DOCTYPE html>...
 ```
 
 ### 4.4 更新/重新部署
@@ -450,7 +498,7 @@ map $http_upgrade $connection_upgrade {
 
 server {
     listen 443 ssl;
-    server_name inkwild.pokonyan.com;
+    server_name inkwild.app;
     client_max_body_size 25m;
 
     # /api/* 和 /static/* 进后端
@@ -484,11 +532,11 @@ server {
         proxy_set_header Connection $connection_upgrade;
     }
 
-    ssl_certificate /etc/letsencrypt/live/inkwild.pokonyan.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/inkwild.pokonyan.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/inkwild.app/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/inkwild.app/privkey.pem;
 }
 
-# admt.pokonyan.com 同理，location / 反代到 127.0.0.1:3001
+# admin.inkwild.app 同理，location / 反代到 127.0.0.1:3001
 ```
 
 **关键点**：

@@ -2,7 +2,9 @@
 
 AI 驱动的互动叙事引擎。剧本模式（预设谜题/真相/结局）+ 自由模式（纯开放世界），共享同一套世界引擎。
 
-当前已上线：双模式游玩、多 Agent 编排、创作工坊（AI 生成世界 + 剧本，含联网检索、AI 配图、草稿/发布流程）、多 LLM Provider 管理后台。下阶段重点：网页版整体打磨，准备正式上线。
+当前已上线：双模式游玩、多 Agent 编排、创作工坊（AI 生成世界 + 剧本，含联网检索、AI 配图、草稿/发布流程）、多 LLM Provider 管理后台。
+
+**已正式上线**（2026-06-06）：主站 https://inkwild.app · 后台 https://admin.inkwild.app。生产运维 runbook 见 [`docs/operations/deploy-and-config.md` §0](docs/operations/deploy-and-config.md)（改代码/改密钥/改数据三类流程 + 服务器拓扑）。
 
 ## 技术栈
 
