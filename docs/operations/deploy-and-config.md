@@ -430,7 +430,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 | 后端 reload | `uvicorn --reload` | `uvicorn`（无 reload） |
 | 端口绑定 | `0.0.0.0:*`（host 直访） | `127.0.0.1:*`（nginx 反代） |
 | `NEXT_PUBLIC_API_URL` | 运行时 env，`http://localhost:8000` | **build arg**，`https://inkwild.app`（烤进客户端 bundle） |
-| `SESSION_COOKIE_DOMAIN` | 空 | `.pokonyan.com`（跨子域共享 session） |
+| `SESSION_COOKIE_DOMAIN` | 空 | `.inkwild.app`（跨子域共享 session） |
 | `CORS_EXTRA_ORIGINS` | 空 | `https://inkwild.app,https://admin.inkwild.app` |
 | `DEBUG` | `true` | `false` |
 | `ENABLE_DEV_AUTH` | 可 `true` | **必须 `false`** |
