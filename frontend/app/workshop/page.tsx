@@ -349,6 +349,12 @@ export default function WorkshopDemoPage() {
         busyTarget={busyTarget}
         onOpenWorldDraft={(id) => openWorldDraft.mutate(id)}
         onOpenScriptDraft={(id) => openScriptDraft.mutate(id)}
+        onSubmitWorld={(draftId) => submitWorld.mutate(draftId)}
+        onWithdrawWorldSubmission={(draftId) => withdrawWorldSubmission.mutate(draftId)}
+        onUnpublishWorld={(worldId) => unpublishWorld.mutate(worldId)}
+        onSubmitScript={(draftId) => submitScript.mutate(draftId)}
+        onWithdrawScriptSubmission={(draftId) => withdrawScriptSubmission.mutate(draftId)}
+        onUnpublishScript={(scriptId) => unpublishScript.mutate(scriptId)}
         notice={notice}
         error={error}
       />
@@ -1968,6 +1974,12 @@ interface MobileWorkshopViewProps {
   busyTarget: string | null;
   onOpenWorldDraft: (id: string) => void;
   onOpenScriptDraft: (id: string) => void;
+  onSubmitWorld: (draftId: string) => void;
+  onWithdrawWorldSubmission: (draftId: string) => void;
+  onUnpublishWorld: (worldId: string) => void;
+  onSubmitScript: (draftId: string) => void;
+  onWithdrawScriptSubmission: (draftId: string) => void;
+  onUnpublishScript: (scriptId: string) => void;
   notice: string | null;
   error: string | null;
 }
@@ -1979,6 +1991,12 @@ function MobileWorkshopView({
   busyTarget,
   onOpenWorldDraft,
   onOpenScriptDraft,
+  onSubmitWorld,
+  onWithdrawWorldSubmission,
+  onUnpublishWorld,
+  onSubmitScript,
+  onWithdrawScriptSubmission,
+  onUnpublishScript,
   notice,
   error,
 }: MobileWorkshopViewProps) {
@@ -2010,6 +2028,36 @@ function MobileWorkshopView({
 
   // 列表/网格共用同一套 MobileWorkCardProps，直接换组件即可
   const CardComp: typeof MobileWorkCard = viewMode === "grid" ? MobileWorkGridTile : MobileWorkCard;
+
+  const worldPrimaryAction = (world: AdminWorldPublishedItem) => {
+    if (!world.is_owner) return { label: null, action: undefined };
+    if (world.status === "published") return { label: "下架", action: () => onUnpublishWorld(world.id) };
+    if (world.review_status === "submitted") {
+      return {
+        label: "撤回提交",
+        action: world.draft_id ? () => onWithdrawWorldSubmission(world.draft_id!) : undefined,
+      };
+    }
+    return {
+      label: world.draft_id ? "提交发布" : null,
+      action: world.draft_id ? () => onSubmitWorld(world.draft_id!) : undefined,
+    };
+  };
+
+  const scriptPrimaryAction = (script: AdminScriptPublishedItem) => {
+    if (!script.is_owner) return { label: null, action: undefined };
+    if (script.status === "published") return { label: "下架", action: () => onUnpublishScript(script.id) };
+    if (script.review_status === "submitted") {
+      return {
+        label: "撤回提交",
+        action: script.draft_id ? () => onWithdrawScriptSubmission(script.draft_id!) : undefined,
+      };
+    }
+    return {
+      label: script.draft_id ? "提交发布" : null,
+      action: script.draft_id ? () => onSubmitScript(script.draft_id!) : undefined,
+    };
+  };
 
   return (
     <div
@@ -2384,24 +2432,29 @@ function MobileWorkshopView({
               {worldsPublished.length === 0 ? (
                 <EmptyHint loading={worldsQuery.isLoading} text={t("emptyWorlds")} />
               ) : (
-                worldsPublished.map((w) => (
-                  <CardComp
-                    key={w.id}
-                    cover={w.cover_image}
-                    status="published"
-                    badgeLabel={worldStatusBadge(w).label}
-                    badgeColor={worldStatusBadge(w).color}
-                    isOwner={w.is_owner}
-                    kind="world"
-                    title={w.name}
-                    desc={w.description}
-                    updatedAt={null}
-                    bottomMeta={`${w.script_count} 剧本`}
-                    busy={busyTarget === w.id}
-                    onEdit={() => onOpenWorldDraft(w.id)}
-                    onPlay={() => router.push(withReturn(`/worlds/${w.id}`, "/workshop"))}
-                  />
-                ))
+                worldsPublished.map((w) => {
+                  const primary = worldPrimaryAction(w);
+                  return (
+                    <CardComp
+                      key={w.id}
+                      cover={w.cover_image}
+                      status="published"
+                      badgeLabel={worldStatusBadge(w).label}
+                      badgeColor={worldStatusBadge(w).color}
+                      isOwner={w.is_owner}
+                      kind="world"
+                      title={w.name}
+                      desc={w.description}
+                      updatedAt={null}
+                      bottomMeta={`${w.script_count} 剧本`}
+                      busy={busyTarget === w.id}
+                      onEdit={() => onOpenWorldDraft(w.id)}
+                      onPlay={() => router.push(withReturn(`/worlds/${w.id}`, "/workshop"))}
+                      primaryActionLabel={primary.label}
+                      onPrimaryAction={primary.action}
+                    />
+                  );
+                })
               )}
             </>
           )}
@@ -2411,27 +2464,32 @@ function MobileWorkshopView({
               {scriptsPublished.length === 0 ? (
                 <EmptyHint loading={scriptsQuery.isLoading} text={t("emptyScripts")} />
               ) : (
-                scriptsPublished.map((s) => (
-                  <CardComp
-                    key={s.id}
-                    cover={null}
-                    status="published"
-                    badgeLabel={scriptStatusBadge(s).label}
-                    badgeColor={scriptStatusBadge(s).color}
-                    isOwner={s.is_owner}
-                    kind="script"
-                    title={s.name}
-                    desc={s.description}
-                    updatedAt={null}
-                    bottomMeta={`难度 ${s.difficulty} · ${s.estimated_time}`}
-                    busy={busyTarget === s.id}
-                    onEdit={() => onOpenScriptDraft(s.id)}
-                    onPlay={() => {
-                      const wid = scriptsQuery.data?.world?.id;
-                      if (wid) router.push(withReturn(`/worlds/${wid}`, "/workshop?tab=scripts"));
-                    }}
-                  />
-                ))
+                scriptsPublished.map((s) => {
+                  const primary = scriptPrimaryAction(s);
+                  return (
+                    <CardComp
+                      key={s.id}
+                      cover={null}
+                      status="published"
+                      badgeLabel={scriptStatusBadge(s).label}
+                      badgeColor={scriptStatusBadge(s).color}
+                      isOwner={s.is_owner}
+                      kind="script"
+                      title={s.name}
+                      desc={s.description}
+                      updatedAt={null}
+                      bottomMeta={`难度 ${s.difficulty} · ${s.estimated_time}`}
+                      busy={busyTarget === s.id}
+                      onEdit={() => onOpenScriptDraft(s.id)}
+                      onPlay={() => {
+                        const wid = scriptsQuery.data?.world?.id;
+                        if (wid) router.push(withReturn(`/worlds/${wid}`, "/workshop?tab=scripts"));
+                      }}
+                      primaryActionLabel={primary.label}
+                      onPrimaryAction={primary.action}
+                    />
+                  );
+                })
               )}
             </>
           )}
@@ -3025,6 +3083,8 @@ function MobileWorkGridTile({
   badgeColor,
   isOwner = true,
   onPlay,
+  primaryActionLabel,
+  onPrimaryAction,
 }: MobileWorkCardProps) {
   const statusLabel =
     badgeLabel ??
@@ -3108,6 +3168,29 @@ function MobileWorkGridTile({
         >
           {bottomMeta || (kind === "world" ? "世界" : "剧本")}
         </span>
+        {primaryActionLabel && isOwner ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrimaryAction?.();
+            }}
+            disabled={busy}
+            style={{
+              width: "100%",
+              height: 32,
+              marginTop: 8,
+              borderRadius: 999,
+              border: "1px solid rgba(255,255,255,0.14)",
+              background: "rgba(255,255,255,0.055)",
+              color: "var(--lv-ink)",
+              fontSize: 12,
+              fontWeight: 500,
+            }}
+          >
+            {primaryActionLabel}
+          </button>
+        ) : null}
       </div>
     </article>
   );
