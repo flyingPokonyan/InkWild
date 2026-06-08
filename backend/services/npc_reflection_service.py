@@ -32,6 +32,21 @@ def _reflection_threshold() -> int:
     return max(1, settings.npc_reflection_threshold)
 
 
+# Cap the per-run reflection prompt to the most recent N memories. A backlog
+# (failed runs don't advance last_memory_id; very active NPCs) would otherwise
+# dump every accumulated memory and balloon the input (~5.5k tokens observed).
+REFLECTION_MEMORY_LINE_CAP = 30
+
+
+def _format_recent_memory_lines(memories: list, cap: int = REFLECTION_MEMORY_LINE_CAP) -> list[str]:
+    """Format the most recent ``cap`` memories (assumes ascending order) as
+    prompt lines."""
+    return [
+        f"- [第{m.round_number}轮·重要度{m.importance}] {m.content}"
+        for m in memories[-cap:]
+    ]
+
+
 async def get_reflection(
     db: AsyncSession,
     session_id: str,
@@ -133,10 +148,9 @@ async def reflect(
     if not new_memories:
         return None
 
-    memory_lines = [
-        f"- [第{m.round_number}轮·重要度{m.importance}] {m.content}"
-        for m in new_memories
-    ]
+    memory_lines = _format_recent_memory_lines(new_memories)
+    # Advance the cursor past ALL fetched memories (incl. any dropped by the
+    # cap), so a backlog isn't re-fetched and re-dumped on the next run.
     new_max_id = max(m.id for m in new_memories)
 
     system, user = _build_reflection_prompt(

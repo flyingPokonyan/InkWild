@@ -29,6 +29,30 @@ from utils import utcnow
 logger = structlog.get_logger()
 
 
+async def load_recent_messages(
+    db: AsyncSession, session_id: str, limit: int | None = None
+) -> list[dict]:
+    """The Director's non-compacted message window, oldest-first.
+
+    ``limit`` is a safety ceiling (``settings.recent_message_hard_cap``), not a
+    sliding window: kept above the compaction keep-size so it normally returns
+    the full non-compacted history — a stable, append-only prefix that stays
+    prefix-cacheable turn to turn.
+    """
+    if limit is None:
+        limit = settings.recent_message_hard_cap
+    result = await db.execute(
+        select(Message)
+        .where(Message.session_id == session_id, Message.is_compressed.is_(False))
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(limit)
+    )
+    return [
+        {"role": msg.role, "content": msg.content}
+        for msg in reversed(result.scalars().all())
+    ]
+
+
 async def _reflect_one_npc(
     *,
     session_id: str,
@@ -388,13 +412,7 @@ class GameService:
             await db.commit()
 
         game_state = GameState.from_dict(session.game_state)
-        result = await db.execute(
-            select(Message)
-            .where(Message.session_id == session.id, Message.is_compressed.is_(False))
-            .order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(settings.max_context_rounds * 2)
-        )
-        recent_messages = [{"role": msg.role, "content": msg.content} for msg in reversed(result.scalars().all())]
+        recent_messages = await load_recent_messages(db, session.id)
         memory_result = await db.execute(
             select(MemoryEntry)
             .where(MemoryEntry.session_id == session.id)

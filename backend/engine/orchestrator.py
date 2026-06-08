@@ -8,9 +8,10 @@ import structlog
 
 from engine.compressor import (
     build_compression_prompt,
+    claim_compression_round,
     estimate_messages_token_count,
     estimate_token_count,
-    should_compress,
+    merge_context_summary,
 )
 from config import settings
 from engine.action_segmentation import (
@@ -222,22 +223,29 @@ class Orchestrator:
             )
         return ending
 
-    def _maybe_compress(
-        self, session_id: str, rounds_played: int, last_compressed_round: int, _db_unused=None
-    ) -> None:
+    def _maybe_compress(self, session_id: str, state, _db_unused=None) -> None:
         # _db_unused: kept positional for back-compat with existing call sites
         # that still pass `db`. Compression opens its own AsyncSession because
         # the caller's request-scoped session is closed by FastAPI before the
         # fire-and-forget task actually runs — that's the root cause of the
         # 2026-05-27 "compression never fires" bug.
-        if should_compress(rounds_played, last_compressed_round, threshold=20):
-            asyncio.create_task(
-                self._run_compression_with_retry(
-                    session_id=session_id,
-                    rounds_played=rounds_played,
-                    trigger_reason="threshold",
-                )
+        #
+        # Stamp last_compressed_round on the turn's owned ``state`` here (the
+        # main loop persists it under the optimistic lock). The detached task
+        # below must NOT own this counter — see claim_compression_round.
+        claimed = claim_compression_round(
+            state.round_number, state.last_compressed_round, threshold=20
+        )
+        if claimed is None:
+            return
+        state.last_compressed_round = claimed
+        asyncio.create_task(
+            self._run_compression_with_retry(
+                session_id=session_id,
+                rounds_played=claimed,
+                trigger_reason="threshold",
             )
+        )
 
     async def _run_compression_with_retry(
         self,
@@ -342,15 +350,16 @@ class Orchestrator:
                 from models.game import GameSession
                 session = await db.get(GameSession, session_id)
                 if session:
-                    session.context_summary = (
-                        ((session.context_summary or "") + "\n" + summary).strip()
+                    session.context_summary = merge_context_summary(
+                        session.context_summary, summary
                     )
                 for msg in old_msgs:
                     msg.is_compressed = True
 
-                # Update last_compressed_round in game_state
-                if session and session.game_state:
-                    session.game_state["last_compressed_round"] = rounds_played
+                # last_compressed_round is stamped by the main loop on the
+                # turn's GameState (see _maybe_compress / claim_compression_round)
+                # — NOT written here: this detached session + plain-JSON column
+                # would silently drop it and the main loop would clobber it.
 
                 await db.commit()
                 outcome = "success"
@@ -1032,7 +1041,7 @@ class Orchestrator:
 
         # Trigger async compression if needed
         if db and session_id:
-            self._maybe_compress(session_id, new_state.round_number, new_state.last_compressed_round, db)
+            self._maybe_compress(session_id, new_state, db)
 
         _emit_stage_timing(
             "turn_total",
@@ -2274,7 +2283,7 @@ class Orchestrator:
             }
 
         if db and session_id:
-            self._maybe_compress(session_id, new_state.round_number, new_state.last_compressed_round, db)
+            self._maybe_compress(session_id, new_state, db)
 
         _emit_stage_timing(
             "turn_total",

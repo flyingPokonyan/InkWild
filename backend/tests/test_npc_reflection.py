@@ -223,6 +223,42 @@ async def test_reflect_noop_when_disabled(db, monkeypatch):
     assert result is None
 
 
+def test_reflection_memory_lines_capped_to_recent():
+    """A backlog (after failed runs / a very active NPC) must not dump every
+    accumulated memory into the prompt — keep only the most recent N."""
+    from types import SimpleNamespace
+
+    mems = [
+        SimpleNamespace(round_number=i, importance=1, content=f"c{i}")
+        for i in range(50)
+    ]
+    lines = npc_reflection_service._format_recent_memory_lines(mems, cap=30)
+
+    assert len(lines) == 30
+    assert "c49" in lines[-1]  # newest kept
+    assert "c20" in lines[0]   # last 30 == c20..c49
+    assert not any("c19" in line for line in lines)  # older dropped
+
+
+@pytest.mark.asyncio
+async def test_reflect_caps_memory_lines_in_prompt(db, monkeypatch):
+    """End-to-end: with a 40-memory backlog, the prompt sent to the LLM holds
+    only the most recent REFLECTION_MEMORY_LINE_CAP entries."""
+    monkeypatch.setattr(settings, "npc_reflection_enabled", True)
+    sid = str(uuid.uuid4())
+    await _seed_memories(db, sid, "王福", 40)
+    router = StubRouter(text="反思。")
+
+    await npc_reflection_service.reflect(
+        db, session_id=sid, npc_name="王福", npc_personality="", llm_router=router
+    )
+
+    prompt = router.calls[0]["messages"][0]["content"]
+    assert prompt.count("重要度") == npc_reflection_service.REFLECTION_MEMORY_LINE_CAP
+    assert "第40条新记忆" in prompt   # newest kept
+    assert "第10条新记忆" not in prompt  # oldest of the backlog dropped
+
+
 @pytest.mark.asyncio
 async def test_maybe_reflect_swallows_errors(db, monkeypatch):
     """maybe_reflect must never raise — it's fire-and-forget by design."""

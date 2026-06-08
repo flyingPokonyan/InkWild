@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     llm_default_model: str = "deepseek-chat"
     llm_compression_model: str = "deepseek-chat"
     max_context_rounds: int = 15
+    # Safety ceiling on the Director's recent-message window. Must stay ABOVE
+    # the compaction keep-size (max_context_rounds*2) plus a few rounds of
+    # slack, so the window equals the full non-compacted history (a stable,
+    # append-only prefix that stays prefix-cacheable) instead of a per-turn
+    # sliding tail. It only bites if compaction stalls.
+    recent_message_hard_cap: int = 60
     compression_threshold: int = 20
     session_lock_timeout: int = 60
     content_filter_enabled: bool = True
