@@ -101,6 +101,11 @@ async def record_text_usage(event: dict, ctx: UsageContext) -> None:
                 {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
+                    # Prefix-cache split so the column bills hits at the cached
+                    # price (matches the actual credit debit path). Absent → all
+                    # input full price (handled inside the estimator).
+                    "cache_hit_tokens": cache_hit,
+                    "cache_miss_tokens": cache_miss,
                 },
                 pricing=pricing,
                 env_input_cents=settings.game_input_cost_cents_per_million_tokens,

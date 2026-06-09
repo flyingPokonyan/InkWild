@@ -34,3 +34,34 @@ def test_cost_cents_field_overrides_estimate():
     pricing = {"input_price_cents_per_million_tokens": 200}
     cost = estimate_usage_cost_cents(usage, pricing=pricing)
     assert cost == 999
+
+
+def test_cache_hit_billed_at_cached_price():
+    # Prefix-cache hits must bill at the cached input price, not full price —
+    # otherwise the cost_cents observability column (+ the session guardrail)
+    # over-counts ~4x once cache hit rates are high.
+    usage = {
+        "input_tokens": 1_000_000,
+        "output_tokens": 0,
+        "cache_hit_tokens": 800_000,
+        "cache_miss_tokens": 200_000,
+    }
+    pricing = {
+        "input_price_cents_per_million_tokens": 313,
+        "cached_input_price_cents_per_million_tokens": 3,
+        "output_price_cents_per_million_tokens": 626,
+    }
+    cost = estimate_usage_cost_cents(usage, pricing=pricing)
+    # miss 200k*313 + hit 800k*3 = 65,000,000 → ceil/1M = 65
+    # (cache-blind would bill all 1M at 313 = 313)
+    assert cost == 65
+
+
+def test_no_cache_split_bills_all_input_full_price():
+    # Back-compat: when the provider reports no cache breakdown, bill as before.
+    usage = {"input_tokens": 1_000_000, "output_tokens": 0}
+    pricing = {
+        "input_price_cents_per_million_tokens": 313,
+        "cached_input_price_cents_per_million_tokens": 3,
+    }
+    assert estimate_usage_cost_cents(usage, pricing=pricing) == 313

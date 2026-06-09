@@ -90,9 +90,20 @@ def estimate_usage_cost_cents(
         )
         image_price = pricing.get("image_price_cents_per_image") or env_image_cents
 
+        # Prefix-cache aware: bill cache-hit input at the cached price (falls
+        # back to the full input price when not configured). Without this the
+        # column over-counts ~4x once hit rates are high. Mirrors
+        # credit_pricing.usage_to_cost_fen (the actual debit path).
+        hit = max(int(usage.get("cache_hit_tokens") or 0), 0)
+        miss = max(int(usage.get("cache_miss_tokens") or 0), 0)
+        if hit == 0 and miss == 0:
+            miss = input_tokens  # no breakdown reported → all input full price
+        cached_raw = pricing.get("cached_input_price_cents_per_million_tokens")
+        cached_price = cached_raw if cached_raw is not None else input_price
+
         cents = 0
-        if input_price and input_tokens:
-            cents += (input_tokens * input_price + 999_999) // 1_000_000
+        if input_price or cached_price:
+            cents += (miss * input_price + hit * cached_price + 999_999) // 1_000_000
         if output_price and output_tokens:
             cents += (output_tokens * output_price + 999_999) // 1_000_000
         if image_price and image_count:
