@@ -19,7 +19,9 @@ def test_should_not_compress_too_soon_after_last():
 
 
 def test_should_compress_after_gap():
-    assert should_compress(rounds_played=28, last_compressed_round=20, threshold=20)
+    # MIN_GAP is 10: a gap of 8 is still too soon, 10 is due.
+    assert not should_compress(rounds_played=28, last_compressed_round=20, threshold=20)
+    assert should_compress(rounds_played=30, last_compressed_round=20, threshold=20)
 
 
 def test_claim_compression_returns_stamp_when_due():
@@ -36,10 +38,10 @@ def test_claim_compression_debounces_within_gap():
     # Just stamped at round 22 — the next few rounds are within MIN_GAP and
     # must NOT re-fire. This is the regression guard: the old code never
     # advanced the stamp, so compression re-fired every round past threshold.
-    assert claim_compression_round(23, 22, threshold=20) is None
-    assert claim_compression_round(26, 22, threshold=20) is None
-    # Exactly MIN_GAP (5) rounds later it is due again.
-    assert claim_compression_round(27, 22, threshold=20) == 27
+    assert claim_compression_round(27, 22, threshold=20) is None  # gap 5 < 10
+    assert claim_compression_round(31, 22, threshold=20) is None  # gap 9 < 10
+    # Exactly MIN_GAP (10) rounds later it is due again.
+    assert claim_compression_round(32, 22, threshold=20) == 32
 
 
 def test_merge_context_summary_appends_new_segment():

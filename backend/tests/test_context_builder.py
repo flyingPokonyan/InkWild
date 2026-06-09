@@ -95,6 +95,38 @@ def test_director_state_view_caps_actions_and_drops_bookkeeping():
     assert view["narrative_arc"] == {"stage": "rising"}
 
 
+def test_director_state_view_slims_info_items():
+    # info_items is the single largest per-turn block (the Director never reads
+    # the propagation matrix — info isolation is the NPC layer). The view drops
+    # per-item ``known_by`` (→ ``known_count``) and tail-caps the list.
+    state = GameState(current_time="第1天·上午", current_location="禁林")
+    roster = [f"NPC{n}" for n in range(19)]
+    state.info_items = [
+        {
+            "source": "Seamus",
+            "content": f"线索{i}",
+            "known_by": list(roster),
+            "created_at_round": i,
+        }
+        for i in range(20)
+    ]
+
+    view = director_state_view(state)
+    items = view["info_items"]
+
+    # tail-capped to the most recent entries
+    assert len(items) == 15
+    assert items[-1]["content"] == "线索19"
+    assert items[0]["content"] == "线索5"
+    # known_by replaced with a count — no 19-name roster per item
+    assert all("known_by" not in it for it in items)
+    assert items[0]["known_count"] == 19
+    assert items[0]["content"] == "线索5"  # content retained
+    # view-only: persisted state untouched (NPC/world-sim still get full data)
+    assert len(state.info_items) == 20
+    assert state.info_items[0]["known_by"] == roster
+
+
 def test_director_state_view_drops_empty_containers_keeps_scalars():
     state = GameState(current_time="第1天·上午", current_location="大堂")
 

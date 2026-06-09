@@ -1,4 +1,10 @@
-MIN_GAP_BETWEEN_COMPRESSIONS = 5
+# Rounds between compactions. Each compaction drops the oldest messages from
+# the Director's window → resets its prefix cache. A larger gap = fewer resets
+# = higher average cache hit (the window accumulates longer between compactions).
+# Bounded by recent_message_hard_cap (keep-size 30 + 2*MIN_GAP must stay under
+# it). 2026-06-09: 5→10 after eval showed the cache sawtooth reset every 5
+# rounds capped the average ~35%; fewer resets lift it.
+MIN_GAP_BETWEEN_COMPRESSIONS = 10
 
 
 def estimate_token_count(text: str) -> int:

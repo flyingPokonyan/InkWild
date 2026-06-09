@@ -30,15 +30,15 @@ def test_claim_compression_debounces_within_gap():
     state = types.SimpleNamespace(round_number=22, last_compressed_round=0)
     assert orch._claim_compression(state) is True  # stamps 22
 
-    # Next round within MIN_GAP(5) of the stamp must not re-claim.
-    state.round_number = 24
+    # Next rounds within MIN_GAP(10) of the stamp must not re-claim.
+    state.round_number = 27
     assert orch._claim_compression(state) is False
     assert state.last_compressed_round == 22  # unchanged
 
     # MIN_GAP elapsed → claims again.
-    state.round_number = 27
+    state.round_number = 32
     assert orch._claim_compression(state) is True
-    assert state.last_compressed_round == 27
+    assert state.last_compressed_round == 32
 
 
 def test_claim_compression_returns_false_before_threshold():

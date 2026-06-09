@@ -120,17 +120,39 @@ _DIRECTOR_STATE_OMIT = frozenset(
 # Director retains a pacing signal (narrative_pressure) without the full
 # 20-entry block, which dominates the dump.
 _DIRECTOR_PLAYER_ACTIONS_TAIL = 3
+# info_items is the single largest per-turn block in long free-mode sessions
+# (measured ~5.6k tokens / 75% of the dump at round 31). Its bulk is the
+# per-item ``known_by`` roster (every NPC ends up knowing each fact) — the
+# Director never reads the propagation matrix (info isolation is enforced in
+# the NPC layer; no Director prompt references it). The view drops ``known_by``
+# (→ ``known_count``) and tail-caps to the most recent items. Full info_items
+# stay in GameState for info_propagation / world_simulator / intent_system.
+_DIRECTOR_INFO_ITEMS_TAIL = 15
+
+
+def _slim_info_items(items: list) -> list:
+    out = []
+    for item in items[-_DIRECTOR_INFO_ITEMS_TAIL:]:
+        if not isinstance(item, dict):
+            out.append(item)
+            continue
+        slim = {k: v for k, v in item.items() if k != "known_by"}
+        known_by = item.get("known_by")
+        if isinstance(known_by, (list, tuple, set)):
+            slim["known_count"] = len(known_by)
+        out.append(slim)
+    return out
 
 
 def director_state_view(state: GameState) -> dict:
     """Trimmed projection of game state for the Director's per-turn dump.
 
     Drops Director-irrelevant bookkeeping (``_DIRECTOR_STATE_OMIT``) and empty
-    containers, and caps ``player_actions`` to the most recent few entries.
-    Everything the Director acts on (clue content, npc_relations, case_board,
-    narrative_arc, locations, counters) is retained. Does **not** mutate the
-    persisted state — callers pass the result as ``state_view`` to
-    ``build_messages``.
+    containers, caps ``player_actions`` to the most recent few entries, and
+    slims ``info_items`` (drop ``known_by`` roster + tail-cap). Everything the
+    Director acts on (clue content, npc_relations, case_board, narrative_arc,
+    locations, counters) is retained. Does **not** mutate the persisted state —
+    callers pass the result as ``state_view`` to ``build_messages``.
     """
     out: dict = {}
     for key, value in state.to_dict().items():
@@ -138,6 +160,8 @@ def director_state_view(state: GameState) -> dict:
             continue
         if key == "player_actions" and isinstance(value, list):
             value = value[-_DIRECTOR_PLAYER_ACTIONS_TAIL:]
+        elif key == "info_items" and isinstance(value, list):
+            value = _slim_info_items(value)
         if isinstance(value, (list, dict, str)) and not value:
             continue  # drop empty containers / strings — no signal, pure tokens
         out[key] = value
