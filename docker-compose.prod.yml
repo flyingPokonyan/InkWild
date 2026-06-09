@@ -31,7 +31,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: https://inkwild.app
-    # 宿主 3000 被同机 chatgpt2api 占用，改用 3100，nginx 上游指向它
+    # 宿主 3000 常被本机开发服务占用，生产入口层默认指向 3100。
     ports:
       - "127.0.0.1:3100:3000"
     environment:

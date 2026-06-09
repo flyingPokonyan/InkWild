@@ -279,7 +279,7 @@ python -m cli.create_admin admin@example.com --password '...'
 | `AUTH_COOKIE_NAME` | `inkwild_session` | cookie 名 |
 | `WEB_SESSION_DAYS` | `90` | session 过期天数（sliding） |
 | `ENABLE_DEV_AUTH` | `false` | 是否注册 `/api/dev/login` 后门 |
-| `DEV_USER_EMAIL` | `pokonyan1666@gmail.com` | dev login 默认账号 |
+| `DEV_USER_EMAIL` | `dev@example.com` | dev login 默认账号 |
 | `DEV_USER_PASSWORD_HASH` | scrypt 串 | dev 账号密码 hash（密码变了改这串） |
 | `DEBUG` | `false` | False 时 cookie `secure=True`（HTTPS only） |
 

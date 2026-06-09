@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     session_cookie_domain: str | None = None  # set to ".inkwild.app" in prod for admin subdomain
     cors_extra_origins: str = ""  # comma-separated extra origins, e.g. "https://admin.inkwild.app,https://inkwild.app"
     enable_dev_auth: bool = False
-    dev_user_email: str = "pokonyan1666@gmail.com"
+    dev_user_email: str = "dev@example.com"
     dev_user_password_hash: str = (
         "scrypt$16384$8$1$jSqLH9IicIfqLId2P2gGRw==$"
         "nYvTCyEO6kwofKolvYn0lnKJFJTatrlqXFhoHMGsSLpi6Bsn7HKI1zz4u2xhAOPd/"
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     grok_model: str = "grok-4.20-0309-reasoning"
     grok_image_model: str = "grok-imagine-image"
     gptimage_api_key: str = ""
-    gptimage_base_url: str = "https://gptimage.pokonyan.com/v1"
+    gptimage_base_url: str = "https://api.openai.com/v1"
     gptimage_image_model: str = "gpt-image-2"
     gemini_openai_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     model_probe_ttl_hours: int = 168

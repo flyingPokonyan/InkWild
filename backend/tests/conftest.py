@@ -5,6 +5,7 @@ import fakeredis.aioredis as _fakeredis
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from config import settings
 from database import Base
@@ -12,8 +13,8 @@ from dependencies import get_db, get_redis
 from main import app
 from models.user import User, WebSession
 
-TEST_DB_URL = "sqlite+aiosqlite:///./test.db"
-_TEST_ENGINE = create_async_engine(TEST_DB_URL)
+TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+_TEST_ENGINE = create_async_engine(TEST_DB_URL, poolclass=StaticPool)
 _TEST_SESSION_FACTORY = async_sessionmaker(_TEST_ENGINE, class_=AsyncSession, expire_on_commit=False)
 
 

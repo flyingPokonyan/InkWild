@@ -29,10 +29,10 @@ async def _create_password_user(db, email: str, password: str) -> User:
 
 @pytest.mark.asyncio
 async def test_password_login_creates_web_session(db):
-    user = await _create_password_user(db, "pokonyan1666@gmail.com", "secret-pass")
+    user = await _create_password_user(db, "dev@example.com", "secret-pass")
 
     service = AuthService()
-    session = await service.login_with_password(db, "pokonyan1666@gmail.com", "secret-pass")
+    session = await service.login_with_password(db, "dev@example.com", "secret-pass")
 
     assert isinstance(session, WebSession)
     assert session.user_id == user.id
@@ -41,19 +41,19 @@ async def test_password_login_creates_web_session(db):
 
 @pytest.mark.asyncio
 async def test_password_login_rejects_invalid_password(db):
-    await _create_password_user(db, "pokonyan1666@gmail.com", "secret-pass")
+    await _create_password_user(db, "dev@example.com", "secret-pass")
 
     service = AuthService()
 
     with pytest.raises(AppError) as exc_info:
-        await service.login_with_password(db, "pokonyan1666@gmail.com", "wrong-pass")
+        await service.login_with_password(db, "dev@example.com", "wrong-pass")
 
     assert exc_info.value.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_get_user_by_session_id_returns_none_for_expired_session(db):
-    user = await _create_password_user(db, "pokonyan1666@gmail.com", "secret-pass")
+    user = await _create_password_user(db, "dev@example.com", "secret-pass")
     expired_session = WebSession(
         user_id=user.id,
         expires_at=utcnow() - timedelta(days=1),
@@ -68,7 +68,7 @@ async def test_get_user_by_session_id_returns_none_for_expired_session(db):
 
 @pytest.mark.asyncio
 async def test_logout_removes_active_session(db):
-    user = await _create_password_user(db, "pokonyan1666@gmail.com", "secret-pass")
+    user = await _create_password_user(db, "dev@example.com", "secret-pass")
     session = WebSession(
         user_id=user.id,
         expires_at=utcnow() + timedelta(days=7),

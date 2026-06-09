@@ -5,29 +5,22 @@
 # `uvicorn --reload` / `npm run dev`。这份 dev compose 是给"整套都跑 docker"的场景。
 
 services:
-  db:
-    ports:
-      - "5432:5432"
-
-  redis:
-    ports:
-      - "6379:6379"
-
   backend:
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     environment:
       DEBUG: "true"
+      CORS_EXTRA_ORIGINS: http://localhost:${FRONTEND_PORT:-3000},http://127.0.0.1:${FRONTEND_PORT:-3000},http://localhost:${ADMIN_PORT:-3001},http://127.0.0.1:${ADMIN_PORT:-3001}
     command: sh -c "pip install -q beautifulsoup4 lxml authlib email-validator itsdangerous fakeredis && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - ./backend:/app
 
   frontend:
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8000}
     # 启动时强制清 .next；Docker bind mount 下 Turbopack dev cache 偶发缺
     # [turbopack]_runtime.js / build-manifest.json，改用 webpack 换稳定 HMR。
     command: sh -c "rm -rf .next && npm run dev -- --webpack"
@@ -37,11 +30,11 @@ services:
 
   admin-frontend:
     ports:
-      - "3001:3001"
+      - "${ADMIN_PORT:-3001}:3001"
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      NEXT_PUBLIC_MAIN_SITE_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:${BACKEND_PORT:-8000}
+      NEXT_PUBLIC_MAIN_SITE_URL: http://localhost:${FRONTEND_PORT:-3000}
     command: sh -c "rm -rf .next && npm run dev"
     volumes:
       - ./admin-frontend:/app

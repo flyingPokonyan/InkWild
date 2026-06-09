@@ -1,28 +1,59 @@
-__pycache__/
-*.pyc
+# Environment and secrets
 .env
-.venv/
-node_modules/
-.next/
-*.egg-info/
-dist/
-.DS_Store
-.superpowers/
+.env.*
+!.env.example
+!.env.*.example
 
-# 本地 IDE / 缓存 / 临时与评测产物
-.idea/
-.kiro/
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
-.restore-tmp/
-test_outputs/
-.claude/settings.local.json
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
 
-# 生成图走 OSS，本地 static/images 不入库（保留目录占位）
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local data and generated outputs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+test_outputs/
+backend/_*.txt
+backend/eval/runs/
+
+# Local tools, IDEs, and agent scratch space
+.DS_Store
+.idea/
+.vscode/
+.kiro/
+.claude/
+.codex/
+.codex-home-*.png
+.impeccable/
+.understand-anything/
+.restore-tmp/
+.superpowers/
+
+# Generated images are stored in OSS; keep only the directory placeholder.
 backend/static/images/*
 !backend/static/images/.gitkeep
-
-# 设计走查截图 / 临时图，别再进库
-/.codex/
-.codex-home-*.png
 /img.png
+
+# One-off production SQL patches may contain provider keys or live data.
+prod_model_cfg_*.sql
+*.bak

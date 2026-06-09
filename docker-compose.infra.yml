@@ -1,0 +1,12 @@
+# Local infrastructure override for running backend/frontend directly on the host.
+# Full Docker development (`make dev-docker`) does not need to expose db/redis
+# ports, which avoids conflicts with an existing local Postgres or Redis.
+
+services:
+  db:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"

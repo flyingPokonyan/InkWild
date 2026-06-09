@@ -5,6 +5,7 @@ import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 from config import settings
 from database import Base
@@ -13,12 +14,12 @@ from models.npc_reflection import NPCReflection
 from services import npc_reflection_service
 
 
-_TEST_DB_URL = "sqlite+aiosqlite:///./test_npc_reflection.db"
+_TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 
 @pytest.fixture
 async def db():
-    engine = create_async_engine(_TEST_DB_URL)
+    engine = create_async_engine(_TEST_DB_URL, poolclass=StaticPool)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)

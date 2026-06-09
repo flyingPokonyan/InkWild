@@ -14,16 +14,16 @@
 
 ## 0. 生产运维速查（2026-06-06 上线 · 权威，先看这节）
 
-线上：主站 **https://inkwild.app**（+www）· 后台 **https://admin.inkwild.app**。
+生产域名默认按 `inkwild.app` / `admin.inkwild.app` 配置；如需部署到其他域名，同步修改 compose、nginx 和 OAuth 回调配置。
 
 **环境**
-- 服务器：AWS EC2 ap-northeast-1，`ssh inkwild`（ec2-user）。**共享机**——同机还跑 chatgpt2api / video-site-91 / gptimage / hermes，**只动 `inkwild` 项目，别碰别的**。
-- 代码：私有库 clone 到 `~/inkwild`（服务器 deploy key，SSH 别名 `github-inkwild`）。
+- 服务器：任意 Docker Compose 主机。生产环境建议使用专用账号和最小权限 deploy key。
+- 代码：clone 到服务器项目目录，密钥和数据文件不进入 Git。
 - 运行：compose 项目名 `inkwild`，命令前缀
   `docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild`
-- 入口：host nginx（`/etc/nginx/conf.d/inkwild.conf`）反代 → frontend `127.0.0.1:3100`、admin `:3001`、backend `:8000`（`/api/` 路由到 backend）；certbot TLS 自动续期；域名走 Cloudflare（apex/admin 代理，www 直连源站）。
-- 密钥：`~/inkwild/backend/.env`（gitignore，**永不进库**）；LLM provider key 另存 DB（admin 后台管）。
-- 备份：每日 03:00 backup 容器；上线前全量备份留在 `~/inkwild_pre_wipe_*.sql.gz` + `~/inkwild_backend.env.bak`。
+- 入口：host nginx / Caddy / 云负载均衡反代到 frontend、admin-frontend、backend；TLS 在入口层终结。
+- 密钥：服务器上的 `backend/.env`（gitignore，**永不进库**）；LLM provider key 另存 DB（admin 后台管）。
+- 备份：每日 03:00 backup 容器；上线前建议额外做一次数据库和 env 备份，备份产物不要提交。
 
 **改动分三类 —— 关键原则：代码走 git，密钥/数据不走 git**
 
@@ -34,7 +34,7 @@
 cd frontend && npx tsc --noEmit && npm run lint     # 后端改则 python -m pytest
 git add -A && git commit -m "..." && git push
 # 服务器：拉取 + 只重建改动的服务
-ssh inkwild 'cd ~/inkwild && git pull --ff-only && \
+ssh <host> 'cd <project-dir> && git pull --ff-only && \
   docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild up -d --build <服务>'
 ```
 - 前端改 → `frontend`；后端 / `migrations/` 改 → `backend`（启动自动跑 `alembic upgrade head`）；后台改 → `admin-frontend`。
@@ -43,7 +43,7 @@ ssh inkwild 'cd ~/inkwild && git pull --ff-only && \
 **② 改密钥 / 配置（`.env`）→ 不走 git，改完重启容器**
 > `.env` 是 gitignore 的；env_file 在容器启动时读，改完重启即可，不用 rebuild。
 ```bash
-ssh inkwild   # 编辑 ~/inkwild/backend/.env
+ssh <host>   # 编辑 <project-dir>/backend/.env
 docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild up -d backend
 ```
 
@@ -56,7 +56,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild \
 
 **验证**：`curl -s -o /dev/null -w '%{http_code}\n' https://inkwild.app/`（再测 `/login`、`/api/worlds`）。
 
-**已知坑**：① 全新空库首次迁移需库里先有 ≥1 admin（已修 `c45bcbdcd049`，但换库要记得）；② 前端宿主端口用 **3100**（3000 被同机 chatgpt2api 占）；③ 无蓝绿/零停机，重建期该服务短暂中断（几十秒）。
+**已知坑**：① 全新空库首次迁移需库里先有 ≥1 admin（已修 `c45bcbdcd049`，但换库要记得）；② 前端宿主端口默认用 **3100**，确认入口层 upstream 与 compose 一致；③ 无蓝绿/零停机，重建期该服务短暂中断（几十秒）。
 
 ---
 
@@ -197,7 +197,7 @@ docker-compose.prod.yml    # prod override：生产 URL/cookie/CORS + build args
 | `AUTH_COOKIE_NAME` | `inkwild_session` | O | 不要随便改 |
 | `WEB_SESSION_DAYS` | `90` | O | session cookie 有效期 |
 | `ENABLE_DEV_AUTH` | `false` | O | 开发免登录用 |
-| `DEV_USER_EMAIL` | `pokonyan1666@gmail.com` | O | 仅 ENABLE_DEV_AUTH=true 生效 |
+| `DEV_USER_EMAIL` | `dev@example.com` | O | 仅 ENABLE_DEV_AUTH=true 生效 |
 | `DEV_USER_PASSWORD_HASH` | `(scrypt hash)` | O | 同上 |
 
 #### LLM provider（fallback / bootstrap）

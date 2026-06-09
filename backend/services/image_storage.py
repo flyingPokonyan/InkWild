@@ -56,7 +56,7 @@ class LocalImageStorage(ImageStorage):
         return f"/static/images/{key}"
 
     async def save_from_url(self, source_url: str, key: str) -> str:
-        # Follow redirects — image hosts (e.g. gptimage.pokonyan.com) often
+        # Follow redirects because generated image hosts often
         # return a 301 from http:// to https:// for their generated assets;
         # without this httpx raises and the image lands as a placeholder.
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
