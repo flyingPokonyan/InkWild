@@ -215,6 +215,16 @@ class DirectorParseError(RuntimeError):
     """
 
 
+class DirectorUpstreamError(RuntimeError):
+    """The LLM call itself failed at the transport/provider layer (402 balance,
+    auth, rate-limit, exhausted fallback chain) — NOT a parse failure.
+
+    Kept distinct from DirectorParseError so the orchestrator surfaces an
+    accurate error instead of the misleading ``llm_parse`` "导演无法解析"
+    (which falsely blames the model's output when the request never succeeded).
+    """
+
+
 @dataclass
 class DirectorResult:
     # ---- v1 fields (still produced in legacy path) ----
@@ -1055,8 +1065,11 @@ class DirectorAgent:
                     usage_data = event
                     finish_reason = event.get("finish_reason")
         except Exception as exc:  # noqa: BLE001
+            # Reaching here means the STREAM failed (transport/provider/balance)
+            # — never a parse problem (that's the `tool_input is None` path
+            # below). Surface it as upstream so it isn't masked as `llm_parse`.
             logger.warning("director_v2.json_mode_provider_failed", error=str(exc))
-            return None
+            raise DirectorUpstreamError(str(exc)) from exc
 
         raw = "".join(text_parts)
         tool_input = _extract_json_from_text(raw)

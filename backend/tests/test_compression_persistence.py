@@ -1,51 +1,48 @@
-"""B1: the compression debounce counter must be advanced on the turn's owned
-GameState (persisted by the main loop under the optimistic lock), not written
-from the detached fire-and-forget task into a plain-JSON column (silently
-dropped + clobbered). Regression: compression used to re-fire every round past
-the threshold because last_compressed_round never advanced."""
+"""B1: the compaction debounce counter must be stamped on the turn's owned
+GameState (persisted by the main loop, BEFORE the early-stream state snapshot),
+not written from the detached fire-and-forget task into a plain-JSON column
+(silently dropped + clobbered). Regression: compaction used to re-fire every
+round past the threshold because last_compressed_round never advanced.
 
-import asyncio
+Ordering coverage (stamp must precede the committed snapshot) lives in
+test_orchestrator_v2_loading.py::test_compression_counter_stamped_before_state_snapshot.
+"""
+
 import types
-
-import pytest
 
 from engine.orchestrator import Orchestrator
 
 
-def _orch(monkeypatch):
-    orch = Orchestrator(llm_router=object())
-    calls = []
-
-    async def _fake_retry(**kwargs):
-        calls.append(kwargs)
-
-    monkeypatch.setattr(orch, "_run_compression_with_retry", _fake_retry)
-    return orch, calls
+def _orch():
+    return Orchestrator(llm_router=object())
 
 
-@pytest.mark.asyncio
-async def test_maybe_compress_stamps_owned_state_counter(monkeypatch):
-    orch, calls = _orch(monkeypatch)
+def test_claim_compression_stamps_and_returns_true_when_due():
+    orch = _orch()
     state = types.SimpleNamespace(round_number=22, last_compressed_round=0)
 
-    orch._maybe_compress("sess", state)
-    await asyncio.sleep(0)  # let the scheduled task run
-
+    assert orch._claim_compression(state) is True
     assert state.last_compressed_round == 22
-    assert len(calls) == 1
 
 
-@pytest.mark.asyncio
-async def test_maybe_compress_debounces_within_gap(monkeypatch):
-    orch, calls = _orch(monkeypatch)
+def test_claim_compression_debounces_within_gap():
+    orch = _orch()
     state = types.SimpleNamespace(round_number=22, last_compressed_round=0)
+    assert orch._claim_compression(state) is True  # stamps 22
 
-    orch._maybe_compress("sess", state)
-    await asyncio.sleep(0)
+    # Next round within MIN_GAP(5) of the stamp must not re-claim.
+    state.round_number = 24
+    assert orch._claim_compression(state) is False
+    assert state.last_compressed_round == 22  # unchanged
 
-    state.round_number = 24  # within MIN_GAP(5) of the stamp at 22
-    orch._maybe_compress("sess", state)
-    await asyncio.sleep(0)
+    # MIN_GAP elapsed → claims again.
+    state.round_number = 27
+    assert orch._claim_compression(state) is True
+    assert state.last_compressed_round == 27
 
-    assert state.last_compressed_round == 22  # not advanced
-    assert len(calls) == 1  # not rescheduled
+
+def test_claim_compression_returns_false_before_threshold():
+    orch = _orch()
+    state = types.SimpleNamespace(round_number=15, last_compressed_round=0)
+    assert orch._claim_compression(state) is False
+    assert state.last_compressed_round == 0

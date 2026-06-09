@@ -205,6 +205,65 @@ async def test_progress_milestones_emitted_in_order():
     assert all(e.get("kind") == "progress" for e in events if e.get("type") == "processing")
 
 
+class UpstreamErrorDirectorV2:
+    """run_v2 raises an upstream/provider error (e.g. 402) rather than a parse
+    failure — the orchestrator must surface it as a distinct error code, not
+    the misleading ``llm_parse`` "导演无法解析"."""
+
+    async def run_v2(self, **kwargs):
+        from engine.director_agent import DirectorUpstreamError
+
+        raise DirectorUpstreamError("402 Insufficient Balance")
+
+
+async def test_director_upstream_error_not_mapped_to_llm_parse():
+    orch = _make_orch(
+        UpstreamErrorDirectorV2(),
+        FakeNPCAgentV2(),
+        FakeNarratorV2([{"type": "text_delta", "text": "x"}]),
+    )
+    events = await _run(orch)
+    err = next(e for e in events if e.get("type") == "error")
+    assert err["code"] == "provider_unavailable"
+    assert err["code"] != "llm_parse"
+
+
+async def test_compression_counter_stamped_before_state_snapshot():
+    """The compaction debounce stamp (last_compressed_round) must land on
+    new_state BEFORE the turn emits its state snapshot. The early-stream path
+    commits at state_ready/state_update, so a stamp applied afterward is lost
+    and compaction re-fires every round (counter stuck at 0)."""
+    state = make_state()
+    state.round_number = 21  # +1 during the turn → 22, past threshold(20)
+    state.last_compressed_round = 0
+    orch = _make_orch(
+        StreamingDirectorV2(full_result=_full_result(with_case_board=False)),
+        FakeNPCAgentV2(),
+        FakeNarratorV2(
+            [
+                {"type": "text_delta", "text": "门槛边有暗红痕迹。"},
+                {"type": "usage", "input_tokens": 1, "output_tokens": 1},
+            ]
+        ),
+    )
+    events = []
+    async for ev in orch.process_action(
+        action_text=ACTION_TEXT,
+        game_state=state,
+        recent_messages=[],
+        context_summary=None,
+        world_data=make_world_data(),
+        game_mode="script",
+        db=None,
+        session_id="s1",
+    ):
+        events.append(ev)
+
+    su = next(e for e in events if e["type"] == "state_update")
+    assert su["game_state"]["round_number"] == 22
+    assert su["game_state"]["last_compressed_round"] == 22
+
+
 async def test_done_emitted_before_case_board_followup():
     orch = _make_orch(
         StreamingDirectorV2(full_result=_full_result(with_case_board=True)),

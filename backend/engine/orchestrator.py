@@ -20,7 +20,12 @@ from engine.action_segmentation import (
 )
 from engine.case_board import CaseBoardError, apply_case_board_ops
 from engine.content_filter import check_input_moderated, check_output_moderated
-from engine.director_agent import DirectorAgent, DirectorParseError, DirectorResult
+from engine.director_agent import (
+    DirectorAgent,
+    DirectorParseError,
+    DirectorResult,
+    DirectorUpstreamError,
+)
 from engine.ending_system import check_forced_ending, check_hard_endings, merge_ai_ending_judgment
 from engine.event_system import apply_event_effects, check_events
 from engine.memory_manager import MemoryManager
@@ -223,26 +228,33 @@ class Orchestrator:
             )
         return ending
 
-    def _maybe_compress(self, session_id: str, state, _db_unused=None) -> None:
-        # _db_unused: kept positional for back-compat with existing call sites
-        # that still pass `db`. Compression opens its own AsyncSession because
-        # the caller's request-scoped session is closed by FastAPI before the
-        # fire-and-forget task actually runs — that's the root cause of the
-        # 2026-05-27 "compression never fires" bug.
-        #
-        # Stamp last_compressed_round on the turn's owned ``state`` here (the
-        # main loop persists it under the optimistic lock). The detached task
-        # below must NOT own this counter — see claim_compression_round.
+    def _claim_compression(self, state) -> bool:
+        """Decide whether to compact this turn and, if so, stamp the debounce
+        counter on the turn's owned ``state``.
+
+        MUST be called BEFORE the turn emits its state snapshot (state_ready /
+        state_update): the early-stream path commits state at state_ready, so a
+        stamp written afterward is lost + clobbered, and compaction re-fires
+        every round (last_compressed_round stuck at 0). The detached compaction
+        task must NOT own this counter — see claim_compression_round.
+        """
         claimed = claim_compression_round(
             state.round_number, state.last_compressed_round, threshold=20
         )
         if claimed is None:
-            return
+            return False
         state.last_compressed_round = claimed
+        return True
+
+    def _schedule_compression(self, session_id: str, rounds_played: int) -> None:
+        # Compaction opens its own AsyncSession because the caller's
+        # request-scoped session is closed by FastAPI before this
+        # fire-and-forget task actually runs — that's the root cause of the
+        # 2026-05-27 "compression never fires" bug.
         asyncio.create_task(
             self._run_compression_with_retry(
                 session_id=session_id,
-                rounds_played=claimed,
+                rounds_played=rounds_played,
                 trigger_reason="threshold",
             )
         )
@@ -518,22 +530,29 @@ class Orchestrator:
                 recall_fn=recall_fn,
                 script_type=world_data.get("script_type", ""),
             )
-        except DirectorParseError as exc:
-            # Phase 2.A.3 — Director still couldn't produce a usable tool_use
-            # after one agent-level retry. Surface a typed SSE `llm_parse`
-            # error so the UI can offer "retry round" instead of leaving the
-            # turn in a degraded state. Abort the turn cleanly without
+        except (DirectorParseError, DirectorUpstreamError) as exc:
+            # Phase 2.A.3 — Director couldn't produce a usable decision. Surface
+            # a typed SSE error so the UI can offer "retry round". Distinguish a
+            # genuine parse failure (`llm_parse`) from an upstream/provider
+            # failure (`provider_unavailable`, e.g. 402 balance) — the latter
+            # must NOT be mislabeled "导演无法解析". Abort cleanly without
             # mutating game_state.
+            upstream = isinstance(exc, DirectorUpstreamError)
             logger.warning(
                 "director.unrecoverable",
                 session_id=session_id,
                 round_number=round_number,
                 error=str(exc),
+                upstream=upstream,
             )
             yield {
                 "type": "error",
-                "code": "llm_parse",
-                "message": "导演无法解析本轮指令，请重试该回合",
+                "code": "provider_unavailable" if upstream else "llm_parse",
+                "message": (
+                    "AI 服务暂时不可用，请稍后再试"
+                    if upstream
+                    else "导演无法解析本轮指令，请重试该回合"
+                ),
             }
             return
         _emit_stage_timing(
@@ -950,6 +969,10 @@ class Orchestrator:
                 if part
             )
 
+        # Stamp the compaction counter BEFORE the state snapshot (see
+        # _claim_compression); scheduling happens after, gated on db.
+        compress_due = self._claim_compression(new_state)
+
         if emit_state_ready:
             yield {
                 "type": "state_ready",
@@ -1039,9 +1062,9 @@ class Orchestrator:
                 "summary": summary_data,
             }
 
-        # Trigger async compression if needed
-        if db and session_id:
-            self._maybe_compress(session_id, new_state, db)
+        # Trigger async compression if needed (counter already stamped above)
+        if db and session_id and compress_due:
+            self._schedule_compression(session_id, new_state.round_number)
 
         _emit_stage_timing(
             "turn_total",
@@ -1668,25 +1691,33 @@ class Orchestrator:
                     # waiting for the director's tail. director_result is fetched
                     # after the narrator (Phase 3); the task runs in background.
                     break
-        except DirectorParseError as exc:
+        except (DirectorParseError, DirectorUpstreamError) as exc:
             # Director failed before producing a usable scene_direction → nothing
-            # shown to the player yet, so surface a clean retry error.
+            # shown to the player yet, so surface a clean retry error. Upstream/
+            # provider failures (402 balance, exhausted fallback) get a distinct
+            # code so they aren't mislabeled as a parse failure.
             if not npc_block_task.done():
                 npc_block_task.cancel()
             if not narrator_ready_waiter.done():
                 narrator_ready_waiter.cancel()
             if not progress_waiter.done():
                 progress_waiter.cancel()
+            upstream = isinstance(exc, DirectorUpstreamError)
             logger.warning(
                 "director_v2.unrecoverable",
                 session_id=session_id,
                 round_number=round_number,
                 error=str(exc),
+                upstream=upstream,
             )
             yield {
                 "type": "error",
-                "code": "llm_parse",
-                "message": "导演无法解析本轮指令，请重试该回合",
+                "code": "provider_unavailable" if upstream else "llm_parse",
+                "message": (
+                    "AI 服务暂时不可用，请稍后再试"
+                    if upstream
+                    else "导演无法解析本轮指令，请重试该回合"
+                ),
             }
             return
         finally:
@@ -1828,15 +1859,17 @@ class Orchestrator:
             # but stays correct.
             try:
                 director_result = await director_task
-            except DirectorParseError as exc:
+            except (DirectorParseError, DirectorUpstreamError) as exc:
                 # Rare: scene_direction partial-parsed (narrative already shown)
-                # but the final parse failed. Degrade gracefully — close the turn
-                # with no state changes rather than error after showing text.
+                # but the final director call failed (parse OR upstream). Degrade
+                # gracefully — close the turn with no state changes rather than
+                # error after showing text.
                 logger.warning(
                     "director_v2.unrecoverable_post_narrative",
                     session_id=session_id,
                     round_number=round_number,
                     error=str(exc),
+                    upstream=isinstance(exc, DirectorUpstreamError),
                 )
                 director_result = DirectorResult(
                     scene_direction=narrator_inputs.get("scene_direction", ""),
@@ -2204,6 +2237,11 @@ class Orchestrator:
         )
         append_log_entries(new_state, offstage_triggers)
 
+        # Stamp the compaction counter BEFORE the state snapshot so the
+        # early-stream commit (state_ready) persists it; scheduling happens
+        # after, gated on db.
+        compress_due = self._claim_compression(new_state)
+
         if emit_state_ready:
             yield {
                 "type": "state_ready",
@@ -2282,8 +2320,8 @@ class Orchestrator:
                 "summary": summary_data,
             }
 
-        if db and session_id:
-            self._maybe_compress(session_id, new_state, db)
+        if db and session_id and compress_due:
+            self._schedule_compression(session_id, new_state.round_number)
 
         _emit_stage_timing(
             "turn_total",
