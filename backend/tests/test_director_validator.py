@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from engine.director_validator import (
+    PER_NPC_FOCUS_MAX_CHARS,
     check_focus_objectivity,
     validate_active_npcs,
     validate_event_fire_intent,
@@ -67,7 +68,7 @@ def test_per_npc_focus_drops_inactive():
 def test_per_npc_focus_trims_long_text():
     long = "a" * 200
     out = validate_per_npc_focus({"周世安": long}, ["周世安"])
-    assert len(out["周世安"]) <= 120
+    assert len(out["周世安"]) <= PER_NPC_FOCUS_MAX_CHARS
 
 
 def test_scene_role_fills_missing_secondary():

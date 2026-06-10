@@ -30,6 +30,9 @@ DIRECTIVE_LEAK_WORDS: tuple[str, ...] = (
     "去做",
 )
 
+PER_NPC_FOCUS_MAX_CHARS = 80
+DIRECTOR_SCENE_BRIEF_MAX_CHARS = 180
+
 
 def check_focus_objectivity(npc: str, focus: str) -> list[str]:
     """Return the directive-leak words found inside *focus* text.
@@ -87,8 +90,14 @@ def validate_per_npc_focus(
         if not name or name not in active_set:
             continue
         text = str(focus or "").strip()
-        if len(text) > 120:
-            text = text[:120].rstrip()
+        if len(text) > PER_NPC_FOCUS_MAX_CHARS:
+            logger.info(
+                "director_v2.per_npc_focus.truncated",
+                npc=name,
+                received_chars=len(text),
+                kept_chars=PER_NPC_FOCUS_MAX_CHARS,
+            )
+            text = text[:PER_NPC_FOCUS_MAX_CHARS].rstrip()
         # warn-only — do not strip directive words. Prompt should fix this.
         leak = check_focus_objectivity(name, text)
         if leak:

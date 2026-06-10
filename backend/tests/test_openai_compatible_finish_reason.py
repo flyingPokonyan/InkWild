@@ -77,3 +77,34 @@ async def test_usage_event_finish_reason_stop_on_normal_completion():
         messages=[{"role": "user", "content": "x"}], tools=None, system="s")]
     usage = [e for e in events if e["type"] == "usage"][0]
     assert usage["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_usage_event_counts_reasoning_content_without_streaming_it():
+    chunks = [
+        SimpleNamespace(
+            choices=[SimpleNamespace(
+                delta=SimpleNamespace(
+                    content=None,
+                    reasoning_content="hidden thought",
+                    tool_calls=None,
+                ),
+                finish_reason=None)],
+            usage=None),
+        SimpleNamespace(
+            choices=[SimpleNamespace(
+                delta=SimpleNamespace(content="正文", tool_calls=None),
+                finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2)),
+    ]
+    provider = _make_provider(chunks)
+    events = [e async for e in provider.stream_with_tools(
+        messages=[{"role": "user", "content": "x"}], tools=None, system="s")]
+
+    text = "".join(e["text"] for e in events if e["type"] == "text_delta")
+    usage = [e for e in events if e["type"] == "usage"][0]
+
+    assert text == "正文"
+    assert "hidden thought" not in text
+    assert usage["reasoning_content_chunks"] == 1
+    assert usage["reasoning_content_chars"] == len("hidden thought")

@@ -102,6 +102,8 @@ class DeepSeekProvider(LLMProvider):
 
         tool_buffers: dict[int, dict] = {}
         usage = None
+        reasoning_content_chunks = 0
+        reasoning_content_chars = 0
 
         async for chunk in stream:
             if getattr(chunk, "usage", None):
@@ -111,6 +113,11 @@ class DeepSeekProvider(LLMProvider):
                 delta = getattr(choice, "delta", None)
                 if not delta:
                     continue
+
+                reasoning_content = getattr(delta, "reasoning_content", None)
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    reasoning_content_chunks += 1
+                    reasoning_content_chars += len(reasoning_content)
 
                 content = getattr(delta, "content", None)
                 if content:
@@ -164,7 +171,11 @@ class DeepSeekProvider(LLMProvider):
                 "input": parsed_input,
             }
 
-        yield _build_usage_event(usage)
+        event = _build_usage_event(usage)
+        if reasoning_content_chunks:
+            event["reasoning_content_chunks"] = reasoning_content_chunks
+            event["reasoning_content_chars"] = reasoning_content_chars
+        yield event
 
     async def stream_json(
         self,
@@ -200,6 +211,8 @@ class DeepSeekProvider(LLMProvider):
 
         usage = None
         finish_reason = None
+        reasoning_content_chunks = 0
+        reasoning_content_chars = 0
         async for chunk in stream:
             if getattr(chunk, "usage", None):
                 usage = chunk.usage
@@ -209,8 +222,16 @@ class DeepSeekProvider(LLMProvider):
                 delta = getattr(choice, "delta", None)
                 if not delta:
                     continue
+                reasoning_content = getattr(delta, "reasoning_content", None)
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    reasoning_content_chunks += 1
+                    reasoning_content_chars += len(reasoning_content)
                 content = getattr(delta, "content", None)
                 if content:
                     yield {"type": "text_delta", "text": content}
 
-        yield _build_usage_event(usage, finish_reason)
+        event = _build_usage_event(usage, finish_reason)
+        if reasoning_content_chunks:
+            event["reasoning_content_chunks"] = reasoning_content_chunks
+            event["reasoning_content_chars"] = reasoning_content_chars
+        yield event

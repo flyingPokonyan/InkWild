@@ -1,6 +1,7 @@
 import pytest
 
 from engine.director_agent import DirectorAgent, DirectorParseError, DirectorResult
+from engine.director_validator import DIRECTOR_SCENE_BRIEF_MAX_CHARS
 from engine.state_manager import GameState
 
 
@@ -337,6 +338,15 @@ def test_build_result_v2_structural_in_play_defaults_false():
         None, known_npcs=set(), known_event_ids=set(), fired_event_ids=set(),
     )
     assert r.structural_in_play is False
+
+
+def test_build_result_v2_trims_long_scene_brief():
+    agent = DirectorAgent(llm_router=None)
+    r = agent._build_result_v2(
+        {"scene_brief": "雾" * 400, "active_npcs": []},
+        None, known_npcs=set(), known_event_ids=set(), fired_event_ids=set(),
+    )
+    assert len(r.scene_brief) <= DIRECTOR_SCENE_BRIEF_MAX_CHARS
 
 
 # --- quick_actions fallback (stuck-player hint safety net) -------------------

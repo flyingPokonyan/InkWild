@@ -173,7 +173,9 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
             "Content-Type": "application/json",
         }
         try:
-            async with httpx.AsyncClient(timeout=60.0) as http:
+            # 100s：multi-agent-xhigh 这类重型 grok 模型一条 Live Search 实测 ~55s，
+            # 60s 会贴边偶发超时→静默返回空结果。给到 100s 留足余量。
+            async with httpx.AsyncClient(timeout=100.0) as http:
                 resp = await http.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 logger.warning(

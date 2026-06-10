@@ -105,6 +105,8 @@ class OpenAICompatibleProvider(LLMProvider):
         tool_buffers: dict[int, dict] = {}
         usage = None
         finish_reason: str | None = None
+        reasoning_content_chunks = 0
+        reasoning_content_chars = 0
         async for chunk in stream:
             if getattr(chunk, "usage", None):
                 usage = chunk.usage
@@ -115,6 +117,11 @@ class OpenAICompatibleProvider(LLMProvider):
                 delta = getattr(choice, "delta", None)
                 if not delta:
                     continue
+
+                reasoning_content = getattr(delta, "reasoning_content", None)
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    reasoning_content_chunks += 1
+                    reasoning_content_chars += len(reasoning_content)
 
                 content = getattr(delta, "content", None)
                 if content:
@@ -178,6 +185,9 @@ class OpenAICompatibleProvider(LLMProvider):
                 event["cache_hit_tokens"] = int(hit)
             if miss is not None:
                 event["cache_miss_tokens"] = int(miss)
+        if reasoning_content_chunks:
+            event["reasoning_content_chunks"] = reasoning_content_chunks
+            event["reasoning_content_chars"] = reasoning_content_chars
         yield event
 
 

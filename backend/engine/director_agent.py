@@ -8,6 +8,30 @@ from dataclasses import dataclass, field
 import structlog
 
 from engine.context_builder import build_messages, director_state_view
+from engine.director_validator import (
+    DIRECTOR_SCENE_BRIEF_MAX_CHARS,
+    validate_active_npcs,
+    validate_event_fire_intent,
+    validate_offstage_active,
+    validate_per_npc_focus,
+    validate_scene_role,
+)
+from engine.event_progress import build_director_event_payload
+from engine.prompts import (
+    RECALL_MEMORY_TOOL,
+    build_director_json_instruction,
+    build_director_system,
+    build_director_system_v2,
+    build_director_tool,
+    build_director_tool_v2,
+)
+from engine.state_manager import GameState
+from engine.structural_grounding import normalize_claim
+from llm.model_capabilities import StructuredOutputMode, capability_for
+from llm.router import LLMRouter
+from llm.usage_context import current_usage_context
+
+logger = structlog.get_logger()
 
 
 def _find_last_outer_comma(buf: str) -> int:
@@ -69,33 +93,6 @@ def try_partial_parse(buf: str) -> dict | None:
         return result if isinstance(result, dict) else None
     except json.JSONDecodeError:
         return None
-
-
-
-from engine.director_validator import (
-    validate_active_npcs,
-    validate_event_fire_intent,
-    validate_offstage_active,
-    validate_per_npc_focus,
-    validate_scene_role,
-)
-from engine.event_progress import build_director_event_payload
-from engine.prompts import (
-    DIRECTOR_TOOL,
-    RECALL_MEMORY_TOOL,
-    build_director_json_instruction,
-    build_director_system,
-    build_director_system_v2,
-    build_director_tool,
-    build_director_tool_v2,
-)
-from engine.state_manager import GameState
-from engine.structural_grounding import normalize_claim
-from llm.model_capabilities import StructuredOutputMode, capability_for
-from llm.router import LLMRouter
-from llm.usage_context import current_usage_context
-
-logger = structlog.get_logger()
 
 
 def _record_director_outcome(
@@ -504,6 +501,13 @@ class DirectorAgent:
         fields — orchestrator is expected to still drive the turn rather than
         bail when one field is malformed."""
         scene_brief = self._coerce_str(tool_input.get("scene_brief"))
+        if len(scene_brief) > DIRECTOR_SCENE_BRIEF_MAX_CHARS:
+            logger.info(
+                "director_v2.scene_brief.truncated",
+                received_chars=len(scene_brief),
+                kept_chars=DIRECTOR_SCENE_BRIEF_MAX_CHARS,
+            )
+            scene_brief = scene_brief[:DIRECTOR_SCENE_BRIEF_MAX_CHARS].rstrip()
         active_npcs = validate_active_npcs(
             self._coerce_string_list(tool_input.get("active_npcs")),
             known_npcs,
@@ -511,6 +515,18 @@ class DirectorAgent:
         per_npc_focus = validate_per_npc_focus(
             self._coerce_string_value_dict(tool_input.get("per_npc_focus")),
             active_npcs,
+        )
+        focus_lengths = [len(text) for text in per_npc_focus.values()]
+        logger.info(
+            "director_v2.early_field_lengths",
+            scene_brief_chars=len(scene_brief),
+            per_npc_focus_max_chars=max(focus_lengths, default=0),
+            per_npc_focus_avg_chars=(
+                round(sum(focus_lengths) / len(focus_lengths), 1)
+                if focus_lengths
+                else 0
+            ),
+            active_npc_count=len(active_npcs),
         )
         scene_role = validate_scene_role(
             self._coerce_string_value_dict(tool_input.get("scene_role")),

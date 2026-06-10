@@ -1,8 +1,10 @@
 from engine.prompts import (
     DIRECTOR_TOOL,
+    DIRECTOR_TOOL_V2,
     RECALL_MEMORY_TOOL,
     build_director_system,
     build_director_system_v2,
+    build_director_json_instruction,
     build_director_tool,
     build_narrator_system,
     build_npc_system,
@@ -55,6 +57,34 @@ def test_director_tool_has_required_fields():
         "ending_triggered",
         "memory_extracts",
     }.issubset(props)
+
+
+def test_director_v2_scene_direction_is_early_for_ttft():
+    props = DIRECTOR_TOOL_V2["input_schema"]["properties"]
+    keys = list(props)
+
+    npc_ready_keys = [
+        "scene_brief",
+        "active_npcs",
+        "per_npc_focus",
+        "scene_role",
+        "dramatic_intensity",
+    ]
+    assert keys[:5] == npc_ready_keys
+    assert keys.index("narrative_pressure") == 5
+    assert keys.index("scene_direction") == 6
+    assert keys.index("narrative_pressure") < keys.index("scene_direction")
+    assert keys.index("scene_direction") < keys.index("offstage_active")
+    assert keys.index("scene_direction") < keys.index("state_updates")
+
+
+def test_director_json_instruction_preserves_early_scene_direction_example():
+    instruction = build_director_json_instruction(DIRECTOR_TOOL_V2["input_schema"])
+
+    assert instruction.index('"dramatic_intensity"') < instruction.index('"narrative_pressure"')
+    assert instruction.index('"narrative_pressure"') < instruction.index('"scene_direction"')
+    assert instruction.index('"scene_direction"') < instruction.index('"state_updates"')
+    assert "然后立刻输出 scene_direction" in instruction
 
 
 def test_director_tool_uses_case_board_ops_for_script_mode():

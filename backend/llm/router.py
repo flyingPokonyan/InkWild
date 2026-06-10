@@ -36,6 +36,32 @@ def _accumulate_usage(event: dict) -> None:
             cache_miss_tokens=event.get("cache_miss_tokens") or 0,
         )
 
+
+def _log_reasoning_content_observed(
+    event: dict,
+    *,
+    provider: str,
+    provider_name: str | None,
+    model_id: str | None,
+    reasoning_requested: bool | None,
+) -> None:
+    chunks = int(event.get("reasoning_content_chunks") or 0)
+    if not chunks:
+        return
+    ctx = _current_usage_context()
+    logger.warning(
+        "llm.reasoning_content_observed",
+        provider=provider,
+        provider_name=provider_name,
+        model_id=model_id,
+        chunks=chunks,
+        chars=int(event.get("reasoning_content_chars") or 0),
+        reasoning_requested=reasoning_requested,
+        purpose=ctx.purpose if ctx else None,
+        phase=ctx.phase if ctx else None,
+    )
+
+
 logger = structlog.get_logger()
 
 # BUGS #20 — global cap on concurrent in-flight LLM stream calls (across all
@@ -218,6 +244,13 @@ class LLMRouter:
                 **json_kwargs,
             ):
                 if event.get("type") == "usage":
+                    _log_reasoning_content_observed(
+                        event,
+                        provider=name,
+                        provider_name=stamped_provider_name,
+                        model_id=stamped_model_id,
+                        reasoning_requested=self._reasoning,
+                    )
                     if stamped_provider_name and not event.get("provider_name"):
                         event = {**event, "provider_name": stamped_provider_name}
                     if stamped_model_id and not event.get("model_id"):
@@ -339,6 +372,13 @@ class LLMRouter:
                     backoff_s=backoff_s,
                 ):
                     if event.get("type") == "usage":
+                        _log_reasoning_content_observed(
+                            event,
+                            provider=name,
+                            provider_name=stamped_provider_name,
+                            model_id=stamped_model_id,
+                            reasoning_requested=self._reasoning,
+                        )
                         # Don't clobber identity keys a provider already set;
                         # only fill in what's missing.
                         if stamped_provider_name and not event.get("provider_name"):
@@ -416,7 +456,7 @@ class LLMRouter:
             except StopAsyncIteration:
                 # Empty stream — treat as success, nothing to yield.
                 return
-            except asyncio.TimeoutError as exc:
+            except asyncio.TimeoutError:
                 logger.warning(
                     "llm.timeout",
                     provider=provider_name,

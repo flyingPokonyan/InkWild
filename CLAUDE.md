@@ -211,6 +211,7 @@ docker compose up -d db redis
 | 数据库 schema（所有表 + Alembic 演进） | `docs/data/schema.md` |
 | 部署 + env 配置 | `docs/operations/deploy-and-config.md` |
 | 可观测 + 备份 | `docs/operations/observability-backup.md` |
+| 延迟 / TTFT 优化（缓存进展 + decode 地板 + 杠杆清单） | `docs/operations/latency-ttft.md` |
 | **UI 视觉原则 v2.3（必读）** | `docs/design/visual-principles.md` |
 | **设计令牌值 v2.3** | `docs/design/frontend-spec.md` |
 | **Play 页专属规范**（例外清单 + 实现细节） | `docs/design/play-mode-spec.md` |

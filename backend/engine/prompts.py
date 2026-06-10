@@ -201,7 +201,7 @@ DIRECTOR_TOOL_V2 = {
                 "type": "string",
                 "description": (
                     "客观描述本回合发生了什么（玩家做了什么、环境变化、谁出现了）。"
-                    "禁止写「NPC 应该如何反应」「NPC 心想什么」。≤300 字。"
+                    "禁止写「NPC 应该如何反应」「NPC 心想什么」。≤180 字，写短句，不铺陈。"
                 ),
             },
             "active_npcs": {
@@ -218,7 +218,7 @@ DIRECTOR_TOOL_V2 = {
                 "additionalProperties": {"type": "string"},
                 "description": (
                     "{NPC 名: 该 NPC 在场感受到的客观场景刺激}。"
-                    "每条 ≤120 字。**只描述客观事实**——"
+                    "每条 ≤80 字。**只描述客观事实**——"
                     "✅「玩家直接对你说话」「玩家拿走了你桌上的木匣」「外面传来打更声」。"
                     "❌「你应该感到紧张」「现在是你出手的时机」「保持冷静」。"
                     "违例样例：「你应该」「你需要」「试图」「记得」等指导性词汇——绝对禁止。"
@@ -248,16 +248,6 @@ DIRECTOR_TOOL_V2 = {
                     "**玩家弱输入（<12 字或纯观察）时不要给 high/climax**。"
                 ),
             },
-            "offstage_active": {
-                "type": "array",
-                "items": {"type": "string"},
-                "maxItems": 3,
-                "description": (
-                    "不在 active_npcs 但 offstage 仍在策划/行动的 NPC（最多 3 人）。"
-                    "这些 NPC 的内心状态会随事件实时更新，而不是冻结到下次出场。"
-                    "必须 ∩ active_npcs = ∅。"
-                ),
-            },
             "narrative_pressure": {
                 "type": "string",
                 "enum": ["advance", "build_tension", "breathing_room"],
@@ -269,7 +259,22 @@ DIRECTOR_TOOL_V2 = {
             },
             "scene_direction": {
                 "type": "string",
-                "description": "给 narrator 的场景描写指引（环境/氛围/节奏）。不涉及 NPC 具体行为。",
+                "description": (
+                    "给 narrator 的场景描写指引（环境/氛围/节奏）。不涉及 NPC 具体行为。"
+                    "这是关键路径字段，必须紧跟 NPC 早绑所需字段（scene_brief/active_npcs/"
+                    "per_npc_focus/scene_role/dramatic_intensity）和极短的 narrative_pressure 之后输出，"
+                    "不要等 offstage、状态、quick_actions 或案件面板字段。"
+                ),
+            },
+            "offstage_active": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 3,
+                "description": (
+                    "不在 active_npcs 但 offstage 仍在策划/行动的 NPC（最多 3 人）。"
+                    "这些 NPC 的内心状态会随事件实时更新，而不是冻结到下次出场。"
+                    "必须 ∩ active_npcs = ∅。"
+                ),
             },
             "event_fire_intent": {
                 "type": "array",
@@ -401,6 +406,7 @@ DIRECTOR_TOOL_V2 = {
             "per_npc_focus",
             "scene_role",
             "dramatic_intensity",
+            "narrative_pressure",
             "scene_direction",
             "state_updates",
             "quick_actions",
@@ -441,6 +447,22 @@ def build_director_json_instruction(schema: dict) -> str:
     import json as _json
 
     schema_str = _json.dumps(schema, ensure_ascii=False, indent=2)
+    schema_keys = list((schema.get("properties") or {}).keys())
+    if schema_keys[:7] == [
+        "scene_brief",
+        "active_npcs",
+        "per_npc_focus",
+        "scene_role",
+        "dramatic_intensity",
+        "narrative_pressure",
+        "scene_direction",
+    ]:
+        order_hint = (
+            "请严格按 schema/properties 的顺序输出字段；先完成 NPC 早绑所需的前 5 个字段，"
+            "再输出极短的 narrative_pressure，然后立刻输出 scene_direction，让叙述器尽早进入等待队列。\n\n"
+        )
+    else:
+        order_hint = "请尽量按 schema/properties 的顺序输出字段。\n\n"
     # DeepSeek JSON mode (official docs) requires the prompt to contain the word
     # "json" AND a concrete *sample* of the desired output — a schema alone is
     # not enough and correlates with the empty/invalid-output failure mode. The
@@ -453,6 +475,7 @@ def build_director_json_instruction(schema: dict) -> str:
             "per_npc_focus": {"管家": "玩家直接走向你身后的书架"},
             "scene_role": {"管家": "primary"},
             "dramatic_intensity": "medium",
+            "narrative_pressure": "build_tension",
             "scene_direction": "压低光线，强调书房的陈旧与寂静。",
             "state_updates": {"new_clues": ["书架第三层有一本被反复翻阅的账册"]},
             "quick_actions": ["翻开账册", "质问管家", "检查抽屉"],
@@ -464,7 +487,8 @@ def build_director_json_instruction(schema: dict) -> str:
     return (
         "## 输出格式（严格遵守）\n"
         "你不能调用任何工具。请直接输出**一个** JSON 对象，结构需符合下面的 JSON Schema，"
-        "不要输出任何其它文字、解释、思考过程、代码块标记或前后缀。\n\n"
+        "不要输出任何其它文字、解释、思考过程、代码块标记或前后缀。\n"
+        f"{order_hint}"
         "### JSON Schema\n"
         "```\n"
         f"{schema_str}\n"
@@ -1489,7 +1513,7 @@ def build_npc_system(
 
     # Emotion state and trust
     parts.append("")
-    parts.append(f"## 你与玩家的关系")
+    parts.append("## 你与玩家的关系")
     parts.append(f"- 信任度：{trust}/10")
     parts.append(f"- 当前情绪：{mood}")
 
@@ -1912,7 +1936,7 @@ def build_npc_catchup_system(
     parts.extend(
         [
             "",
-            f"## 时间跨度",
+            "## 时间跨度",
             f"你上次出场是第 {last_active_round} 回合，现在是第 {current_round} 回合，"
             f"中间过了 {current_round - last_active_round} 回合。",
         ]

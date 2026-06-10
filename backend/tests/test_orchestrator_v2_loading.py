@@ -64,7 +64,7 @@ def make_world_data() -> dict:
     }
 
 
-def _full_result(*, with_case_board: bool) -> DirectorResult:
+def _full_result(*, with_case_board: bool, narrative_pressure: str = "advance") -> DirectorResult:
     return DirectorResult(
         involved_npcs=["王福"],
         scene_direction="门槛边有暗红痕迹。",
@@ -78,7 +78,7 @@ def _full_result(*, with_case_board: bool) -> DirectorResult:
         per_npc_focus={"王福": "玩家在检查门槛"},
         scene_role={"王福": "primary"},
         dramatic_intensity="medium",
-        narrative_pressure="advance",
+        narrative_pressure=narrative_pressure,
         usage=None,
     )
 
@@ -119,8 +119,9 @@ class StreamingDirectorV2:
                 "dramatic_intensity": r.dramatic_intensity,
             }
             on_partial(dict(base))  # active_npcs + 5-field → npcs_entering + partial_ready
+            base["narrative_pressure"] = r.narrative_pressure
             base["scene_direction"] = r.scene_direction
-            on_partial(dict(base))  # scene_direction → narrator_ready + writing
+            on_partial(dict(base))  # narrative_pressure + scene_direction → narrator_ready + writing
             base["state_updates"] = dict(r.state_updates or {})
             base["quick_actions"] = list(r.quick_actions)
             if r.ending_triggered is not None:
@@ -288,6 +289,24 @@ async def test_done_emitted_before_case_board_followup():
     assert cb["case_board_history_entries"][0]["op_type"] == "upsert_list_item"
     assert cb["game_state"]["case_board"]["evidence"][0]["clue_id"] == "clue_001"
     assert cb["mem_extract_input"]["case_board_ops"] == [CASE_BOARD_OP]
+
+
+async def test_early_narrator_receives_streamed_narrative_pressure():
+    narrator = FakeNarratorV2([{"type": "text_delta", "text": "门槛边有暗红痕迹。"}])
+    orch = _make_orch(
+        StreamingDirectorV2(
+            full_result=_full_result(
+                with_case_board=False,
+                narrative_pressure="build_tension",
+            )
+        ),
+        FakeNPCAgentV2(),
+        narrator,
+    )
+    events = await _run(orch)
+
+    assert any(e.get("stage") == "writing" for e in events)
+    assert narrator.calls[0]["narrative_pressure"] == "build_tension"
 
 
 async def test_done_state_update_excludes_deferred_case_board():
