@@ -1,6 +1,6 @@
 # 延迟与 TTFT 优化
 
-> **状态（2026-06-09）**：验证阶段。当前实时槽（game_main = director/narrator）跑在 **OpenCode Zen Go** 网关。**后续将切到 DeepSeek 官方**（成本基数已按官方价 313/3/626 配置）——这本身就是下面优化清单里的 TTFT 杠杆②，验证完即落地。
+> **状态（2026-06-10）**：§7 三刀（杠杆①③④）已随 `e29b56a` 部署并经 `hp-free-20260610T094340Z` 验证：TTFT p50 23.3s(-10%)、done p50 33.2s(-17%)，scene_direction 紧贴 partial_signal（差 2.3s），director/narrator 输出 -21%/-24%。**杠杆①结论：OpenCode 对关键路径 honor 关思考，"网关偷偷思考"假设排除**——切官方（杠杆②）回归纯"钱换速度"决策，前置=核网关真实计费。新尾巴：reflection 路径没带关思考配方在泄漏 CoT（纯成本，待修）；npc(flash) 的 cost_cents 疑似缓存价没配仍虚高（待核）。
 >
 > 缓存这条线（prefill 侧）已基本吃干；剩下的是 **decode 地板**，需要换更快推理 / 减输出 / 调架构才能再降。
 
@@ -122,3 +122,4 @@ director_v2.early_field_lengths
 | `hp_free_opt_20260608_144329` | `708b124` | 官方(主)+OpenCode(续) | A 生效(缓存增长)、B1 仍坏、发现 402→llm_parse 假象 |
 | `hp_free_40rerun_20260609_014848` | `c92378a` | OpenCode | B1 修好:压缩 3 次、缓存峰值 50%、0 llm_parse |
 | `hp-free-20260609T062333Z` | `b66094d` | OpenCode | MIN_GAP+C-1:director 50.2%/峰 65%、压缩 2 次、质量无退化 |
+| `hp-free-20260610T094340Z` | `e29b56a` | OpenCode | 三刀验证:TTFT p50 23.3s(-10%)/done p50 33.2s(-17%);scene_direction 距 partial_signal 仅 2.3s;director/narrator 输出 -21%/-24%;**①结论=关键路径 reasoning 干净,reflection 路径泄漏待修**;缓存持平 |
