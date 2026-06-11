@@ -123,3 +123,4 @@ director_v2.early_field_lengths
 | `hp_free_40rerun_20260609_014848` | `c92378a` | OpenCode | B1 修好:压缩 3 次、缓存峰值 50%、0 llm_parse |
 | `hp-free-20260609T062333Z` | `b66094d` | OpenCode | MIN_GAP+C-1:director 50.2%/峰 65%、压缩 2 次、质量无退化 |
 | `hp-free-20260610T094340Z` | `e29b56a` | OpenCode | 三刀验证:TTFT p50 23.3s(-10%)/done p50 33.2s(-17%);scene_direction 距 partial_signal 仅 2.3s;director/narrator 输出 -21%/-24%;**①结论=关键路径 reasoning 干净,reflection 路径泄漏待修**;缓存持平 |
+| `hp-free-continue-*-20260611` | `e29b56a` 同 session 续到 R100 | OpenCode | **§3 plateau 预测成立**:TTFT p50 三段 23.3/23.6/22.1s 全平,director 输入 19.8K→34.8K(max 39K,优于预测45-55K),narrator 缓存 76%;**新发现长局唯一真问题=DeepSeek json_object 空白输出退化**(24 次失败全是"数百空白字符+finish_reason=stop",R61-100 段 17 次/40 轮,重试轮即慢轮 Top8,R73/R78 三连败直接报错玩家);修法=空白流早期熔断+retry 换 tool 模式 |
