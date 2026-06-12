@@ -128,16 +128,20 @@ _DIRECTOR_PLAYER_ACTIONS_TAIL = 3
 # (→ ``known_count``) and tail-caps to the most recent items. Full info_items
 # stay in GameState for info_propagation / world_simulator / intent_system.
 _DIRECTOR_INFO_ITEMS_TAIL = 15
-# discovered_clues grows unbounded in long free-mode sessions (169 entries /
+# discovered_clues grows unbounded in long FREE-mode sessions (169 entries /
 # ~12k tokens at round 120) and is currently invisible to users (the play-page
 # side panel that displayed it is disabled). The accumulating full-text list is
 # the largest remaining append-only contributor to the Director's rising input
 # baseline, which correlates with DeepSeek json_object empty-output degradation.
-# The view tail-caps clue content to the recent window (Director only needs
-# recent clues for narrative continuity) and folds the rest into a single count.
-# Full discovered_clues stay in GameState so the count signal (narrative_arc
-# pacing) and clue-id triggers (event_system endings — script-mode judging) are
-# untouched; the Director's clue_id constraint is also built from the full list.
+#
+# The tail-cap is applied **only in free mode**. Script mode keeps the full clue
+# list in the Director view, so puzzle reasoning / pacing toward the designed
+# ending is never affected — the user's hard line. (Even there it's defence in
+# depth: the system expects single-digit clue counts — CLIMAX_CLUE_THRESHOLD=6 —
+# so script sessions almost never reach the cap anyway.) Independent of mode, the
+# event_system clue-id endings and narrative_arc count read the FULL persisted
+# discovered_clues, and the Director's clue_id constraint is built from the full
+# list — none of those go through this trimmed view.
 _DIRECTOR_CLUES_TAIL = 30
 
 
@@ -162,15 +166,18 @@ def _slim_discovered_clues(clues: list) -> list:
     return [{"_older_clues_omitted": omitted}, *clues[-_DIRECTOR_CLUES_TAIL:]]
 
 
-def director_state_view(state: GameState) -> dict:
+def director_state_view(state: GameState, game_mode: str | None = None) -> dict:
     """Trimmed projection of game state for the Director's per-turn dump.
 
     Drops Director-irrelevant bookkeeping (``_DIRECTOR_STATE_OMIT``) and empty
     containers, caps ``player_actions`` to the most recent few entries, and
-    slims ``info_items`` (drop ``known_by`` roster + tail-cap). Everything the
-    Director acts on (clue content, npc_relations, case_board, narrative_arc,
-    locations, counters) is retained. Does **not** mutate the persisted state —
-    callers pass the result as ``state_view`` to ``build_messages``.
+    slims ``info_items`` (drop ``known_by`` roster + tail-cap). In **free mode**
+    it also tail-caps ``discovered_clues`` (unbounded, user-invisible); script
+    mode keeps the full clue list so puzzle reasoning / endings are untouched.
+    Everything else the Director acts on (npc_relations, case_board,
+    narrative_arc, locations, counters) is retained. Does **not** mutate the
+    persisted state — callers pass the result as ``state_view`` to
+    ``build_messages``.
     """
     out: dict = {}
     for key, value in state.to_dict().items():
@@ -180,7 +187,11 @@ def director_state_view(state: GameState) -> dict:
             value = value[-_DIRECTOR_PLAYER_ACTIONS_TAIL:]
         elif key == "info_items" and isinstance(value, list):
             value = _slim_info_items(value)
-        elif key == "discovered_clues" and isinstance(value, list):
+        elif (
+            key == "discovered_clues"
+            and isinstance(value, list)
+            and game_mode == "free"
+        ):
             value = _slim_discovered_clues(value)
         if isinstance(value, (list, dict, str)) and not value:
             continue  # drop empty containers / strings — no signal, pure tokens

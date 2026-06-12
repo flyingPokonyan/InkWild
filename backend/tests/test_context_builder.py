@@ -127,18 +127,22 @@ def test_director_state_view_slims_info_items():
     assert state.info_items[0]["known_by"] == roster
 
 
-def test_director_state_view_slims_discovered_clues():
-    # discovered_clues grows unbounded in long free sessions (169 entries / ~12k
-    # tokens observed at R120) and is invisible to users (side panel disabled).
-    # The view tail-caps clue content; full clues stay in GameState so the
-    # script-mode case (event_system clue-id triggers / endings) is untouched.
-    state = GameState(current_time="第1天·上午", current_location="图书馆")
-    state.discovered_clues = [
+def _clues(n: int) -> list[dict]:
+    return [
         {"id": f"clue_{i:03d}", "content": f"线索{i}", "found_at": "上午"}
-        for i in range(40)
+        for i in range(n)
     ]
 
-    view = director_state_view(state)
+
+def test_director_state_view_slims_discovered_clues_in_free_mode():
+    # discovered_clues grows unbounded in long free sessions (169 entries / ~12k
+    # tokens observed at R120) and is invisible to users (side panel disabled).
+    # Free mode tail-caps clue content; full clues stay in GameState so count
+    # (narrative_arc) and clue-id triggers (event_system) are untouched.
+    state = GameState(current_time="第1天·上午", current_location="图书馆")
+    state.discovered_clues = _clues(40)
+
+    view = director_state_view(state, game_mode="free")
     clues = view["discovered_clues"]
 
     # most recent 30 retained verbatim
@@ -148,21 +152,29 @@ def test_director_state_view_slims_discovered_clues():
     assert recent[0]["content"] == "线索10"
     # older entries folded into a single count signal, not dumped
     assert any(c.get("_older_clues_omitted") == 10 for c in clues)
-    # view-only: persisted state keeps all 40 for script judging / count
+    # view-only: persisted state keeps all 40 for count / id triggers
     assert len(state.discovered_clues) == 40
     assert state.discovered_clues[0]["content"] == "线索0"
 
 
+def test_director_state_view_keeps_full_clues_in_script_mode():
+    # Hard line: script-mode puzzle reasoning / endings must see every clue.
+    state = GameState(current_time="第1天·上午", current_location="书房")
+    state.discovered_clues = _clues(40)
+
+    view = director_state_view(state, game_mode="script")
+
+    assert view["discovered_clues"] == state.discovered_clues
+    assert not any("_older_clues_omitted" in c for c in view["discovered_clues"])
+
+
 def test_director_state_view_keeps_short_clue_list_intact():
     state = GameState(current_time="第1天·上午", current_location="图书馆")
-    state.discovered_clues = [
-        {"id": f"clue_{i:03d}", "content": f"线索{i}", "found_at": "上午"}
-        for i in range(5)
-    ]
+    state.discovered_clues = _clues(5)
 
-    view = director_state_view(state)
+    # below the cap → unchanged even in free mode, no fold marker
+    view = director_state_view(state, game_mode="free")
 
-    # below the cap → unchanged, no fold marker
     assert view["discovered_clues"] == state.discovered_clues
     assert not any("_older_clues_omitted" in c for c in view["discovered_clues"])
 

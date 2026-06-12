@@ -835,7 +835,7 @@ class DirectorAgent:
         messages = build_messages(
             game_state, recent_messages, context_summary, user_input,
             memory_context=memory_context,
-            state_view=director_state_view(game_state),
+            state_view=director_state_view(game_state, game_mode=game_mode),
         )
         discovered_clue_ids = [
             clue["id"]
