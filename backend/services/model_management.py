@@ -124,9 +124,9 @@ DEFAULT_TEXT_SLOT_NAMES = {
     "intermission",
 }
 # Realtime game-loop slots: their routers disable model thinking/reasoning
-# (reasoning=False) for speed + clean structured output. Offline/quality slots
-# (generation, research, compression, ending_summary) keep the model default,
-# where chain-of-thought genuinely helps.
+# (reasoning=False) for speed + clean structured output. The full set of slots
+# that disable thinking is REASONING_OFF_TEXT_SLOT_NAMES (below); ending_summary
+# / research_summary keep the model default where CoT may help quality.
 REALTIME_TEXT_SLOT_NAMES = {"game_main", "npc_agent", "intermission"}
 # 生成槽：① 关 thinking（reasoning=False）—— 实测 thinking-capable 模型(deepseek-v4-pro)
 # 在慢网关(OpenCode)上 CoT 开时会把 token 预算耗在隐藏推理上、正文为空或被截 →
@@ -134,7 +134,28 @@ REALTIME_TEXT_SLOT_NAMES = {"game_main", "npc_agent", "intermission"}
 # 不需要可见 CoT，关掉更稳更快。② 仍给更长首 token 超时(300s)作余量。
 # (2026-05-31：硬证据推翻了"CoT 对生成有帮助"的旧假设——见 [[generation-infra-2026-05-31]])
 GENERATION_TEXT_SLOT_NAMES = {"admin_generation", "research_planning"}
+# Offline summary slots that also disable thinking. conversation_compression is
+# a structured-summary task (CoT never reaches the summary, just burns tokens);
+# NPC reflection rides this same router (game_service → orchestrator.
+# compression_llm_router), so disabling it here fixes both the compression and
+# the reflection CoT leak (~21 reflection calls/session observed leaking in the
+# 2026-06 soaks). ending_summary is intentionally NOT included — it produces
+# player-facing narrative where visible reasoning may aid quality.
+REASONING_OFF_TEXT_SLOT_NAMES = (
+    REALTIME_TEXT_SLOT_NAMES
+    | GENERATION_TEXT_SLOT_NAMES
+    | {"conversation_compression"}
+)
 GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS = 300.0
+
+
+def _reasoning_for_slot(slot_name: str) -> bool | None:
+    """Thinking on/off for a slot's router. ``False`` disables CoT (realtime,
+    generation, compression); ``None`` leaves the model default (e.g.
+    ending_summary, research_summary)."""
+    return False if slot_name in REASONING_OFF_TEXT_SLOT_NAMES else None
+
+
 SYSTEM_BOOTSTRAP_SOURCE = "system_bootstrap"
 SYSTEM_DEEPSEEK_PROVIDER_NAME = "系统默认 DeepSeek"
 SYSTEM_XAI_PROVIDER_NAME = "系统默认 xAI"
@@ -1362,7 +1383,7 @@ def _legacy_text_router(slot_name: str) -> LLMRouter | None:
             providers={"legacy": provider},
             fallback_chain=["legacy"],
             identity={"provider_name": "deepseek-legacy", "model_id": model_name},
-            reasoning=False if slot_name in (REALTIME_TEXT_SLOT_NAMES | GENERATION_TEXT_SLOT_NAMES) else None,
+            reasoning=_reasoning_for_slot(slot_name),
             timeout_seconds=GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
         )
     if slot_name == "research_summary" and settings.grok_api_key:
@@ -1390,7 +1411,7 @@ async def resolve_slot_router(db: AsyncSession, slot_name: str) -> LLMRouter | N
             "provider_name": config.provider.name,
             "model_id": config.model.model_id,
         },
-        reasoning=False if slot_name in (REALTIME_TEXT_SLOT_NAMES | GENERATION_TEXT_SLOT_NAMES) else None,
+        reasoning=_reasoning_for_slot(slot_name),
         timeout_seconds=GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
     )
 
