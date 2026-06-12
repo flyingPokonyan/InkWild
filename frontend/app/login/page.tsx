@@ -759,7 +759,7 @@ function LoginPageInner() {
           color: var(--lv-ink-3);
           line-height: 1.5;
           display: -webkit-box;
-          -webkit-line-clamp: 2;
+          -webkit-line-clamp: 1;
           -webkit-box-orient: vertical;
           overflow: hidden;
         }

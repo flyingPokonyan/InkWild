@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useTranslations } from "next-intl";
 import {
@@ -16,9 +17,6 @@ import {
   Clock,
   Activity,
   ArrowRight,
-  X,
-  ChevronRight,
-  LogOut,
   LayoutGrid,
   List as ListIcon,
 } from "lucide-react";
@@ -44,6 +42,34 @@ import type {
 // Types matching tab keys
 type WorkshopTab = "worlds" | "scripts";
 type Filter = "all" | "published" | "private";
+type MobileActionVariant = "primary" | "ghost";
+
+function mobileWorkshopActionButtonStyle(
+  variant: MobileActionVariant = "ghost",
+  overrides: CSSProperties = {},
+): CSSProperties {
+  const isPrimary = variant === "primary";
+  return {
+    height: 32,
+    minWidth: isPrimary ? 52 : 48,
+    padding: "0 12px",
+    borderRadius: 999,
+    border: isPrimary ? "1px solid var(--lv-ink)" : "1px solid rgba(255,255,255,0.10)",
+    background: isPrimary ? "var(--lv-ink)" : "rgba(255,255,255,0.04)",
+    color: isPrimary ? "var(--lv-bg)" : "var(--lv-ink-2)",
+    boxShadow: isPrimary ? "none" : "inset 0 1px 0 rgba(255,255,255,0.06)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "var(--lv-font-sans)",
+    fontSize: 12,
+    fontWeight: 500,
+    lineHeight: 1,
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+    ...overrides,
+  };
+}
 
 // A mapper for world genre styles to mock visual palettes (cover-art-spec §5.3)
 function getGenreCoverClass(genre?: string | null, name?: string | null): string {
@@ -2007,8 +2033,6 @@ function MobileWorkshopView({
   const [tab, setTab] = useState<MobileTab>("drafts");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [avatarOpen, setAvatarOpen] = useState(false);
-  const logout = useAuthStore((s) => s.logout);
 
   const worldDrafts = useMemo(() => worldsQuery.data?.drafts ?? [], [worldsQuery.data?.drafts]);
   const worldsPublished = worldsQuery.data?.published ?? [];
@@ -2023,39 +2047,44 @@ function MobileWorkshopView({
     [worldDrafts, scriptDrafts],
   );
 
-  const displayName = user?.nickname || user?.identities.find((i) => i.email)?.email || "—";
-  const initial = (displayName.trim()[0] || "T").toUpperCase();
-
   // 列表/网格共用同一套 MobileWorkCardProps，直接换组件即可
   const CardComp: typeof MobileWorkCard = viewMode === "grid" ? MobileWorkGridTile : MobileWorkCard;
 
   const worldPrimaryAction = (world: AdminWorldPublishedItem) => {
-    if (!world.is_owner) return { label: null, action: undefined };
-    if (world.status === "published") return { label: "下架", action: () => onUnpublishWorld(world.id) };
+    if (!world.is_owner) return { label: null, action: undefined, variant: "ghost" as const };
+    if (world.status === "published") {
+      return { label: "下架", action: () => onUnpublishWorld(world.id), variant: "ghost" as const };
+    }
     if (world.review_status === "submitted") {
       return {
-        label: "撤回提交",
+        label: "撤回",
         action: world.draft_id ? () => onWithdrawWorldSubmission(world.draft_id!) : undefined,
+        variant: "ghost" as const,
       };
     }
     return {
-      label: world.draft_id ? "提交发布" : null,
+      label: world.draft_id ? "发布" : null,
       action: world.draft_id ? () => onSubmitWorld(world.draft_id!) : undefined,
+      variant: "primary" as const,
     };
   };
 
   const scriptPrimaryAction = (script: AdminScriptPublishedItem) => {
-    if (!script.is_owner) return { label: null, action: undefined };
-    if (script.status === "published") return { label: "下架", action: () => onUnpublishScript(script.id) };
+    if (!script.is_owner) return { label: null, action: undefined, variant: "ghost" as const };
+    if (script.status === "published") {
+      return { label: "下架", action: () => onUnpublishScript(script.id), variant: "ghost" as const };
+    }
     if (script.review_status === "submitted") {
       return {
-        label: "撤回提交",
+        label: "撤回",
         action: script.draft_id ? () => onWithdrawScriptSubmission(script.draft_id!) : undefined,
+        variant: "ghost" as const,
       };
     }
     return {
-      label: script.draft_id ? "提交发布" : null,
+      label: script.draft_id ? "发布" : null,
       action: script.draft_id ? () => onSubmitScript(script.draft_id!) : undefined,
+      variant: "primary" as const,
     };
   };
 
@@ -2068,35 +2097,6 @@ function MobileWorkshopView({
         paddingBottom: "calc(76px + env(safe-area-inset-bottom))",
       }}
     >
-      <button
-        type="button"
-        aria-label="profile"
-        onClick={() => setAvatarOpen(true)}
-        style={{
-          position: "absolute",
-          top: "calc(env(safe-area-inset-top, 0px) + 14px)",
-          right: 20,
-          zIndex: 5,
-          width: 42,
-          height: 42,
-          minWidth: 44,
-          minHeight: 44,
-          borderRadius: 999,
-          border: "1px solid rgba(255,255,255,0.08)",
-          background:
-            "radial-gradient(circle at 34% 24%, rgba(245,242,235,0.88), transparent 18%), linear-gradient(135deg, #3e3325, #8d7b64 48%, #171412)",
-          color: "var(--lv-bg)",
-          fontWeight: 700,
-          fontSize: 13,
-          display: "grid",
-          placeItems: "center",
-          cursor: "pointer",
-          padding: 0,
-        }}
-      >
-        {initial}
-      </button>
-
       {(notice || error) && (
         <div
           style={{
@@ -2452,6 +2452,7 @@ function MobileWorkshopView({
                       onPlay={() => router.push(withReturn(`/worlds/${w.id}`, "/workshop"))}
                       primaryActionLabel={primary.label}
                       onPrimaryAction={primary.action}
+                      primaryActionVariant={primary.variant}
                     />
                   );
                 })
@@ -2487,6 +2488,7 @@ function MobileWorkshopView({
                       }}
                       primaryActionLabel={primary.label}
                       onPrimaryAction={primary.action}
+                      primaryActionVariant={primary.variant}
                     />
                   );
                 })
@@ -2603,223 +2605,6 @@ function MobileWorkshopView({
         )}
       </AnimatePresence>
 
-      {/* avatar bottom sheet —— redesign: 头像区 + 导航项 + 登出，max-height 自适应可滚动 */}
-      <AnimatePresence>
-        {avatarOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setAvatarOpen(false)}
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.55)",
-                zIndex: 80,
-              }}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", stiffness: 320, damping: 32 }}
-              style={{
-                position: "fixed",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 81,
-                background: "var(--lv-bg-1)",
-                borderTopLeftRadius: 22,
-                borderTopRightRadius: 22,
-                paddingTop: 8,
-                paddingBottom: "calc(20px + env(safe-area-inset-bottom))",
-                boxShadow: "0 -20px 40px rgba(0,0,0,0.55)",
-                maxHeight: "calc(85dvh - env(safe-area-inset-top))",
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                aria-hidden
-                style={{
-                  width: 44,
-                  height: 4,
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.18)",
-                  margin: "0 auto 4px",
-                }}
-              />
-
-              {/* 头像区 + 关闭按钮 */}
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                  padding: "14px 16px 18px",
-                }}
-              >
-                <div
-                  style={{
-                    width: 52,
-                    height: 52,
-                    borderRadius: 999,
-                    background:
-                      "radial-gradient(circle at 34% 24%, rgba(245,242,235,0.88), transparent 18%), linear-gradient(135deg, #3e3325, #8d7b64 48%, #171412)",
-                    display: "grid",
-                    placeItems: "center",
-                    color: "var(--lv-bg)",
-                    fontWeight: 700,
-                    fontSize: 18,
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {initial}
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      fontFamily: "var(--lv-font-serif)",
-                      fontSize: 17,
-                      color: "var(--lv-ink)",
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {displayName}
-                  </div>
-                  <div
-                    style={{
-                      fontFamily: "var(--lv-font-mono)",
-                      fontSize: 10,
-                      letterSpacing: "0.16em",
-                      color: "var(--lv-ink-4)",
-                      marginTop: 3,
-                    }}
-                  >
-                    {user ? "User" : "Guest"}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label="关闭"
-                  onClick={() => setAvatarOpen(false)}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 999,
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    background: "rgba(255,255,255,0.04)",
-                    color: "var(--lv-ink-2)",
-                    display: "grid",
-                    placeItems: "center",
-                    cursor: "pointer",
-                    flexShrink: 0,
-                    padding: 0,
-                  }}
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              {/* 导航项（可滚动）*/}
-              <div
-                style={{
-                  flex: 1,
-                  overflowY: "auto",
-                  WebkitOverflowScrolling: "touch",
-                  padding: "0 12px",
-                  borderTop: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <nav style={{ display: "flex", flexDirection: "column", padding: "8px 0" }}>
-                  {[
-                    { href: "/discover", icon: Globe, label: "发现世界" },
-                    { href: "/history", icon: Clock, label: "游戏历史" },
-                  ].map(({ href, icon: Icon, label }) => (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setAvatarOpen(false)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                        padding: "14px 4px",
-                        color: "var(--lv-ink)",
-                        textDecoration: "none",
-                        fontSize: 15,
-                      }}
-                    >
-                      <Icon size={18} strokeWidth={1.6} style={{ color: "var(--lv-ink-2)" }} />
-                      <span style={{ flex: 1 }}>{label}</span>
-                      <ChevronRight size={16} style={{ color: "var(--lv-ink-4)" }} />
-                    </Link>
-                  ))}
-                </nav>
-              </div>
-
-              {/* 底部 action */}
-              <div style={{ padding: "12px 16px 0" }}>
-                {user ? (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      setAvatarOpen(false);
-                      await logout();
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: 14,
-                      border: "1px solid rgba(200,125,112,0.18)",
-                      background: "rgba(200,125,112,0.05)",
-                      color: "var(--lv-danger)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <LogOut size={15} strokeWidth={1.8} />
-                    退出登录
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAvatarOpen(false);
-                      router.push(buildLoginHref("/workshop"));
-                    }}
-                    style={{
-                      display: "block",
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: 14,
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(255,255,255,0.035)",
-                      color: "var(--lv-ink)",
-                      fontSize: 14,
-                      fontWeight: 500,
-                      cursor: "pointer",
-                    }}
-                  >
-                    登录
-                  </button>
-                )}
-              </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
@@ -2861,6 +2646,7 @@ interface MobileWorkCardProps {
   onPlay?: () => void;
   primaryActionLabel?: string | null;
   onPrimaryAction?: () => void;
+  primaryActionVariant?: MobileActionVariant;
 }
 
 function MobileWorkCard({
@@ -2879,6 +2665,7 @@ function MobileWorkCard({
   onPlay,
   primaryActionLabel,
   onPrimaryAction,
+  primaryActionVariant = "ghost",
 }: MobileWorkCardProps) {
   const statusLabel =
     badgeLabel ??
@@ -3006,21 +2793,21 @@ function MobileWorkCard({
             {bottomMeta || (status === "published" ? "已发布" : "草稿")}
           </span>
           {primaryActionLabel && isOwner ? (
-            <span style={{ display: "inline-flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                gap: 6,
+                flexShrink: 0,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
               <button
                 type="button"
                 onClick={onPlay}
                 disabled={busy}
-                style={{
-                  height: 34,
-                  padding: "0 12px",
-                  borderRadius: 999,
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "rgba(255,255,255,0.05)",
-                  color: "var(--lv-ink)",
-                  fontSize: 12,
-                  fontWeight: 500,
-                }}
+                style={mobileWorkshopActionButtonStyle("ghost")}
               >
                 试玩
               </button>
@@ -3028,16 +2815,7 @@ function MobileWorkCard({
                 type="button"
                 onClick={onPrimaryAction}
                 disabled={busy}
-                style={{
-                  height: 34,
-                  padding: "0 12px",
-                  borderRadius: 999,
-                  border: "1px solid var(--lv-accent)",
-                  background: "transparent",
-                  color: "var(--lv-accent)",
-                  fontSize: 12,
-                  fontWeight: 500,
-                }}
+                style={mobileWorkshopActionButtonStyle(primaryActionVariant)}
               >
                 {primaryActionLabel}
               </button>
@@ -3085,6 +2863,7 @@ function MobileWorkGridTile({
   onPlay,
   primaryActionLabel,
   onPrimaryAction,
+  primaryActionVariant = "ghost",
 }: MobileWorkCardProps) {
   const statusLabel =
     badgeLabel ??
@@ -3177,15 +2956,10 @@ function MobileWorkGridTile({
             }}
             disabled={busy}
             style={{
-              width: "100%",
-              height: 32,
               marginTop: 8,
-              borderRadius: 999,
-              border: "1px solid rgba(255,255,255,0.14)",
-              background: "rgba(255,255,255,0.055)",
-              color: "var(--lv-ink)",
-              fontSize: 12,
-              fontWeight: 500,
+              ...mobileWorkshopActionButtonStyle(primaryActionVariant, {
+                minWidth: primaryActionVariant === "primary" ? 56 : 52,
+              }),
             }}
           >
             {primaryActionLabel}
