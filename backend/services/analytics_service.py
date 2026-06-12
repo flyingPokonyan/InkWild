@@ -8,7 +8,7 @@ from models.generation_task import GenerationTask
 from models.model_management import ProviderModel
 from models.user import User
 from models.world import World
-from utils import utcnow
+from utils import beijing_date, beijing_day_start_utc, serialize_utc_datetime, utcnow
 
 
 def _utc_cutoff(days: int) -> datetime:
@@ -66,18 +66,25 @@ async def generation_task_summary(
 
 # ────────────── Cost trend (daily bucket) ──────────────
 async def cost_trend_daily(db: AsyncSession, days: int = 30) -> dict:
-    """按 UTC 日切的 cost_cents 序列。"""
-    cutoff = _utc_cutoff(days)
-    bucket = func.date_trunc("day", TokenUsage.created_at).label("day")
+    """按北京时间日切的 cost_cents 序列。"""
+    today_start = beijing_day_start_utc()
+    cutoff = today_start - timedelta(days=days - 1)
+    next_day_start = today_start + timedelta(days=1)
     rows = (
         await db.execute(
-            select(bucket, func.coalesce(func.sum(TokenUsage.cost_cents), 0).label("cost"))
-            .where(TokenUsage.created_at >= cutoff)
-            .group_by(bucket)
-            .order_by(bucket)
+            select(TokenUsage.created_at, TokenUsage.cost_cents)
+            .where(TokenUsage.created_at >= cutoff, TokenUsage.created_at < next_day_start)
+            .order_by(TokenUsage.created_at)
         )
     ).all()
-    series = [{"date": r.day.date().isoformat(), "cost_cents": int(r.cost)} for r in rows]
+    totals_by_date: dict[str, int] = {}
+    for row in rows:
+        date = beijing_date(row.created_at)
+        totals_by_date[date] = totals_by_date.get(date, 0) + int(row.cost_cents or 0)
+    series = [
+        {"date": date, "cost_cents": cost}
+        for date, cost in sorted(totals_by_date.items())
+    ]
     return {
         "window_days": days,
         "series": series,
@@ -225,9 +232,9 @@ async def expensive_sessions(
             "world_id": r.world_id,
             "world_name": r.world_name,
             "rounds_played": int(r.rounds_played or 0),
-            "started_at": r.started_at.isoformat() if r.started_at else None,
-            "last_played_at": r.last_played_at.isoformat() if r.last_played_at else None,
-            "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+            "started_at": serialize_utc_datetime(r.started_at),
+            "last_played_at": serialize_utc_datetime(r.last_played_at),
+            "ended_at": serialize_utc_datetime(r.ended_at),
             "duration_minutes": _duration_minutes(r.started_at, r.ended_at, r.last_played_at),
             "cost_cents": int(r.cost),
         }
@@ -238,9 +245,12 @@ async def expensive_sessions(
 
 # ────────────── Cost KPIs ──────────────
 async def cost_kpis(db: AsyncSession) -> dict:
-    """Dashboard 用：今日 / 7 天 / 30 天 总消耗 + 上一周期对比"""
+    """Dashboard 用：今日 / 7 天 / 30 天总消耗 + 上一周期对比。
+
+    日边界按北京时间计算，再转换成 naive UTC 与数据库列比较。
+    """
     now = utcnow()
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today = beijing_day_start_utc(now)
     yesterday = today - timedelta(days=1)
     week_ago = today - timedelta(days=7)
     two_weeks_ago = today - timedelta(days=14)
@@ -412,8 +422,8 @@ async def expensive_generation_tasks(
             "status": r.status,
             "user_id": r.created_by_user_id,
             "user_nickname": r.nickname,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            "created_at": serialize_utc_datetime(r.created_at),
+            "finished_at": serialize_utc_datetime(r.finished_at),
             "cost_cents": int(r.cost),
             "calls": int(r.calls),
         }

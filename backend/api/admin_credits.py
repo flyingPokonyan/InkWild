@@ -11,13 +11,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
-from dependencies import get_current_admin_user
+from dependencies import get_current_admin_user, get_db
 from models.credit import CreditConfig, CreditLedger
 from models.user import User
 from services import credit_service
 from services.audit_service import record_admin_action
 from services.credit_pricing import credits_to_units, units_to_credits
+from utils import serialize_utc_datetime
 
 router = APIRouter(prefix="/api/admin", tags=["admin-credits"])
 
@@ -33,7 +33,7 @@ def _ua(request: Request) -> str | None:
 def _ledger_item(r: CreditLedger) -> dict:
     return {
         "id": r.id,
-        "ts": r.created_at.isoformat(),
+        "ts": serialize_utc_datetime(r.created_at),
         "kind": r.kind,
         "category": r.category,
         "delta": units_to_credits(r.delta_units),

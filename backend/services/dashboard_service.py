@@ -8,7 +8,7 @@ from models.game import GameSession
 from models.generation_task import GenerationTask
 from models.model_management import ProviderModel
 from models.script import Script
-from models.user import User
+from models.user import AuthIdentity, User
 from models.world import World
 
 from services.analytics_service import cost_kpis
@@ -45,7 +45,9 @@ async def dashboard_kpis(db: AsyncSession) -> dict:
 
     new_users_7d = await _scalar(
         db,
-        select(func.count()).select_from(User).where(User.created_at >= week_ago),
+        select(func.count(func.distinct(AuthIdentity.user_id))).where(
+            AuthIdentity.verified_at >= week_ago
+        ),
     )
 
     new_worlds_7d = await _scalar(

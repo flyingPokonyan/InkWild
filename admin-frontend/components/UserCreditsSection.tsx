@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "@/lib/api";
+import { fmtDateTime } from "@/lib/format";
 
 interface LedgerItem {
   id: string;
@@ -24,8 +25,7 @@ interface UserCredits {
 }
 
 const fmt = (n: number) => n.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
-const fmtTime = (ts: string) =>
-  new Date(ts).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const fmtTime = (ts: string) => fmtDateTime(ts).slice(5, 16);
 
 export function UserCreditsSection({ userId }: { userId: string | null }) {
   const queryClient = useQueryClient();

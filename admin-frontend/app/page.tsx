@@ -239,7 +239,7 @@ export default function DashboardPage() {
       <div className="grid-cost" style={{ marginBottom: "var(--gap)" }}>
         <Card
           title="近 30 天每日消耗"
-          sub="按 UTC 日切"
+          sub="按北京时间日切"
           actions={
             <Link href="/cost">
               <Btn variant="ghost" size="xs" icon={ArrowUpRight}>

@@ -20,6 +20,7 @@ async def _create_password_user(db, email: str, password: str) -> User:
             provider_user_id=email.lower(),
             credential_hash=hash_password(password),
             email=email.lower(),
+            verified_at=utcnow(),
         )
     )
     await db.commit()

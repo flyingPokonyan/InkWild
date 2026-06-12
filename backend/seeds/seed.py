@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from config import settings
 from database import async_session, engine
 from models import AuthIdentity, Ending, Event, User, World, WorldCharacter
+from utils import utcnow
 
 SEED_DIR = Path(__file__).parent / "wuyinzhen"
 TABLES_TO_CLEAR = [
@@ -56,6 +57,7 @@ async def ensure_dev_user(session) -> str:
             user.nickname = user.nickname or "Pokonyan"
         identity.email = normalized_email
         identity.credential_hash = settings.dev_user_password_hash
+        identity.verified_at = identity.verified_at or utcnow()
         await session.flush()
         return str(user.id if user is not None else identity.user_id)
 
@@ -69,6 +71,7 @@ async def ensure_dev_user(session) -> str:
             provider_user_id=normalized_email,
             credential_hash=settings.dev_user_password_hash,
             email=normalized_email,
+            verified_at=utcnow(),
             profile={"source": "seed"},
         )
     )

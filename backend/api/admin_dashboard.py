@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
-from dependencies import get_current_admin_user
+from dependencies import get_current_admin_user, get_db
 from services import dashboard_service
 
 router = APIRouter(

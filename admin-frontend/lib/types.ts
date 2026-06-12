@@ -2,6 +2,7 @@ export interface IdentitySummary {
   provider: string;
   email: string | null;
   phone: string | null;
+  verified_at?: string | null;
 }
 
 export interface CurrentUser {
@@ -268,6 +269,8 @@ export interface AdminUserListItem {
   status: UserStatus | string;
   is_admin: boolean;
   can_create: boolean;
+  is_verified: boolean;
+  verified_at: string | null;
   created_at: string | null;
   last_login_at: string | null;
   identities: IdentitySummary[];
@@ -278,6 +281,8 @@ export interface AdminUserListItem {
 
 export interface AdminUserListSummary {
   total: number;
+  verified_count: number;
+  unverified_count: number;
   admin_count: number;
   can_create_count: number;
   banned_count: number;

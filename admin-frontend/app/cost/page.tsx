@@ -165,7 +165,7 @@ export default function CostPage() {
 
       <Card
         title={`近 ${days} 天每日消耗`}
-        sub="按 UTC 日切"
+        sub="按北京时间日切"
         style={{ marginBottom: "var(--gap)" }}
       >
         {trendQuery.isPending ? (
@@ -379,4 +379,3 @@ function ShareBar({ share, color }: { share: number; color: string }) {
     </div>
   );
 }
-

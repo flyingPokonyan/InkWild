@@ -14,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
 from database import async_session  # noqa: E402
 from models.user import AuthIdentity, User  # noqa: E402
 from services.auth_service import hash_password, normalize_email  # noqa: E402
+from utils import utcnow  # noqa: E402
 
 from sqlalchemy import select  # noqa: E402
 
@@ -35,6 +36,8 @@ async def create_or_promote_admin(email: str, password: str | None) -> User:
             if not user:
                 raise RuntimeError("Password identity exists but its user is missing")
             user.is_admin = True
+            if identity.verified_at is None:
+                identity.verified_at = utcnow()
             await db.commit()
             await db.refresh(user)
             return user
@@ -54,6 +57,7 @@ async def create_or_promote_admin(email: str, password: str | None) -> User:
                 provider_user_id=normalized_email,
                 credential_hash=hash_password(password),
                 email=normalized_email,
+                verified_at=utcnow(),
             )
         )
         await db.commit()

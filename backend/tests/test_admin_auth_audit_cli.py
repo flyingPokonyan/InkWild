@@ -48,9 +48,10 @@ async def test_create_admin_cli_creates_password_admin_user(test_session_factory
                     AuthIdentity.provider == "password",
                     AuthIdentity.provider_user_id == "admin@example.com",
                 )
-            )
-        ).scalar_one()
-        assert verify_password("secret-pass", identity.credential_hash or "")
+        )
+    ).scalar_one()
+    assert verify_password("secret-pass", identity.credential_hash or "")
+    assert identity.verified_at is not None
 
 
 @pytest.mark.asyncio
@@ -68,6 +69,7 @@ async def test_create_admin_cli_promotes_existing_password_user(test_session_fac
                 provider_user_id="existing@example.com",
                 credential_hash="hash",
                 email="existing@example.com",
+                verified_at=None,
             )
         )
         await db.commit()
@@ -80,3 +82,12 @@ async def test_create_admin_cli_promotes_existing_password_user(test_session_fac
         assert promoted.id == user_id
         assert saved is not None
         assert saved.is_admin is True
+        identity = (
+            await db.execute(
+                create_admin.select(AuthIdentity).where(
+                    AuthIdentity.provider == "password",
+                    AuthIdentity.provider_user_id == "existing@example.com",
+                )
+            )
+        ).scalar_one()
+        assert identity.verified_at is not None

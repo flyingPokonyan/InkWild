@@ -3,14 +3,14 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
-from dependencies import get_current_admin_user
+from dependencies import get_current_admin_user, get_db
 from models.draft import ScriptDraft, WorldDraft
 from models.game import GameSession, TokenUsage
 from models.script import Script
 from models.user import AuthIdentity, User
 from models.world import World
 from services.audit_service import record_admin_action
+from utils import serialize_utc_datetime
 
 router = APIRouter(
     prefix="/api/admin/users",
@@ -33,6 +33,10 @@ def _serialize_user_list_item(
     pub_worlds: int,
     pub_scripts: int,
 ) -> dict:
+    verified_at_values = [
+        ident.verified_at for ident in identities if ident.verified_at is not None
+    ]
+    first_verified_at = min(verified_at_values) if verified_at_values else None
     return {
         "id": u.id,
         "nickname": u.nickname,
@@ -40,13 +44,16 @@ def _serialize_user_list_item(
         "status": u.status,
         "is_admin": u.is_admin,
         "can_create": u.can_create,
-        "created_at": u.created_at.isoformat() if u.created_at else None,
-        "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+        "is_verified": first_verified_at is not None,
+        "verified_at": serialize_utc_datetime(first_verified_at),
+        "created_at": serialize_utc_datetime(u.created_at),
+        "last_login_at": serialize_utc_datetime(u.last_login_at),
         "identities": [
             {
                 "provider": ident.provider,
                 "email": ident.email,
                 "phone": ident.phone,
+                "verified_at": serialize_utc_datetime(ident.verified_at),
             }
             for ident in identities
         ],
@@ -64,6 +71,7 @@ async def list_users(
     q: str | None = Query(None, description="搜索 nickname / id / email"),
     permission: str = Query("all", description="all|admin|can_create|no_perm"),
     status: str = Query("all", description="all|active|banned"),
+    verified: str = Query("all", description="all|verified|unverified"),
     order_by: str = Query(
         "created_at", description="created_at|last_login_at"
     ),
@@ -92,6 +100,15 @@ async def list_users(
         filters.append(User.can_create.is_(False))
     if status != "all":
         filters.append(User.status == status)
+    verified_user_ids = (
+        select(AuthIdentity.user_id)
+        .where(AuthIdentity.verified_at.is_not(None))
+        .distinct()
+    )
+    if verified == "verified":
+        filters.append(User.id.in_(verified_user_ids))
+    elif verified == "unverified":
+        filters.append(User.id.not_in(verified_user_ids))
 
     order_col = (
         User.last_login_at if order_by == "last_login_at" else User.created_at
@@ -184,9 +201,30 @@ async def list_users(
         for u in users
     ]
 
-    # Top-level summary counts (across all users matching active/banned, not just this page)
+    verified_count = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(User)
+                .where(User.id.in_(verified_user_ids))
+            )
+        ).scalar_one()
+    )
+    unverified_count = int(
+        (
+            await db.execute(
+                select(func.count())
+                .select_from(User)
+                .where(User.id.not_in(verified_user_ids))
+            )
+        ).scalar_one()
+    )
+
+    # Top-level summary counts (global, not just this page)
     summary = {
         "total": total,
+        "verified_count": verified_count,
+        "unverified_count": unverified_count,
         "admin_count": int(
             (
                 await db.execute(
@@ -354,11 +392,7 @@ async def get_user_detail(
                     "world_name": r.world_name,
                     "rounds_played": int(r.rounds_played or 0),
                     "status": r.status,
-                    "last_played_at": (
-                        r.last_played_at.isoformat()
-                        if r.last_played_at
-                        else None
-                    ),
+                    "last_played_at": serialize_utc_datetime(r.last_played_at),
                     "cost_cents": int(r.cost),
                 }
                 for r in session_rows

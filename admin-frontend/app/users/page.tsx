@@ -31,23 +31,26 @@ const PAGE_SIZE = 50;
 
 type StatusFilter = "all" | UserStatus;
 type OrderBy = "created_at" | "last_login_at";
+type VerifiedFilter = "all" | "verified" | "unverified";
 
 export default function UsersPage() {
   const [q, setQ] = useState("");
   const [permission, setPermission] = useState<UserPermissionFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
+  const [verified, setVerified] = useState<VerifiedFilter>("all");
   const [orderBy, setOrderBy] = useState<OrderBy>("created_at");
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const listQuery = useQuery({
-    queryKey: ["admin-users", page, q, permission, status, orderBy],
+    queryKey: ["admin-users", page, q, permission, status, verified, orderBy],
     queryFn: () => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(PAGE_SIZE),
         permission,
         status,
+        verified,
         order_by: orderBy,
       });
       if (q.trim()) params.set("q", q.trim());
@@ -67,7 +70,7 @@ export default function UsersPage() {
         title="用户管理"
         sub={
           data
-            ? `共 ${data.summary.total} 个用户 · ${data.summary.admin_count} 个 admin · ${data.summary.can_create_count} 个 can_create · ${data.summary.banned_count} 个 banned`
+            ? `共 ${data.summary.total} 条账号记录 · ${data.summary.verified_count} 个已验证用户 · ${data.summary.unverified_count} 个未验证 · ${data.summary.admin_count} 个 admin`
             : "—"
         }
       />
@@ -110,6 +113,18 @@ export default function UsersPage() {
               setPage(1);
             }}
           />
+          <Segmented<VerifiedFilter>
+            value={verified}
+            options={[
+              { value: "all", label: "全部验证" },
+              { value: "verified", label: "已验证" },
+              { value: "unverified", label: "未验证" },
+            ]}
+            onChange={(v) => {
+              setVerified(v);
+              setPage(1);
+            }}
+          />
           <Select
             value={orderBy}
             onChange={(v) => setOrderBy(v as OrderBy)}
@@ -131,7 +146,7 @@ export default function UsersPage() {
           <thead>
             <tr>
               <th style={{ width: 240 }}>用户</th>
-              <th style={{ width: 160 }}>权限</th>
+              <th style={{ width: 210 }}>验证 / 权限</th>
               <th style={{ width: 90 }}>状态</th>
               <th style={{ width: 130 }}>注册时间</th>
               <th style={{ width: 130 }}>最近登录</th>
@@ -246,6 +261,11 @@ function UserRow({
       </td>
       <td>
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {u.is_verified ? (
+            <Badge tone="success">已验证</Badge>
+          ) : (
+            <Badge tone="warning">未验证</Badge>
+          )}
           {u.is_admin && <Badge tone="accent">admin</Badge>}
           {u.can_create && <Badge tone="info">can_create</Badge>}
           {!u.is_admin && !u.can_create && <span className="dim-2">普通</span>}
@@ -354,6 +374,7 @@ function UserDrawer({
               </div>
             </div>
             <Row label="注册时间" value={u.created_at ? fmtDateTime(u.created_at) : "—"} />
+            <Row label="验证时间" value={u.verified_at ? fmtDateTime(u.verified_at) : "未验证"} />
             <Row label="最近登录" value={u.last_login_at ? fmtDateTime(u.last_login_at) : "—"} />
           </section>
 
@@ -380,7 +401,14 @@ function UserDrawer({
                   }}
                 >
                   <span className="mono dim">{ident.provider}</span>
-                  <span>{ident.email || ident.phone || "—"}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>{ident.email || ident.phone || "—"}</span>
+                    {ident.verified_at ? (
+                      <Badge tone="success">已验证</Badge>
+                    ) : (
+                      <Badge tone="warning">未验证</Badge>
+                    )}
+                  </span>
                 </div>
               ))
             )}

@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import inspect
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -40,6 +39,7 @@ from services.publish_service import (
     normalize_script_payload as _normalize_script_payload,
     _split_world_setting,
 )
+from utils import serialize_utc_datetime
 
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(get_current_admin_user)])
 
@@ -236,10 +236,10 @@ def _serialize_generation_task(task: GenerationTask | None, events: list[Generat
         "current_message": task.current_message,
         "last_event_seq": task.last_event_seq,
         "error_message": task.error_message,
-        "started_at": _serialize_utc_datetime(task.started_at),
-        "finished_at": _serialize_utc_datetime(task.finished_at),
-        "created_at": _serialize_utc_datetime(task.created_at),
-        "updated_at": _serialize_utc_datetime(task.updated_at),
+        "started_at": serialize_utc_datetime(task.started_at),
+        "finished_at": serialize_utc_datetime(task.finished_at),
+        "created_at": serialize_utc_datetime(task.created_at),
+        "updated_at": serialize_utc_datetime(task.updated_at),
         "events": [
             {
                 "id": str(event.id),
@@ -275,12 +275,6 @@ async def _load_latest_generation_task(
         )
     ).scalars().all()
     return task, list(events)
-
-
-def _serialize_utc_datetime(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _extract_generated_name(task: GenerationTask) -> str | None:
@@ -320,8 +314,8 @@ def _world_draft_detail(
         "id": str(draft.id),
         "world_id": str(draft.world_id) if draft.world_id else None,
         "payload": draft.payload,
-        "updated_at": _serialize_utc_datetime(draft.updated_at),
-        "created_at": _serialize_utc_datetime(draft.created_at),
+        "updated_at": serialize_utc_datetime(draft.updated_at),
+        "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
     }
 
@@ -337,8 +331,8 @@ def _script_draft_detail(
         "world_id": str(draft.world_id),
         "script_id": str(draft.script_id) if draft.script_id else None,
         "payload": draft.payload,
-        "updated_at": _serialize_utc_datetime(draft.updated_at),
-        "created_at": _serialize_utc_datetime(draft.created_at),
+        "updated_at": serialize_utc_datetime(draft.updated_at),
+        "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
     }
 
@@ -468,9 +462,9 @@ async def list_generation_tasks(
             "fidelity_mode": req.get("fidelity_mode"),
             "ip_name": (req.get("ip_recognition") or req.get("pre_recognition") or {}).get("ip_name"),
             "generated_name": _extract_generated_name(t),
-            "created_at": _serialize_utc_datetime(t.created_at),
-            "started_at": _serialize_utc_datetime(t.started_at),
-            "finished_at": _serialize_utc_datetime(t.finished_at),
+            "created_at": serialize_utc_datetime(t.created_at),
+            "started_at": serialize_utc_datetime(t.started_at),
+            "finished_at": serialize_utc_datetime(t.finished_at),
         })
 
     return {"code": 0, "data": {"items": items, "total": total, "page": page, "limit": limit}}
