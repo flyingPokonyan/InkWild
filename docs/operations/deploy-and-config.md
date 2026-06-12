@@ -5,8 +5,8 @@
 这份文档目标是**实操向**：跟着这份从 0 把项目跑起来。配置项数量大，按域分组阅读；不用全填，每节标了"必填"和"可选"。
 
 > **TL;DR**：
-> - 本地开发：`docker compose up -d db redis`，前后端在 host 上跑 `npm run dev` / `uvicorn --reload`。
-> - 整套都在 docker 跑（调试用）：`docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`。
+> - 本地开发：`make setup && make dev-infra`，前后端在 host 上跑 `npm run dev` / `uvicorn --reload`。
+> - 整套都在 docker 跑（调试用）：`make setup && make dev-docker`。
 > - **生产部署**：`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`。
 > - 直接 `docker compose up` 跑的是**生产基底**（无 bind-mount、无 reload、`npm start`），但缺少生产 URL/cookie domain/CORS 等配置，**不要在服务器上这么用**。
 
@@ -83,7 +83,7 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml -p inkwild \
 | `admin-frontend`（Next.js） | ✅ | 同 frontend，独立后台 |
 | `backup`（postgres:16-alpine + 03:00 cron） | ✅ | `docker-compose.yml`，详见 `docs/operations/observability-backup.md §5` |
 | `depends_on` healthcheck 串联 | ✅ | backend 等 db + redis 健康；backup 等 db |
-| 端口映射 | ✅ | dev：`0.0.0.0:5432/6379/8000/3000/3001`；prod：`127.0.0.1:*`（仅 nginx 可访问） |
+| 端口映射 | ✅ | `make dev-docker`：只暴露 `3000/3001/8000`，DB/Redis 留在 Docker 内网；`make dev-infra`：额外暴露 `5432/6379` 给宿主进程；prod：`127.0.0.1:*`（仅 nginx 可访问） |
 | volumes 持久化（pgdata + backups） | ✅ | named volumes |
 
 ### B. 配置加载
@@ -374,12 +374,15 @@ git clone <repo> inkwild
 cd inkwild
 
 # 2. 准备 .env
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env  # 可选
+make setup
+# make setup 只在文件不存在时复制:
+#   backend/.env
+#   frontend/.env.local
+#   admin-frontend/.env.local
 # 编辑 backend/.env：至少填 DEEPSEEK_API_KEY
 
 # 3. 起基础设施（db + redis）
-docker compose up -d db redis
+make dev-infra
 
 # 4. 后端依赖 + 迁移 + 启动
 cd backend
@@ -400,10 +403,10 @@ cd ..
 cd admin-frontend && npm install && npm run dev   # http://localhost:3001
 ```
 
-如果你想"整套都跑 docker"（少见，比如要在 Linux 上调 docker 网络问题）：
+如果你想"整套都跑 docker"：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+make dev-docker
 ```
 
 注意点：
@@ -425,7 +428,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 | 维度 | 本地 dev | 生产 prod |
 |---|---|---|
-| Compose 调用 | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d` 或 host 直跑 | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build` |
+| Compose 调用 | `make dev-docker` 或 host 直跑 + `make dev-infra` | `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build` |
 | 前端模式 | `next dev`（turbopack，HMR） | `next start`（构建产物） |
 | 后端 reload | `uvicorn --reload` | `uvicorn`（无 reload） |
 | 端口绑定 | `0.0.0.0:*`（host 直访） | `127.0.0.1:*`（nginx 反代） |

@@ -13,6 +13,8 @@ make setup
 make dev-docker
 ```
 
+`make setup` copies example env files to `backend/.env`, `frontend/.env.local`, and `admin-frontend/.env.local` if they do not already exist. It does not overwrite existing files, install dependencies, start services, or generate real secrets.
+
 This mode exposes only the app ports (`3000`, `3001`, `8000`). Postgres and Redis stay on Docker's internal network to avoid conflicts with local services.
 The Makefile uses Compose project name `inkwild` by default. Override it with `COMPOSE_PROJECT=...` when you intentionally want a separate stack.
 
@@ -90,6 +92,8 @@ Minimum useful backend key:
 ```dotenv
 DEEPSEEK_API_KEY=...
 ```
+
+Private provider keys belong in `backend/.env`. Do not put provider keys in `frontend/.env.local` or `admin-frontend/.env.local`; those files only contain public browser-side values such as `NEXT_PUBLIC_API_URL`.
 
 Optional integrations:
 
