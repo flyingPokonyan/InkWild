@@ -33,6 +33,22 @@ from llm.usage_context import current_usage_context
 
 logger = structlog.get_logger()
 
+# DeepSeek json_object mode degrades under long context by emitting a run of
+# whitespace then ``finish_reason=stop`` (observed 247–656 whitespace chars in
+# the 2026-06-11 100-round soak). No legitimate json_object output has this many
+# leading whitespace chars before any content, so a buffer that has crossed this
+# size while still stripping to empty is a safe "dead stream" signal — abort and
+# retry rather than draining the full 30–60s decode.
+_EMPTY_STREAM_ABORT_CHARS = 64
+
+
+def _should_abort_empty_stream(
+    accumulated: str, threshold: int = _EMPTY_STREAM_ABORT_CHARS
+) -> bool:
+    """True when the stream has emitted ``>= threshold`` chars that are *all*
+    whitespace — the json_object empty-output degradation signature."""
+    return len(accumulated) >= threshold and not accumulated.strip()
+
 
 def _find_last_outer_comma(buf: str) -> int:
     """位于顶层 object 内（depth==1）的最后一个 comma 索引，
@@ -844,14 +860,24 @@ class DirectorAgent:
 
         model_id = self.llm_router.current_model_id()
         if self.prefer_json_mode is True:
-            mode = StructuredOutputMode.JSON_OBJECT
+            primary_mode = StructuredOutputMode.JSON_OBJECT
         elif self.prefer_json_mode is False:
-            mode = StructuredOutputMode.TOOL_USE_AUTO
+            primary_mode = StructuredOutputMode.TOOL_USE_AUTO
         else:
-            mode = capability_for(model_id).structured_output_mode
+            primary_mode = capability_for(model_id).structured_output_mode
 
         last_feedback = ""
         for attempt in range(3):
+            # json_object empty/garbage output is mode-specific (DeepSeek long-
+            # context degradation). Retrying in the same mode re-hits it; escalate
+            # to forced tool_use, which samples a different mechanism (verified
+            # reliable on OpenCode deepseek-v4-pro with reasoning off).
+            mode = primary_mode
+            escalated = (
+                attempt >= 1 and primary_mode == StructuredOutputMode.JSON_OBJECT
+            )
+            if escalated:
+                mode = StructuredOutputMode.FORCED_TOOL
             mutated_system = base_system
             if last_feedback:
                 mutated_system = (
@@ -924,6 +950,24 @@ class DirectorAgent:
                     attempt=attempt + 1,
                     mode=mode.value,
                     reason=str(exc),
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001
+                # The escalated forced-tool fallback can hit a provider that
+                # rejects tool_choice (e.g. reasoning left ON: "Thinking mode
+                # does not support this tool_choice"). Contain it to the
+                # fallback path so a misconfigured binding degrades to a normal
+                # parse_failure instead of crashing the turn; primary-mode
+                # upstream errors (402/transport) still surface as before.
+                if not escalated:
+                    raise
+                logger.warning(
+                    "director_v2.escalated_tool_fallback_failed",
+                    attempt=attempt + 1,
+                    reason=str(exc),
+                )
+                last_feedback = (
+                    "- 工具调用失败，请直接产出合法 JSON 对象。"
                 )
                 continue
 
@@ -1059,6 +1103,14 @@ class DirectorAgent:
             ):
                 if event["type"] == "text_delta":
                     text_parts.append(event.get("text", ""))
+                    if _should_abort_empty_stream("".join(text_parts)):
+                        # Dead whitespace stream — stop draining and let the
+                        # terminal `empty` path below trigger a fast retry.
+                        logger.warning(
+                            "director_v2.json_mode_empty_stream_aborted",
+                            output_chars=len("".join(text_parts)),
+                        )
+                        break
                     if on_partial:
                         accumulated = "".join(text_parts)
                         # JSON 可能包在 markdown ```json fence 里——剥掉前导
@@ -1223,6 +1275,12 @@ class DirectorAgent:
             ):
                 if event["type"] == "text_delta":
                     text_parts.append(event.get("text", ""))
+                    if _should_abort_empty_stream("".join(text_parts)):
+                        logger.warning(
+                            "director.json_mode_empty_stream_aborted",
+                            output_chars=len("".join(text_parts)),
+                        )
+                        break
                 elif event["type"] == "usage":
                     usage_data = event
         except Exception as exc:  # noqa: BLE001
