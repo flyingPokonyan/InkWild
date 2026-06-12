@@ -93,6 +93,7 @@ export interface AdminProgressEvent {
 }
 
 export interface AdminSSECallbacks<T> {
+  onEvent?: (event: { name: string; seq?: number; payload: unknown }) => void;
   onProgress?: (event: AdminProgressEvent) => void;
   onWarning?: (event: AdminProgressEvent) => void;
   onResult?: (payload: T) => void;

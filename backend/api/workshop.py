@@ -12,7 +12,6 @@ import asyncio
 import base64
 import json
 import re
-from datetime import UTC, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -64,6 +63,7 @@ from services.world_image_fields import (
     resolve_world_image_fields_from_mapping,
     resolve_world_image_fields_from_model,
 )
+from utils import serialize_utc_datetime
 from llm.deepseek import DeepSeekProvider
 from llm.router import LLMRouter
 from llm.usage_context import usage_context
@@ -102,8 +102,11 @@ def _assert_owner(obj, user: User, label: str = "resource") -> None:
 # ---------------------------------------------------------------------------
 
 
-def _to_sse_event(event: str, payload: dict) -> dict:
-    return {"event": event, "data": json.dumps(payload, ensure_ascii=False)}
+def _to_sse_event(event: str, payload: dict, *, seq: int | None = None) -> dict:
+    sse_event = {"event": event, "data": json.dumps(payload, ensure_ascii=False)}
+    if seq is not None:
+        sse_event["id"] = str(seq)
+    return sse_event
 
 
 # ---------------------------------------------------------------------------
@@ -184,14 +187,8 @@ def _generation_task_limit_error(exc: GenerationTaskLimitExceeded) -> HTTPExcept
 
 
 # ---------------------------------------------------------------------------
-# Serialisation helpers (mirrored from admin.py)
+# Serialisation helpers
 # ---------------------------------------------------------------------------
-
-
-def _serialize_utc_datetime(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    return value.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z")
 
 
 def _serialize_generation_task(
@@ -211,10 +208,10 @@ def _serialize_generation_task(
         "current_message": task.current_message,
         "last_event_seq": task.last_event_seq,
         "error_message": task.error_message,
-        "started_at": _serialize_utc_datetime(task.started_at),
-        "finished_at": _serialize_utc_datetime(task.finished_at),
-        "created_at": _serialize_utc_datetime(task.created_at),
-        "updated_at": _serialize_utc_datetime(task.updated_at),
+        "started_at": serialize_utc_datetime(task.started_at),
+        "finished_at": serialize_utc_datetime(task.finished_at),
+        "created_at": serialize_utc_datetime(task.created_at),
+        "updated_at": serialize_utc_datetime(task.updated_at),
         "events": [
             {
                 "id": str(event.id),
@@ -262,8 +259,8 @@ def _world_draft_detail(
         "id": str(draft.id),
         "world_id": str(draft.world_id) if draft.world_id else None,
         "payload": draft.payload,
-        "updated_at": _serialize_utc_datetime(draft.updated_at),
-        "created_at": _serialize_utc_datetime(draft.created_at),
+        "updated_at": serialize_utc_datetime(draft.updated_at),
+        "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
     }
 
@@ -298,8 +295,8 @@ def _script_draft_detail(
         "payload": draft.payload,
         # 该剧本所属世界的全部可玩角色，编辑器据此渲染可玩角色多选清单。
         "world_playable_characters": world_playable_characters or [],
-        "updated_at": _serialize_utc_datetime(draft.updated_at),
-        "created_at": _serialize_utc_datetime(draft.created_at),
+        "updated_at": serialize_utc_datetime(draft.updated_at),
+        "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
     }
 
@@ -654,7 +651,7 @@ async def stream_generation_task(
 
     async def event_generator():
         async for item in service.stream_task_events(task_id, after_seq=after_seq):
-            yield _to_sse_event(item["event"], item["payload"])
+            yield _to_sse_event(item["event"], item["payload"], seq=item.get("seq"))
 
     return EventSourceResponse(event_generator(), ping=15)
 
@@ -802,7 +799,7 @@ async def list_workshop_worlds(
             "cover_image": images["cover_image"],
             "hero_image": images["hero_image"],
             "world_id": None,
-            "updated_at": _serialize_utc_datetime(draft.updated_at),
+            "updated_at": serialize_utc_datetime(draft.updated_at),
             "generation_status": latest_task.status if latest_task else None,
             "generation_task_id": str(latest_task.id) if latest_task else None,
         })
@@ -902,7 +899,7 @@ async def list_workshop_scripts(
                     "world_id": str(d.world_id),
                     "name": (d.payload or {}).get("name", "未命名剧本草稿"),
                     "description": (d.payload or {}).get("description", ""),
-                    "updated_at": _serialize_utc_datetime(d.updated_at),
+                    "updated_at": serialize_utc_datetime(d.updated_at),
                     "generation_status": latest_task_by_draft.get(str(d.id)).status if latest_task_by_draft.get(str(d.id)) else None,
                     "generation_task_id": str(latest_task_by_draft.get(str(d.id)).id) if latest_task_by_draft.get(str(d.id)) else None,
                 }

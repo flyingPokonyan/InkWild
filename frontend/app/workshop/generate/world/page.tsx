@@ -17,11 +17,13 @@ import {
 import {
   workshopFetch,
   continueWorldDraftGeneration,
+  getGenerationTask,
   streamAdminEvents,
   type AdminProgressEvent,
 } from "@/lib/workshop-api";
 import { isIPRecognitionEvent, type IPRecognitionEvent } from "@/lib/admin-sse-events";
-import type { AdminGenerationTaskCreateResponse } from "@/lib/types";
+import type { ProgressMeta } from "@/lib/admin-sse-events";
+import type { AdminGenerationTaskCreateResponse, AdminGenerationTaskEvent } from "@/lib/types";
 
 type GenStep = "prompt" | "options";
 const STEPS_ORDER: GenStep[] = ["prompt", "options"];
@@ -35,6 +37,37 @@ function compactText(value: string, max = 34): string {
 }
 
 type FidelityMode = "strict" | "loose" | "none";
+const STREAM_RECONNECT_LIMIT = 5;
+const STREAM_RECONNECT_DELAY_MS = 1200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function streamPath(taskId: string, afterSeq: number): string {
+  const query = afterSeq > 0 ? `?after_seq=${afterSeq}` : "";
+  return `/api/workshop/generation-tasks/${taskId}/stream${query}`;
+}
+
+function extractIpRecognitionFromEvents(
+  events: AdminGenerationTaskEvent[],
+): IPRecognitionEvent["meta"] | null {
+  for (const event of events) {
+    if (event.event !== "progress") {
+      continue;
+    }
+    const progress = {
+      phase: String(event.payload.phase || ""),
+      code: String(event.payload.code || ""),
+      message: String(event.payload.message || ""),
+      meta: event.payload.meta as ProgressMeta | undefined,
+    };
+    if (isIPRecognitionEvent(progress)) {
+      return progress.meta;
+    }
+  }
+  return null;
+}
 
 export default function GenerateWorldPage() {
   const router = useRouter();
@@ -94,31 +127,76 @@ export default function GenerateWorldPage() {
     ): Promise<{ didComplete: boolean; ipRec: IPRecognitionEvent["meta"] | null }> => {
       let didComplete = false;
       let ipRec: IPRecognitionEvent["meta"] | null = null;
+      let afterSeq = 0;
+      let reconnects = 0;
 
-      const controller = new AbortController();
-      streamAbortRef.current = controller;
+      while (true) {
+        let streamError: string | null = null;
+        const controller = new AbortController();
+        streamAbortRef.current = controller;
 
-      await streamAdminEvents(`/api/workshop/generation-tasks/${taskId}/stream`, {
-        onProgress: (event: AdminProgressEvent) => {
-          setPhases((prev) => appendAdminPhaseEvent(prev, event));
-          if (isIPRecognitionEvent(event)) {
-            ipRec = event.meta;
-            setIpRecognition(event.meta);
+        const result = await streamAdminEvents(streamPath(taskId, afterSeq), {
+          onEvent: (event) => {
+            if (typeof event.seq === "number" && event.seq > afterSeq) {
+              afterSeq = event.seq;
+            }
+          },
+          onProgress: (event: AdminProgressEvent) => {
+            setPhases((prev) => appendAdminPhaseEvent(prev, event));
+            if (isIPRecognitionEvent(event)) {
+              ipRec = event.meta;
+              setIpRecognition(event.meta);
+              setCardDecided(false);
+              setContinueError(null);
+            }
+          },
+          onWarning: (event: AdminProgressEvent) => {
+            setPhases((prev) => appendAdminPhaseEvent(prev, event, "warning"));
+          },
+          onResult: () => {
+            didComplete = true;
+          },
+          onError: (message) => {
+            streamError = message;
+          },
+        }, { signal: controller.signal });
+
+        if (streamAbortRef.current === controller) {
+          streamAbortRef.current = null;
+        }
+
+        if (result.aborted) {
+          return { didComplete: false, ipRec };
+        }
+
+        const task = await getGenerationTask(taskId).catch(() => null);
+        if (task?.events?.length && !ipRec) {
+          const recognition = extractIpRecognitionFromEvents(task.events);
+          if (recognition) {
+            ipRec = recognition;
+            setIpRecognition(recognition);
             setCardDecided(false);
             setContinueError(null);
           }
-        },
-        onWarning: (event: AdminProgressEvent) => {
-          setPhases((prev) => appendAdminPhaseEvent(prev, event, "warning"));
-        },
-        onResult: () => {
-          didComplete = true;
-        },
-        onError: (message) => setError(message),
-      }, { signal: controller.signal });
+        }
 
-      streamAbortRef.current = null;
-      return { didComplete, ipRec };
+        if (didComplete || task?.status === "succeeded") {
+          return { didComplete: true, ipRec };
+        }
+
+        if (task?.status === "failed" || task?.status === "cancelled") {
+          setError(task.error_message || streamError || "生成失败");
+          return { didComplete: false, ipRec };
+        }
+
+        reconnects += 1;
+        if (reconnects > STREAM_RECONNECT_LIMIT || result.timedOut) {
+          setError("连接不稳定，生成任务仍在后台运行。请稍后返回创作工坊查看草稿。");
+          return { didComplete: false, ipRec };
+        }
+
+        await sleep(STREAM_RECONNECT_DELAY_MS * reconnects);
+      }
     },
     [],
   );

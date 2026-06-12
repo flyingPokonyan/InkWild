@@ -21,11 +21,27 @@ import {
   type AdminPhaseEntry,
 } from "@/lib/admin-progress-state";
 import { LV_EASE, lvStaggerContainer } from "@/lib/motion";
-import { workshopFetch, streamAdminEvents, type AdminProgressEvent } from "@/lib/workshop-api";
+import {
+  getGenerationTask,
+  workshopFetch,
+  streamAdminEvents,
+  type AdminProgressEvent,
+} from "@/lib/workshop-api";
 import type { AdminGenerationTaskCreateResponse, AdminWorldListResponse } from "@/lib/types";
 
 type GenStep = "world_select" | "prompt";
 const STEPS_ORDER: GenStep[] = ["world_select", "prompt"];
+const STREAM_RECONNECT_LIMIT = 5;
+const STREAM_RECONNECT_DELAY_MS = 1200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function streamPath(taskId: string, afterSeq: number): string {
+  const query = afterSeq > 0 ? `?after_seq=${afterSeq}` : "";
+  return `/api/workshop/generation-tasks/${taskId}/stream${query}`;
+}
 
 function compactText(value: string, max = 34): string {
   const text = value.trim().replace(/\s+/g, " ");
@@ -165,19 +181,62 @@ function GenerateScriptPageContent() {
       return;
     }
 
-    const abortController = new AbortController();
-    streamAbortRef.current = abortController;
-    await streamAdminEvents(`/api/workshop/generation-tasks/${taskMeta.task_id}/stream`, {
-      onProgress: trackPhase, 
-      onWarning: trackWarning,
-      onResult: () => { didComplete = true; }, 
-      onError: (m) => setError(m),
-    }, {
-      signal: abortController.signal,
-    });
-    
+    let afterSeq = 0;
+    let reconnects = 0;
+    while (!didComplete) {
+      let streamError: string | null = null;
+      const abortController = new AbortController();
+      streamAbortRef.current = abortController;
+      const streamResult = await streamAdminEvents(streamPath(taskMeta.task_id, afterSeq), {
+        onEvent: (event) => {
+          if (typeof event.seq === "number" && event.seq > afterSeq) {
+            afterSeq = event.seq;
+          }
+        },
+        onProgress: trackPhase,
+        onWarning: trackWarning,
+        onResult: () => { didComplete = true; },
+        onError: (m) => {
+          streamError = m;
+        },
+      }, {
+        signal: abortController.signal,
+      });
+      if (streamAbortRef.current === abortController) {
+        streamAbortRef.current = null;
+      }
+
+      if (streamResult.aborted) {
+        stopTimer();
+        setGenerating(false);
+        return;
+      }
+
+      const task = await getGenerationTask(taskMeta.task_id).catch(() => null);
+      if (task?.status === "succeeded") {
+        didComplete = true;
+        break;
+      }
+      if (task?.status === "failed" || task?.status === "cancelled") {
+        stopTimer();
+        setGenerating(false);
+        setError(task.error_message || streamError || "生成失败");
+        setPhases((prev) => markLatestAdminPhaseAsError(prev));
+        return;
+      }
+
+      reconnects += 1;
+      if (reconnects > STREAM_RECONNECT_LIMIT || streamResult.timedOut) {
+        stopTimer();
+        setGenerating(false);
+        setError("连接不稳定，生成任务仍在后台运行。请稍后返回创作工坊查看草稿。");
+        setPhases((prev) => markLatestAdminPhaseAsError(prev));
+        return;
+      }
+      await sleep(STREAM_RECONNECT_DELAY_MS * reconnects);
+    }
+
     stopTimer();
-    streamAbortRef.current = null;
     
     if (!taskMeta) {
       setGenerating(false);

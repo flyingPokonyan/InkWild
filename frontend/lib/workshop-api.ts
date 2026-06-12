@@ -1,8 +1,15 @@
 import { dispatchAdminSseEvent, type AdminSSECallbacks } from "./admin-sse-events";
 import { extractSSEBlocks } from "./sse-parser";
-import type { ApiEnvelope, ApiErrorDetail } from "./types";
+import type { AdminGenerationTaskSummary, ApiEnvelope, ApiErrorDetail } from "./types";
 
 const ADMIN_STREAM_TIMEOUT_MS = 30 * 60 * 1000;
+
+export type AdminStreamResult = {
+  completed: boolean;
+  aborted: boolean;
+  timedOut: boolean;
+  errorMessage: string | null;
+};
 
 export class AdminPermissionError extends Error {
   status: number;
@@ -182,7 +189,7 @@ export async function streamAdminEvents<T>(
     body?: Record<string, unknown>;
     signal?: AbortSignal;
   },
-): Promise<void> {
+): Promise<AdminStreamResult> {
   const timeout = createTimeoutSignal(options?.signal);
   const headers = new Headers({ Accept: "text/event-stream" });
   if (options?.body) {
@@ -203,22 +210,24 @@ export async function streamAdminEvents<T>(
     if (timeout.didTimeout()) {
       callbacks.onError?.("任务超时");
       callbacks.onDone?.();
-      return;
+      return { completed: false, aborted: false, timedOut: true, errorMessage: "任务超时" };
     }
     if (error instanceof DOMException && error.name === "AbortError") {
-      return;
+      return { completed: false, aborted: true, timedOut: false, errorMessage: null };
     }
-    callbacks.onError?.(error instanceof Error ? error.message : "连接失败");
+    const message = error instanceof Error ? error.message : "连接失败";
+    callbacks.onError?.(message);
     callbacks.onDone?.();
-    return;
+    return { completed: false, aborted: false, timedOut: false, errorMessage: message };
   }
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     timeout.cleanup();
-    callbacks.onError?.(buildErrorMessage(payload, "连接失败"));
+    const message = buildErrorMessage(payload, "连接失败");
+    callbacks.onError?.(message);
     callbacks.onDone?.();
-    return;
+    return { completed: false, aborted: false, timedOut: false, errorMessage: message };
   }
 
   const reader = response.body?.getReader();
@@ -226,13 +235,14 @@ export async function streamAdminEvents<T>(
     timeout.cleanup();
     callbacks.onError?.("未收到流式响应");
     callbacks.onDone?.();
-    return;
+    return { completed: false, aborted: false, timedOut: false, errorMessage: "未收到流式响应" };
   }
 
   const decoder = new TextDecoder();
   let buffer = "";
   let sawDone = false;
   let aborted = false;
+  let errorMessage: string | null = null;
 
   try {
     while (true) {
@@ -244,17 +254,24 @@ export async function streamAdminEvents<T>(
       for (const chunk of blocks) {
         const lines = chunk.trim().split("\n");
         let eventName = "message";
+        let eventSeq: number | undefined;
         const dataLines: string[] = [];
 
         for (const line of lines) {
           if (line.startsWith("event: ")) {
             eventName = line.slice(7).trim();
+          } else if (line.startsWith("id: ")) {
+            const parsedSeq = Number.parseInt(line.slice(4).trim(), 10);
+            if (Number.isFinite(parsedSeq)) {
+              eventSeq = parsedSeq;
+            }
           } else if (line.startsWith("data: ")) {
             dataLines.push(line.slice(6));
           }
         }
 
         const payload = dataLines.length > 0 ? JSON.parse(dataLines.join("\n")) : {};
+        callbacks.onEvent?.({ name: eventName, seq: eventSeq, payload });
         if (dispatchAdminSseEvent<T>(eventName, payload, callbacks)) {
           sawDone = true;
         }
@@ -264,14 +281,16 @@ export async function streamAdminEvents<T>(
     }
   } catch (error) {
     if (timeout.didTimeout()) {
+      errorMessage = "任务超时";
       callbacks.onError?.("任务超时");
-      return;
+      return { completed: sawDone, aborted: false, timedOut: true, errorMessage };
     }
     if (error instanceof DOMException && error.name === "AbortError") {
       aborted = true;
-      return;
+      return { completed: sawDone, aborted: true, timedOut: false, errorMessage: null };
     }
-    callbacks.onError?.(error instanceof Error ? error.message : "流式连接中断");
+    errorMessage = error instanceof Error ? error.message : "流式连接中断";
+    callbacks.onError?.(errorMessage);
   } finally {
     timeout.cleanup();
     if (timeout.didTimeout()) {
@@ -281,6 +300,8 @@ export async function streamAdminEvents<T>(
       callbacks.onDone?.();
     }
   }
+
+  return { completed: sawDone, aborted, timedOut: timeout.didTimeout(), errorMessage };
 }
 
 export async function streamAdminRequest<T>(
@@ -290,10 +311,14 @@ export async function streamAdminRequest<T>(
   options?: {
     signal?: AbortSignal;
   },
-): Promise<void> {
+): Promise<AdminStreamResult> {
   return streamAdminEvents(path, callbacks, {
     method: "POST",
     body,
     signal: options?.signal,
   });
+}
+
+export async function getGenerationTask(taskId: string): Promise<AdminGenerationTaskSummary> {
+  return workshopFetch<AdminGenerationTaskSummary>(`/api/workshop/generation-tasks/${taskId}`);
 }
