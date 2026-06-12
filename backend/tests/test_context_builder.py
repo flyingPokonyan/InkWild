@@ -127,6 +127,46 @@ def test_director_state_view_slims_info_items():
     assert state.info_items[0]["known_by"] == roster
 
 
+def test_director_state_view_slims_discovered_clues():
+    # discovered_clues grows unbounded in long free sessions (169 entries / ~12k
+    # tokens observed at R120) and is invisible to users (side panel disabled).
+    # The view tail-caps clue content; full clues stay in GameState so the
+    # script-mode case (event_system clue-id triggers / endings) is untouched.
+    state = GameState(current_time="第1天·上午", current_location="图书馆")
+    state.discovered_clues = [
+        {"id": f"clue_{i:03d}", "content": f"线索{i}", "found_at": "上午"}
+        for i in range(40)
+    ]
+
+    view = director_state_view(state)
+    clues = view["discovered_clues"]
+
+    # most recent 30 retained verbatim
+    recent = [c for c in clues if "content" in c]
+    assert len(recent) == 30
+    assert recent[-1]["content"] == "线索39"
+    assert recent[0]["content"] == "线索10"
+    # older entries folded into a single count signal, not dumped
+    assert any(c.get("_older_clues_omitted") == 10 for c in clues)
+    # view-only: persisted state keeps all 40 for script judging / count
+    assert len(state.discovered_clues) == 40
+    assert state.discovered_clues[0]["content"] == "线索0"
+
+
+def test_director_state_view_keeps_short_clue_list_intact():
+    state = GameState(current_time="第1天·上午", current_location="图书馆")
+    state.discovered_clues = [
+        {"id": f"clue_{i:03d}", "content": f"线索{i}", "found_at": "上午"}
+        for i in range(5)
+    ]
+
+    view = director_state_view(state)
+
+    # below the cap → unchanged, no fold marker
+    assert view["discovered_clues"] == state.discovered_clues
+    assert not any("_older_clues_omitted" in c for c in view["discovered_clues"])
+
+
 def test_director_state_view_drops_empty_containers_keeps_scalars():
     state = GameState(current_time="第1天·上午", current_location="大堂")
 

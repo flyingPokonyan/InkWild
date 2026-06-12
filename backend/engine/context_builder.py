@@ -128,6 +128,17 @@ _DIRECTOR_PLAYER_ACTIONS_TAIL = 3
 # (→ ``known_count``) and tail-caps to the most recent items. Full info_items
 # stay in GameState for info_propagation / world_simulator / intent_system.
 _DIRECTOR_INFO_ITEMS_TAIL = 15
+# discovered_clues grows unbounded in long free-mode sessions (169 entries /
+# ~12k tokens at round 120) and is currently invisible to users (the play-page
+# side panel that displayed it is disabled). The accumulating full-text list is
+# the largest remaining append-only contributor to the Director's rising input
+# baseline, which correlates with DeepSeek json_object empty-output degradation.
+# The view tail-caps clue content to the recent window (Director only needs
+# recent clues for narrative continuity) and folds the rest into a single count.
+# Full discovered_clues stay in GameState so the count signal (narrative_arc
+# pacing) and clue-id triggers (event_system endings — script-mode judging) are
+# untouched; the Director's clue_id constraint is also built from the full list.
+_DIRECTOR_CLUES_TAIL = 30
 
 
 def _slim_info_items(items: list) -> list:
@@ -142,6 +153,13 @@ def _slim_info_items(items: list) -> list:
             slim["known_count"] = len(known_by)
         out.append(slim)
     return out
+
+
+def _slim_discovered_clues(clues: list) -> list:
+    if len(clues) <= _DIRECTOR_CLUES_TAIL:
+        return clues
+    omitted = len(clues) - _DIRECTOR_CLUES_TAIL
+    return [{"_older_clues_omitted": omitted}, *clues[-_DIRECTOR_CLUES_TAIL:]]
 
 
 def director_state_view(state: GameState) -> dict:
@@ -162,6 +180,8 @@ def director_state_view(state: GameState) -> dict:
             value = value[-_DIRECTOR_PLAYER_ACTIONS_TAIL:]
         elif key == "info_items" and isinstance(value, list):
             value = _slim_info_items(value)
+        elif key == "discovered_clues" and isinstance(value, list):
+            value = _slim_discovered_clues(value)
         if isinstance(value, (list, dict, str)) and not value:
             continue  # drop empty containers / strings — no signal, pure tokens
         out[key] = value
