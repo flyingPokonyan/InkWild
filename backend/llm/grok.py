@@ -172,33 +172,54 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
+        # The gateway force-streams responses as SSE (`data: {chunk}`) even when
+        # stream isn't requested, so a single resp.json() chokes on char 0 — this
+        # is why web_search silently failed for every IP. Parse the SSE stream:
+        # accumulate delta content and capture the top-level `search_sources`
+        # field that xAI Live Search emits in one of the chunks.
+        payload["stream"] = True
+        text_parts: list[str] = []
+        raw_sources: list[dict] = []
         try:
-            # 100s：multi-agent-xhigh 这类重型 grok 模型一条 Live Search 实测 ~55s，
-            # 60s 会贴边偶发超时→静默返回空结果。给到 100s 留足余量。
+            # 100s：Live Search 深查实测可达 ~75s（grok-4.20-fast），60s 会贴边偶发
+            # 超时→静默返回空结果。给到 100s 留足余量。
             async with httpx.AsyncClient(timeout=100.0) as http:
-                resp = await http.post(url, headers=headers, json=payload)
-            if resp.status_code != 200:
-                logger.warning(
-                    "grok_web_search_http_error",
-                    query=query,
-                    status=resp.status_code,
-                    body=resp.text[:300],
-                )
-                return WebSearchResult(query=query)
-            data = resp.json()
+                async with http.stream("POST", url, headers=headers, json=payload) as resp:
+                    if resp.status_code != 200:
+                        body = (await resp.aread())[:300]
+                        logger.warning(
+                            "grok_web_search_http_error",
+                            query=query,
+                            status=resp.status_code,
+                            body=body,
+                        )
+                        return WebSearchResult(query=query)
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        chunk = line[5:].strip()
+                        if not chunk or chunk == "[DONE]":
+                            continue
+                        try:
+                            obj = json.loads(chunk)
+                        except json.JSONDecodeError:
+                            continue
+                        src = obj.get("search_sources")
+                        if isinstance(src, list):
+                            raw_sources.extend(src)
+                        for ch in obj.get("choices") or []:
+                            piece = ((ch or {}).get("delta") or {}).get("content")
+                            if piece:
+                                text_parts.append(piece)
         except Exception:  # noqa: BLE001
             logger.warning("grok_web_search_failed", query=query, exc_info=True)
             return WebSearchResult(query=query)
 
-        choices = data.get("choices") or []
-        text = ""
-        if choices:
-            msg = (choices[0] or {}).get("message") or {}
-            text = str(msg.get("content") or "").strip()
+        text = "".join(text_parts).strip()
 
         citations: list[dict] = []
         seen: set[str] = set()
-        for src in data.get("search_sources") or []:
+        for src in raw_sources:
             if not isinstance(src, dict):
                 continue
             url_ = str(src.get("url") or "").strip()

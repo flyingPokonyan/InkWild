@@ -108,6 +108,36 @@ def _heuristic_count(description: str) -> int | None:
     return None
 
 
+def _norm_name(name: str) -> str:
+    """规范化人名用于白名单匹配：去空白与中点。"""
+    return re.sub(r"[\s·•・]", "", str(name or "")).strip()
+
+
+def _prune_to_canon(
+    entries: list["CharacterRosterEntry"], ip_pack: IPKnowledgePack
+) -> list["CharacterRosterEntry"]:
+    """严格复刻：裁掉不在原作白名单（全部 ip_pack 角色名）里的角色，保证 0 原创。
+
+    白名单为空（研究完全失败）时不裁——否则会把强约束注入的原作角色也误删成空
+    roster。仅按 _norm_name 精确匹配；prompt 已强制 LLM 用原作名，对不齐的原作角色
+    会被记进 dropped 日志供 review 时核（而非静默）。
+    """
+    canon = {_norm_name(c.name) for c in ip_pack.characters if c.name}
+    if not canon:
+        return entries
+    kept = [e for e in entries if _norm_name(e.name) in canon]
+    dropped_names = [e.name for e in entries if _norm_name(e.name) not in canon]
+    if dropped_names:
+        logger.info(
+            "roster_strict_pruned_non_canon",
+            ip_name=ip_pack.ip_name,
+            kept=len(kept),
+            dropped=len(dropped_names),
+            dropped_names=dropped_names[:20],
+        )
+    return kept
+
+
 async def build_character_roster(
     description: str,
     genre: str,
@@ -163,12 +193,14 @@ async def build_character_roster(
         if must_have:
             if fidelity_mode == "strict":
                 user_content += (
-                    f"\n\n{_CONSTRAINT_HEADER_STRICT}角色清单**必须包含以下原作角色，name 字段使用原作名**：\n"
-                    f"{', '.join(must_have)}\n"
+                    f"\n\n{_CONSTRAINT_HEADER_STRICT}本世界为「严格复刻」，角色清单**只能由以下原作角色组成，"
+                    f"name 字段用原作名**，**禁止新增任何原创 / 路人 / 工具人角色**"
+                    f"（前文若提到生成 12-30 个，一律以本清单为准，宁少勿编）：\n"
+                    f"必含主线角色：{', '.join(must_have)}\n"
                 )
                 if optional:
-                    user_content += f"原作其他配角（建议覆盖）：{', '.join(optional[:10])}\n"
-                user_content += "可额外添加 ≤ 5 个原创配角。已列出的原作角色必须按原作 traits / relation 设定，勿自行更改。\n"
+                    user_content += f"其余原作角色（尽量收全）：{', '.join(optional)}\n"
+                user_content += "所有角色按原作 traits / relation 设定，勿改名、勿杜撰。\n"
             else:  # loose
                 user_content += (
                     f"\n\n{_CONSTRAINT_HEADER_LOOSE}原作核心角色：{', '.join(must_have)}\n"
@@ -212,6 +244,10 @@ async def build_character_roster(
                 ))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("roster_entry_parse_error", item=item, error=str(exc))
+
+        # 严格复刻：硬裁掉原作白名单外的角色，保证 0 原创（loose 不裁，允许扩展）。
+        if fidelity_mode == "strict" and ip_pack is not None:
+            entries = _prune_to_canon(entries, ip_pack)
         return entries
 
     except Exception as exc:  # noqa: BLE001

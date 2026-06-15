@@ -194,3 +194,65 @@ async def test_batches_concurrent_within_limit():
         batch_size=5, concurrency=2,  # 4 批，并发 2
     )
     assert in_flight["max"] <= 2
+
+
+# ---- strict fidelity: 0 originals via post-prune ----
+
+from schemas.ip_knowledge_pack import IPCharacter, IPKnowledgePack  # noqa: E402
+
+
+def _ip_pack(names_must_have: list[tuple[str, bool]]) -> IPKnowledgePack:
+    return IPKnowledgePack(
+        ip_name="唐朝诡事录", ip_type="tv", fidelity_mode="strict", summary="s",
+        characters=[
+            IPCharacter(name=n, role_in_story="x", relation_to_protagonist="y", must_have=mh)
+            for n, mh in names_must_have
+        ],
+        places=[], factions=[], iconic_objects=[], key_events=[],
+        tone_lingo=[], passages=[], timeline=[],
+    )
+
+
+_MIXED_ROSTER = (
+    '{"roster":['
+    '{"name":"卢凌风 ","role_tag":"主角","is_image_target":true},'  # 带空格，规范化后命中
+    '{"name":"苏无名","role_tag":"主角"},'
+    '{"name":"裴喜君","role_tag":"配角"},'
+    '{"name":"沈语","role_tag":"原创路人"},'      # 杜撰 -> 裁
+    '{"name":"杜铭","role_tag":"原创工具人"}]}'    # 杜撰 -> 裁
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_db
+async def test_strict_prunes_non_canon_characters():
+    pack = _ip_pack([("卢凌风", True), ("苏无名", True), ("裴喜君", False)])
+    roster = await build_character_roster(
+        "探案", "悬疑", "唐", IPCanon(), [], [], _make_router([_MIXED_ROSTER]),
+        ip_pack=pack, fidelity_mode="strict",
+    )
+    names = {e.name.strip() for e in roster}
+    assert names == {"卢凌风", "苏无名", "裴喜君"}  # 3 canon 留，2 杜撰裁掉
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_db
+async def test_loose_does_not_prune():
+    pack = _ip_pack([("卢凌风", True), ("苏无名", True), ("裴喜君", False)])
+    roster = await build_character_roster(
+        "探案", "悬疑", "唐", IPCanon(), [], [], _make_router([_MIXED_ROSTER]),
+        ip_pack=pack, fidelity_mode="loose",
+    )
+    assert len(roster) == 5  # loose 允许扩展，杜撰角色保留
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_db
+async def test_strict_empty_canon_skips_prune():
+    """研究完全失败（白名单空）时不裁，否则会裁成空 roster。"""
+    pack = _ip_pack([])
+    roster = await build_character_roster(
+        "探案", "悬疑", "唐", IPCanon(), [], [], _make_router([_MIXED_ROSTER]),
+        ip_pack=pack, fidelity_mode="strict",
+    )
+    assert len(roster) == 5
