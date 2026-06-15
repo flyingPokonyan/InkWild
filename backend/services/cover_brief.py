@@ -152,6 +152,19 @@ def derive_character_reference_anchor(
 # long negative lists do not improve compliance and sometimes confuse the model.
 _LOGO_NEGATIVE = "不要 logo、品牌、奖项、发行日期、电视台署名。"
 
+# Cinematic film-still framing + anti-collage. For big known IPs the dominant
+# failure mode is the "promo key-art montage" — the model stacks every iconic
+# symbol (throne + dragon + sigils + map …) into one over-saturated poster,
+# because that IS the IP's most common key-art on the open web. Asking for a
+# single cohesive film still and explicitly naming the collage/poster form as
+# off-limits pulls it off that mean — without specifying a concrete scene (the
+# cover stays a portrait of the IP's overall mood, not a depiction of one
+# moment). Feedback 2026-06-15.
+_CINEMATIC_COHESION = (
+    "整体呈现电影剧照质感：浑然一体、有统一焦点与景深的单一画面，像一帧电影镜头。"
+    "不要做成多个标志性元素拼贴、分屏或海报式堆叠的合成图，也不要高饱和的商业宣传海报感。"
+)
+
 # The site UI is near-black (--lv-bg #08080a). Without a nudge the model tends
 # to muddy images into that darkness; covers then disappear on the page. This
 # is defensive (avoid murky/oppressive), NOT a hard "make it bright" — so a
@@ -214,7 +227,8 @@ def build_world_hero_prompt(brief: CoverBrief, ip_fallback: bool = False) -> str
     return (
         f"{essence}"
         f"{subject}创作一幅 21:9 的代表性画面，用于网站首页全屏陈列。"
-        "请理解它的氛围与精神内核后自由创作，由你决定最能传达它的意象、构图与象征，不必罗列写实场景。"
+        "请理解这个作品的整体氛围与精神内核后自由创作，由你决定最能传达它气质的意象与构图。"
+        f"{_CINEMATIC_COHESION}"
         f"{_mood_clause(brief.mood)}"
         f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
@@ -233,8 +247,9 @@ def build_world_cover_prompt(brief: CoverBrief, ip_fallback: bool = False) -> st
     return (
         f"{essence}"
         f"{subject}创作一幅 3:2 的封面图，用于网站世界列表里的小尺寸卡片陈列，"
-        "缩略到 280px 宽时仍要一眼传达世界的气质。"
-        "请理解它的内核后自由创作，可聚焦一个核心意象，不必罗列写实场景。"
+        "缩略到 280px 宽时仍要一眼传达这个作品的整体气质。"
+        "请理解它的内核后自由创作，聚焦一个核心意象。"
+        f"{_CINEMATIC_COHESION}"
         f"{_mood_clause(brief.mood)}"
         f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
