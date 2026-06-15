@@ -694,3 +694,35 @@ async def test_submit_script_succeeds_with_published_world(db, sample_user, samp
 
     submitted = await submit_script_for_review(db, draft_id=draft.id, actor_user_id=sample_user.id)
     assert submitted.review_status == "submitted"
+
+
+# ---- voice_style / gender must survive draft normalization (regression) ----
+
+from services.publish_service import normalize_world_payload, _coerce_world_character  # noqa: E402
+
+
+@pytest.mark.no_db
+def test_coerce_world_character_forwards_voice_style_and_gender():
+    out = _coerce_world_character(
+        {"name": "苏无名", "personality": "沉稳", "voice_style": "自称在下，口头禅此事蹊跷", "gender": "男"}
+    )
+    assert out["voice_style"] == "自称在下，口头禅此事蹊跷"
+    assert out["gender"] == "男"
+
+
+@pytest.mark.no_db
+def test_normalize_world_payload_preserves_voice_style():
+    """voice_style 生成阶段产出后必须穿过写库归一化，否则 NPC 失去专属口吻。"""
+    payload = {
+        "name": "唐朝诡事录",
+        "world_characters": [
+            {"name": "苏无名", "personality": "x", "voice_style": "VS-A", "gender": "男"},
+            {"name": "卢凌风", "personality": "y", "voice_style": "VS-B"},
+        ],
+        "character_images": {"苏无名": "http://oss/su.png"},
+    }
+    out = normalize_world_payload(payload)
+    by_name = {c["name"]: c for c in out["world_characters"]}
+    assert by_name["苏无名"]["voice_style"] == "VS-A"
+    assert by_name["卢凌风"]["voice_style"] == "VS-B"
+    assert by_name["苏无名"]["avatar"] == "http://oss/su.png"  # avatar 注入未受影响

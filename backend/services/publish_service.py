@@ -100,6 +100,11 @@ def _coerce_world_character(
     return {
         "name": raw.get("name") or "",
         "personality": raw.get("personality") or "",
+        # voice_style / gender 是生成阶段产出的内容字段（voice_style 决定 NPC 对白
+        # 口吻，运行时注入 npc_agent；gender 喂封面/头像 pipeline）。此前漏 forward，
+        # 导致 LLM 生成好的 voice_style 在写库时被整体丢弃 → NPC 千人一腔。
+        "voice_style": raw.get("voice_style") or "",
+        "gender": raw.get("gender") or "",
         "secret": raw.get("secret"),
         "knowledge": raw.get("knowledge") or [],
         "schedule": raw.get("schedule") or {},
