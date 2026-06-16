@@ -204,8 +204,14 @@ def _world_subject_and_essence(brief: CoverBrief, ip_fallback: bool = False) -> 
 
 def _mood_clause(mood: str) -> str:
     """Inject mood cue. Empty mood degrades to no clause (mood ablation
-    experiment showed quality drops sharply; keep this for the loud failure
-    rather than silently masking it)."""
+    experiment showed quality drops sharply for ORIGINAL worlds; keep this for
+    the loud failure rather than silently masking it).
+
+    IP worlds pass '' here (call sites gate on ip_name): the IP name is a far
+    richer anchor than our hand-derived mood, and injecting a mood cue biases
+    the model toward our reading (e.g. 唐诡 → grimdark) instead of letting it
+    free-create from what it knows about the work. The ablation finding only
+    held for originals (no IP to anchor on)."""
     m = (mood or "").strip()
     if not m:
         return ""
@@ -229,7 +235,7 @@ def build_world_hero_prompt(brief: CoverBrief, ip_fallback: bool = False) -> str
         f"{subject}创作一幅 21:9 的代表性画面，用于网站首页全屏陈列。"
         "请理解这个作品的整体氛围与精神内核后自由创作，由你决定最能传达它气质的意象与构图。"
         f"{_CINEMATIC_COHESION}"
-        f"{_mood_clause(brief.mood)}"
+        f"{_mood_clause('' if (brief.ip_name or '').strip() else brief.mood)}"
         f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
     )
@@ -250,7 +256,7 @@ def build_world_cover_prompt(brief: CoverBrief, ip_fallback: bool = False) -> st
         "缩略到 280px 宽时仍要一眼传达这个作品的整体气质。"
         "请理解它的内核后自由创作，聚焦一个核心意象。"
         f"{_CINEMATIC_COHESION}"
-        f"{_mood_clause(brief.mood)}"
+        f"{_mood_clause('' if (brief.ip_name or '').strip() else brief.mood)}"
         f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
     )
@@ -283,7 +289,7 @@ def build_script_cover_prompt(
     return (
         f"{ess_clause}{head}"
         "请理解这段故事的张力后自由创作，由你决定最能传达它的意象与构图，不必罗列写实场景。"
-        f"{_mood_clause(world_brief.mood)}"
+        f"{_mood_clause('' if ip else world_brief.mood)}"
         f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
     )

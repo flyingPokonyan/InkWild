@@ -440,3 +440,37 @@ def test_prompts_stay_under_500_chars():
     assert len(build_script_cover_prompt(brief, script_title="锦州血案", script_title_english="Jinzhou Massacre")) < 500
     assert len(build_character_portrait_prompt(brief, char)) < 500
     assert len(build_ending_card_prompt(brief, ending)) < 500
+
+
+# ---------------------------------------------------------------------------
+# IP worlds drop the injected mood cue (free-create from IP name)
+# ---------------------------------------------------------------------------
+
+_MOOD = "诡案悬疑、青铜傩面、暗金玄黑"
+
+
+def test_ip_world_cover_omits_mood():
+    """IP-anchored cover must NOT inject our hand-derived mood — the IP name is
+    the anchor and a mood cue biases the model (grimdark drift)."""
+    ip = CoverBrief(world_name="唐朝诡事录", ip_name="唐朝诡事录", mood=_MOOD)
+    cover = build_world_cover_prompt(ip)
+    hero = build_world_hero_prompt(ip)
+    assert "画面风格：" not in cover
+    assert "画面风格：" not in hero
+    assert "唐朝诡事录" in cover  # IP name still anchors
+
+
+def test_original_world_keeps_mood():
+    """Original worlds (no IP anchor) still need the mood cue."""
+    orig = CoverBrief(world_name="雾隐镇", mood=_MOOD)
+    cover = build_world_cover_prompt(orig)
+    assert f"画面风格：{_MOOD}。" in cover
+
+
+def test_ip_script_cover_omits_mood_original_keeps():
+    ip = CoverBrief(world_name="唐朝诡事录", ip_name="唐朝诡事录", mood=_MOOD)
+    orig = CoverBrief(world_name="雾隐镇", mood=_MOOD)
+    ip_prompt = build_script_cover_prompt(ip, script_title="长安红茶", script_title_english="")
+    orig_prompt = build_script_cover_prompt(orig, script_title="雾案", script_title_english="")
+    assert "画面风格：" not in ip_prompt
+    assert f"画面风格：{_MOOD}。" in orig_prompt
