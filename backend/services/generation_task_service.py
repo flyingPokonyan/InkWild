@@ -32,6 +32,9 @@ GENERATION_TASK_LIMIT_RETRY_AFTER_SECONDS = 30
 # min. 30 min covers slow IP-loaded runs with comfortable margin.
 STALE_TASK_AFTER_SECONDS = 1800
 
+# outline 短于此长度即视为「支撑不足」，触发 grok 联网自动选题。
+_OUTLINE_AUTO_RECOMMEND_THRESHOLD = 12
+
 PHASE_A = "phase_a"
 PHASE_B = "phase_b"
 
@@ -708,7 +711,36 @@ class GenerationTaskService:
                 task_id,
                 {"type": "progress", "phase": "boot", "code": "agent_ready", "message": "生成引擎已接入，马上开始拆解任务…"},
             )
-            async for event in agent.create_script(world_data, str(request.get("outline", ""))):
+
+            outline = str(request.get("outline", "") or "")
+            # outline 为空 / 支撑不足时，借 grok 联网选题挑「下一个最合适的剧本」，
+            # 自动取 Top1 当 outline 喂给下游 DeepSeek 创作（永不阻断：失败则退回空 outline）。
+            if len(outline.strip()) < _OUTLINE_AUTO_RECOMMEND_THRESHOLD:
+                await self._record_event(
+                    task_id,
+                    {"type": "progress", "phase": "boot", "code": "recommending_premise",
+                     "message": "没填大纲，先让 grok 联网挑一个最合适的下一个剧本切入点…"},
+                )
+                try:
+                    from services.script_premise_recommender import recommend_script_premises
+                    premises = await recommend_script_premises(
+                        world_data=world_data,
+                        broker=getattr(base_agent, "research_broker", None),
+                        llm_router=getattr(base_agent, "llm", None),
+                        count=1,
+                    )
+                    if premises and premises[0].to_outline():
+                        outline = premises[0].to_outline()
+                        await self._record_event(
+                            task_id,
+                            {"type": "progress", "phase": "boot", "code": "premise_selected",
+                             "message": f"已选定切入点：{premises[0].title or premises[0].theme}",
+                             "meta": {"title": premises[0].title, "theme": premises[0].theme}},
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.warning("script_premise_auto_recommend_failed", task_id=task_id, exc_info=True)
+
+            async for event in agent.create_script(world_data, outline):
                 await self._record_event(task_id, event)
         except Exception as exc:  # noqa: BLE001
             logger.exception("script_generation_task_failed", task_id=task_id)
@@ -903,6 +935,12 @@ class GenerationTaskService:
                     payload_keys_normalized=len(normalized),
                     payload_keys_before=before_keys,
                 )
+
+    async def build_script_world_data(self, session: AsyncSession, world_id: str) -> dict:
+        """Public wrapper so the premise-suggestion endpoint can reuse the exact
+        same world payload (shared_events + existing_scripts + chars) the worker
+        feeds into script generation."""
+        return await self._build_script_world_data(session, world_id)
 
     async def _build_script_world_data(self, session: AsyncSession, world_id: str) -> dict:
         world = await session.get(World, world_id)

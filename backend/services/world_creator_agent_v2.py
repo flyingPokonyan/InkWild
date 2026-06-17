@@ -2837,6 +2837,8 @@ class WorldCreatorAgentV2:
 
         Falls back to safe defaults on any failure (never raises).
         """
+        from services.script_premise_recommender import BANNED_TITLE_WORDS
+
         system = (
             "你是剧本作家。基于世界设定和剧情大纲，生成剧本基础信息。\n"
             "输出严格 JSON，格式：\n"
@@ -2848,6 +2850,11 @@ class WorldCreatorAgentV2:
             '  "difficulty": 3,\n'
             '  "estimated_time": "30-60 min"\n'
             "}\n"
+            "命名要求（name）：贴原作语汇、用世界里真实的地名 / 事件名 / 专有名词；"
+            f"禁止使用这些通用煽情套词：{'、'.join(BANNED_TITLE_WORDS)}；"
+            "不要堆砌「四字地名＋抽象词」的 AI 腔标题。\n"
+            "若提供了 existing_scripts（同世界已有剧本），本剧本的核心真相 / 主线 / "
+            "切入阶段必须与之错开，不要重复已做过的内容。\n"
             "严格 JSON 输出，不含任何解释文字。"
         )
 
@@ -2870,6 +2877,14 @@ class WorldCreatorAgentV2:
             }
 
         ip_canon_dump = research_pack.ip_canon.model_dump()
+        existing_scripts_brief = [
+            {
+                "name": s.get("name", ""),
+                "description": (s.get("description", "") or "")[:120],
+            }
+            for s in (world_data.get("existing_scripts") or [])[:8]
+            if isinstance(s, dict)
+        ]
         user_content = json.dumps(
             {
                 "world_name": world_data.get("name", ""),
@@ -2879,6 +2894,7 @@ class WorldCreatorAgentV2:
                 "outline": outline,
                 "ip_canon": ip_canon_dump,
                 "ip_fidelity": ip_fidelity_block,
+                "existing_scripts": existing_scripts_brief,
             },
             ensure_ascii=False,
         )

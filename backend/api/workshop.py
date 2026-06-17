@@ -321,6 +321,11 @@ class CreateScriptGenerationTaskRequest(BaseModel):
     outline: str = ""
 
 
+class ScriptPremiseSuggestionsRequest(BaseModel):
+    world_id: str
+    count: int = 4
+
+
 class CreateWorldDraftRequest(BaseModel):
     world_id: str | None = None
     payload: dict | None = None
@@ -581,6 +586,46 @@ async def continue_world_draft_generation(
 # ---------------------------------------------------------------------------
 # Script generation tasks
 # ---------------------------------------------------------------------------
+
+
+@router.post("/script-premise-suggestions")
+async def suggest_script_premises(
+    req: ScriptPremiseSuggestionsRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """grok 联网选题：给这个世界推荐「下一个剧本」候选（结合 canon + 已有剧本去重）。
+
+    供工坊 picker 用：用户选一个 / 改一个 → 当 outline 发去 /script-generation-tasks。
+    """
+    _require_can_create(user)
+
+    from services.script_premise_recommender import recommend_script_premises
+
+    service = _get_generation_task_service()
+    try:
+        world_data = await service.build_script_world_data(db, req.world_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail="world not found") from exc
+
+    agent = await _get_world_creator_agent(db)
+    count = max(1, min(req.count, 6))
+    premises = await recommend_script_premises(
+        world_data=world_data,
+        broker=getattr(agent, "research_broker", None),
+        llm_router=getattr(agent, "llm", None),
+        count=count,
+    )
+    return {
+        "code": 0,
+        "data": {
+            "world_id": req.world_id,
+            "premises": [
+                {**p.model_dump(), "outline": p.to_outline()} for p in premises
+            ],
+        },
+        "message": "ok",
+    }
 
 
 @router.post("/script-generation-tasks", status_code=201)

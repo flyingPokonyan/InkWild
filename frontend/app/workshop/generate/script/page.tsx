@@ -29,6 +29,16 @@ import {
 } from "@/lib/workshop-api";
 import type { AdminGenerationTaskCreateResponse, AdminWorldListResponse } from "@/lib/types";
 
+interface ScriptPremiseSuggestion {
+  title: string;
+  theme: string;
+  entry_event: string;
+  povs: string[];
+  core_conflict: string;
+  ending_directions: string;
+  outline: string;
+}
+
 type GenStep = "world_select" | "prompt";
 const STEPS_ORDER: GenStep[] = ["world_select", "prompt"];
 const STREAM_RECONNECT_LIMIT = 5;
@@ -63,6 +73,10 @@ function GenerateScriptPageContent() {
 
   const [outline, setOutline] = useState("");
   const [focusedWorldId, setFocusedWorldId] = useState<string | null>(null);
+
+  const [suggestions, setSuggestions] = useState<ScriptPremiseSuggestion[] | null>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   const [generating, setGenerating] = useState(false);
   const [phases, setPhases] = useState<AdminPhaseEntry[]>([]);
@@ -158,6 +172,23 @@ function GenerateScriptPageContent() {
         router.push("/workshop");
      }
   };
+
+  const loadSuggestions = useCallback(async () => {
+    if (!worldId || loadingSuggestions) return;
+    setLoadingSuggestions(true);
+    setSuggestError(null);
+    try {
+      const data = await workshopFetch<{ premises: ScriptPremiseSuggestion[] }>(
+        "/api/workshop/script-premise-suggestions",
+        { method: "POST", body: JSON.stringify({ world_id: worldId, count: 4 }) },
+      );
+      setSuggestions(data.premises ?? []);
+    } catch (reason) {
+      setSuggestError(reason instanceof Error ? reason.message : "推荐切入点失败，请重试");
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  }, [worldId, loadingSuggestions]);
 
   const handleGenerate = async () => {
     if (!worldId || generating) return;
@@ -300,12 +331,13 @@ function GenerateScriptPageContent() {
   return (
     <ChoiceScene
       eyebrow="创作 · 剧本"
-      title={step === "world_select" ? "选择基底世界" : "剧本概述"}
+      title={step === "world_select" ? "选择基底世界" : ""}
       description={
         step === "world_select"
           ? "剧本将在这个世界里展开。"
           : "写下方向、钩子或转折；留空就交给 AI 自由发挥。"
       }
+      background="plain"
       coverImage={step === "prompt" ? selectedWorld?.cover_image ?? null : null}
       onBack={step === "world_select" ? () => router.push("/workshop") : handleBackToWorldSelect}
       backLabel={step === "world_select" || initialWorldId ? "← 返回工坊" : "← 上一步"}
@@ -377,15 +409,75 @@ function GenerateScriptPageContent() {
             ))}
 
           {step === "prompt" && (
-            <PromptComposer
-              value={outline}
-              onChange={setOutline}
-              onSubmit={() => void handleGenerate()}
-              placeholder="留下起因、转折或钩子，留空也行……"
-              ctaLabel={outline.trim() ? "开始生成" : "全部交给 AI"}
-              ariaLabel="剧本概述"
-              autoFocus
-            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, width: "100%", maxWidth: 560, margin: "0 auto" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={() => void loadSuggestions()}
+                  disabled={loadingSuggestions || !worldId}
+                  className="lv-t-meta"
+                  style={{
+                    alignSelf: "center",
+                    minHeight: 44,
+                    padding: "0 18px",
+                    borderRadius: 999,
+                    border: "1px solid var(--lv-line)",
+                    background: "transparent",
+                    color: "var(--lv-accent)",
+                    cursor: loadingSuggestions ? "default" : "pointer",
+                    opacity: loadingSuggestions ? 0.6 : 1,
+                  }}
+                >
+                  {loadingSuggestions
+                    ? "grok 正在联网选题…"
+                    : suggestions
+                      ? "换一批切入点"
+                      : "不知道写什么？让 grok 联网挑一个切入点"}
+                </button>
+                {suggestError && <span className="lv-form-error" style={{ textAlign: "center" }}>{suggestError}</span>}
+                {suggestions && suggestions.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {suggestions.map((s, i) => {
+                      const active = outline.trim() === s.outline.trim();
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setOutline(s.outline)}
+                          style={{
+                            textAlign: "left",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                            padding: "12px 14px",
+                            borderRadius: 12,
+                            border: `1px solid ${active ? "var(--lv-accent)" : "var(--lv-line)"}`,
+                            background: active ? "color-mix(in srgb, var(--lv-accent) 8%, transparent)" : "var(--lv-card-bg)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <span className="lv-t-h3" style={{ color: "var(--lv-ink)" }}>{s.title || s.theme}</span>
+                          {s.theme && s.title && <span className="lv-t-meta" style={{ color: "var(--lv-ink-2)" }}>{s.theme}</span>}
+                          <span className="lv-t-meta" style={{ color: "var(--lv-ink-3)" }}>
+                            {s.entry_event}
+                            {s.povs.length ? ` · 视角：${s.povs.join("、")}` : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <PromptComposer
+                value={outline}
+                onChange={setOutline}
+                onSubmit={() => void handleGenerate()}
+                placeholder="留下起因、转折或钩子，留空也行……"
+                ctaLabel={outline.trim() ? "开始生成" : "全部交给 AI"}
+                ariaLabel="剧本概述"
+                autoFocus
+              />
+            </div>
           )}
         </motion.div>
       </AnimatePresence>
