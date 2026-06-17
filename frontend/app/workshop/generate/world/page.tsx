@@ -362,12 +362,13 @@ export default function GenerateWorldPage() {
   return (
     <ChoiceScene
       eyebrow="创作 · 世界"
-      title={step === "prompt" ? "创造你的世界" : "附加世界设定"}
+      title={step === "prompt" ? "" : "附加世界设定"}
       description={
         step === "prompt"
           ? "用一句话写下灵感，AI 会把它展开成完整舞台。"
           : "为这个世界补充更精确的细分标签，都可留空。"
       }
+      background="plain"
       onBack={step === "prompt" ? () => router.push("/workshop") : handleBack}
       backLabel={step === "prompt" ? "← 返回工坊" : "← 上一步"}
       steps={{ current: currentStepIndex, total: STEPS_ORDER.length }}

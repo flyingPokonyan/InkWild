@@ -19,7 +19,7 @@ import { AmbientAura } from "./AmbientAura";
 interface ChoiceSceneProps {
   // 内容头
   eyebrow?: string;
-  title: string;
+  title?: string;
   description?: string;
 
   // 顶栏（embedded 模式忽略）
@@ -37,6 +37,7 @@ interface ChoiceSceneProps {
 
   // 背景（仅 standalone）
   coverImage?: string | null;
+  background?: "cinematic" | "plain";
 
   // 模式开关
   embedded?: boolean;
@@ -55,10 +56,12 @@ export function ChoiceScene({
   countdown,
   children,
   coverImage,
+  background = "cinematic",
   embedded,
   onCountdownPauseChange,
 }: ChoiceSceneProps) {
   const hasHeader = Boolean(eyebrow || title || description);
+  const showCinematicBackground = background === "cinematic";
   const headerBlock = !hasHeader ? null : (
     <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: "var(--lv-s-3)" }}>
       {eyebrow && (
@@ -139,7 +142,7 @@ export function ChoiceScene({
         overflow: "hidden",
       }}
     >
-      {coverImage && (
+      {showCinematicBackground && coverImage && (
         <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none", overflow: "hidden" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -165,7 +168,7 @@ export function ChoiceScene({
         </div>
       )}
 
-      <AmbientAura />
+      {showCinematicBackground && <AmbientAura />}
 
       {/* 顶栏 */}
       {(onBack || steps) && (

@@ -925,7 +925,10 @@ def _provider_api_keys_list(provider: ModelProvider) -> list[str]:
     )
 
 
-def _affinity_from_context() -> str | None:
+def _affinity_from_context(explicit_affinity: str | None = None) -> str | None:
+    if explicit_affinity:
+        return explicit_affinity
+
     from llm.usage_context import current_usage_context
 
     ctx = current_usage_context()
@@ -934,11 +937,11 @@ def _affinity_from_context() -> str | None:
     return ctx.session_id or ctx.task_id
 
 
-def _select_provider_key(provider: ModelProvider) -> tuple[str, str]:
+def _select_provider_key(provider: ModelProvider, *, key_affinity: str | None = None) -> tuple[str, str]:
     from llm.key_pool import select_key
 
     keys = _provider_api_keys_list(provider)
-    return select_key(str(provider.id), keys, _affinity_from_context())
+    return select_key(str(provider.id), keys, _affinity_from_context(key_affinity))
 
 
 def _mask_key(key: str) -> str:
@@ -991,38 +994,45 @@ def _resolve_reasoning_off(provider: ModelProvider) -> dict | None:
     return (provider.extra_config or {}).get("reasoning_off") or None
 
 
-def _build_llm_provider(config: RuntimeModelConfig) -> LLMProvider:
-    from llm.key_pool import KeyCooldownProvider
+def _build_llm_provider(config: RuntimeModelConfig, *, key_affinity: str | None = None) -> LLMProvider:
+    from llm.key_pool import KeySwitchingProvider
 
     provider = config.provider
     model = config.model
-    api_key, fp = _select_provider_key(provider)
+    keys = _provider_api_keys_list(provider)
+    affinity = _affinity_from_context(key_affinity)
     base_url = provider.base_url or ""
 
-    inner: LLMProvider
-    if provider.provider_type == "openai_compatible":
-        reasoning_off = _resolve_reasoning_off(provider)
-        inner = OpenAICompatibleProvider(
-            api_key=api_key,
-            base_url=base_url,
-            model=model.model_id,
-            reasoning_off_extra_body=reasoning_off,
-        )
-    elif provider.provider_type == "xai":
-        inner = GrokProvider(api_key=api_key, base_url=base_url or settings.grok_base_url, model=model.model_id)
-    elif provider.provider_type == "gemini":
-        inner = GeminiProvider(api_key=api_key, base_url=base_url or None, model=model.model_id)
-    else:
+    def build(api_key: str) -> LLMProvider:
+        if provider.provider_type == "openai_compatible":
+            reasoning_off = _resolve_reasoning_off(provider)
+            return OpenAICompatibleProvider(
+                api_key=api_key,
+                base_url=base_url,
+                model=model.model_id,
+                reasoning_off_extra_body=reasoning_off,
+            )
+        if provider.provider_type == "xai":
+            return GrokProvider(api_key=api_key, base_url=base_url or settings.grok_base_url, model=model.model_id)
+        if provider.provider_type == "gemini":
+            return GeminiProvider(api_key=api_key, base_url=base_url or None, model=model.model_id)
         raise ModelManagementError("当前 provider 类型不支持文本能力")
-    return KeyCooldownProvider(inner, provider_id=str(provider.id), fp=fp)
+
+    return KeySwitchingProvider(
+        provider_id=str(provider.id),
+        keys=keys,
+        affinity=affinity,
+        build=build,
+        model=model.model_id,
+    )
 
 
-def _build_image_provider(config: RuntimeModelConfig) -> ImageGenerator:
+def _build_image_provider(config: RuntimeModelConfig, *, key_affinity: str | None = None) -> ImageGenerator:
     from llm.key_pool import KeyCooldownImageGenerator
 
     provider = config.provider
     model = config.model
-    api_key, fp = _select_provider_key(provider)
+    api_key, fp = _select_provider_key(provider, key_affinity=key_affinity)
     base_url = provider.base_url or ""
 
     inner: ImageGenerator
@@ -1039,10 +1049,10 @@ def _build_image_provider(config: RuntimeModelConfig) -> ImageGenerator:
     return KeyCooldownImageGenerator(inner, provider_id=str(provider.id), fp=fp)
 
 
-def _build_web_searcher(config: RuntimeModelConfig) -> WebSearcher | None:
+def _build_web_searcher(config: RuntimeModelConfig, *, key_affinity: str | None = None) -> WebSearcher | None:
     if config.provider.provider_type != "xai":
         return None
-    api_key, _ = _select_provider_key(config.provider)
+    api_key, _ = _select_provider_key(config.provider, key_affinity=key_affinity)
     return GrokProvider(
         api_key=api_key,
         base_url=config.provider.base_url or settings.grok_base_url,
@@ -1396,14 +1406,19 @@ def _legacy_text_router(slot_name: str) -> LLMRouter | None:
     return None
 
 
-async def resolve_slot_router(db: AsyncSession, slot_name: str) -> LLMRouter | None:
+async def resolve_slot_router(
+    db: AsyncSession,
+    slot_name: str,
+    *,
+    key_affinity: str | None = None,
+) -> LLMRouter | None:
     slot = _ensure_slot(slot_name)
     if slot["model_kind"] != TEXT_MODEL_KIND:
         raise ModelManagementError("当前槽位不是文本模型槽位")
     config = await _bound_runtime_config(db, slot_name)
     if not config:
         return _legacy_text_router(slot_name)
-    provider = _build_llm_provider(config)
+    provider = _build_llm_provider(config, key_affinity=key_affinity)
     return LLMRouter(
         providers={str(config.model.id): provider},
         fallback_chain=[str(config.model.id)],
@@ -1416,17 +1431,27 @@ async def resolve_slot_router(db: AsyncSession, slot_name: str) -> LLMRouter | N
     )
 
 
-async def resolve_slot_provider(db: AsyncSession, slot_name: str) -> LLMProvider | None:
+async def resolve_slot_provider(
+    db: AsyncSession,
+    slot_name: str,
+    *,
+    key_affinity: str | None = None,
+) -> LLMProvider | None:
     config = await _bound_runtime_config(db, slot_name)
     if config:
-        return _build_llm_provider(config)
+        return _build_llm_provider(config, key_affinity=key_affinity)
     router = _legacy_text_router(slot_name)
     if not router:
         return None
     return next(iter(router.providers.values()))
 
 
-async def resolve_slot_image_generator(db: AsyncSession, slot_name: str) -> ImageGenerator | None:
+async def resolve_slot_image_generator(
+    db: AsyncSession,
+    slot_name: str,
+    *,
+    key_affinity: str | None = None,
+) -> ImageGenerator | None:
     slot = _ensure_slot(slot_name)
     if slot["model_kind"] != IMAGE_MODEL_KIND:
         raise ModelManagementError("当前槽位不是图片模型槽位")
@@ -1447,7 +1472,7 @@ async def resolve_slot_image_generator(db: AsyncSession, slot_name: str) -> Imag
     config = await _bound_runtime_config(db, slot_name)
     if config:
         return MeteredImageGenerator(
-            _build_image_provider(config),
+            _build_image_provider(config, key_affinity=key_affinity),
             provider_name=config.provider.name,
             model_id=config.model.model_id,
         )
@@ -1460,10 +1485,14 @@ async def resolve_slot_image_generator(db: AsyncSession, slot_name: str) -> Imag
     return None
 
 
-async def resolve_research_web_searcher(db: AsyncSession) -> WebSearcher | None:
+async def resolve_research_web_searcher(
+    db: AsyncSession,
+    *,
+    key_affinity: str | None = None,
+) -> WebSearcher | None:
     config = await _bound_runtime_config(db, "research_summary")
     if config:
-        return _build_web_searcher(config)
+        return _build_web_searcher(config, key_affinity=key_affinity)
     if settings.grok_api_key:
         return GrokProvider(model=settings.grok_model)
     return None

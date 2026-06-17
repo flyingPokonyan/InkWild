@@ -11,7 +11,7 @@ import { difficultyLevel } from "@/lib/difficulty";
 import { useWorldList } from "@/lib/api/worlds";
 import { useGameHistory } from "@/lib/api/history";
 import { pickFeaturedWorlds } from "@/lib/featured-worlds";
-import { ossThumb } from "@/lib/oss-image";
+import { ossHero, ossThumb } from "@/lib/oss-image";
 import { LazyCover } from "@/components/ui/LazyCover";
 import { useAuthStore } from "@/stores/auth";
 import type { GameHistoryItem, WorldListItem } from "@/lib/types";
@@ -1009,7 +1009,7 @@ function SpotlightSection({ worlds }: { worlds: WorldListItem[] }) {
       aria-label={`本周精选：${world.name}`}
     >
       {worlds.map((w, i) => {
-        const img = ossThumb(w.hero_image || w.cover_image, 900);
+        const img = ossHero(w.hero_image || w.cover_image);
         if (!img) return null;
         return (
           <div

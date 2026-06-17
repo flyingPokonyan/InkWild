@@ -288,8 +288,11 @@
         "noImage": "NO IMAGE",
         "upload": "Upload from device",
         "regenerate": "Regenerate",
-        "regenerateHintPlaceholder": "Direction (optional): cooler / rainy / dusk…",
-        "regenerateCta": "Regenerate",
+        "promptLabel": "Image Prompt",
+        "regeneratePromptPlaceholder": "Edit the full prompt directly",
+        "promptLoading": "Loading this image prompt…",
+        "promptLoadFailed": "Prompt failed to load; you can type one manually",
+        "regenerateCta": "Regenerate with Prompt",
         "pasteLink": "Paste link",
         "pasteLinkPlaceholder": "Image URL",
         "confirm": "Confirm",
@@ -792,6 +795,7 @@
     "draftWaiting": "Draft, finish it later."
   },
   "loginPage": {
+    "signupClosed": "Sign-ups are temporarily full or not open yet. Please try again later.",
     "brandTagline": "AI interactive narrative engine",
     "showcaseEyebrow": "InkWild Sandbox",
     "showcaseSlogan": "Step into a world, start playing.",
@@ -1005,6 +1009,28 @@
     "markAllRead": "Mark all read",
     "loadMore": "Load more",
     "empty": "You're all caught up",
-    "emptyAnnouncements": "No announcements yet"
+    "emptyAnnouncements": "No announcements yet",
+    "back": "Back",
+    "goToLink": "Open"
+  },
+  "feedback": {
+    "entry": "Help & Feedback",
+    "title": "Help & Feedback",
+    "catBug": "Bug report",
+    "catSuggestion": "Suggestion",
+    "contentLabel": "Details",
+    "contentPlaceholder": "Describe the issue or idea — the more specific, the better…",
+    "screenshot": "Add screenshot (optional)",
+    "removeImage": "Remove",
+    "contactLabel": "Contact (optional)",
+    "contactPlaceholder": "Email or other, so we can reach you",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "successTitle": "Got it — thank you!",
+    "successBody": "We'll review your feedback soon.",
+    "close": "Close",
+    "errorGeneric": "Submission failed, please try again later",
+    "imageTooLarge": "Image must be under 4MB",
+    "imageType": "Only PNG / JPEG / WebP supported"
   }
 }

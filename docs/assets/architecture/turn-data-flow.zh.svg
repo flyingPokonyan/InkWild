@@ -1,0 +1,162 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">InkWild 一个回合的数据流</title>
+  <desc id="desc">玩家行动经过内容审核、世界推进、Director、NPC Agents、Narrator、GameState 提交和 SSE 输出的多 Agent 回合数据流。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#08080a"/>
+      <stop offset="52%" stop-color="#11100e"/>
+      <stop offset="100%" stop-color="#15120c"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1c1b18"/>
+      <stop offset="100%" stop-color="#11110f"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#dfc290"/>
+      <stop offset="100%" stop-color="#aeb4b8"/>
+    </linearGradient>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="7" flood-color="#dfc290" flood-opacity="0.35"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#dfc290"/>
+    </marker>
+    <marker id="arrowDim" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#80796b"/>
+    </marker>
+    <style>
+      .title { font: 700 34px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f5f2eb; letter-spacing: 0; }
+      .subtitle { font: 400 16px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #bcb5a8; letter-spacing: 0; }
+      .label { font: 700 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #f5f2eb; letter-spacing: 0; }
+      .small { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #c9c1b3; letter-spacing: 0; }
+      .tiny { font: 500 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #a9a194; letter-spacing: 0; }
+      .tag { font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: #15120c; letter-spacing: 0; }
+      .card { fill: url(#panel); stroke: rgba(223,194,144,0.24); stroke-width: 1.2; filter: url(#softShadow); }
+      .cardStrong { fill: #191814; stroke: #dfc290; stroke-opacity: 0.55; stroke-width: 1.4; filter: url(#softShadow); }
+      .store { fill: rgba(174,180,184,0.08); stroke: rgba(174,180,184,0.38); stroke-width: 1.2; }
+      .mainLine { fill: none; stroke: #dfc290; stroke-width: 2.4; marker-end: url(#arrow); }
+      .sideLine { fill: none; stroke: #80796b; stroke-width: 1.7; stroke-dasharray: 7 7; marker-end: url(#arrowDim); }
+      .mutedLine { fill: none; stroke: #80796b; stroke-width: 1.6; marker-end: url(#arrowDim); }
+    </style>
+  </defs>
+
+  <rect width="1200" height="720" fill="url(#bg)"/>
+  <rect width="1200" height="720" fill="url(#grid)"/>
+  <circle cx="936" cy="112" r="220" fill="#dfc290" opacity="0.04"/>
+  <circle cx="208" cy="610" r="240" fill="#aeb4b8" opacity="0.04"/>
+
+  <text class="title" x="72" y="72">一个回合的数据流</text>
+  <text class="subtitle" x="72" y="102">结构化世界状态负责“记住”，多 Agent 负责把当前状态渲染成这一回合的叙事。</text>
+
+  <g transform="translate(72 145)">
+    <rect class="card" width="170" height="92" rx="8"/>
+    <text class="label" x="22" y="35">玩家行动</text>
+    <text class="small" x="22" y="61">自然语言输入</text>
+    <text class="tiny" x="22" y="79">action</text>
+  </g>
+
+  <g transform="translate(292 145)">
+    <rect class="card" width="170" height="92" rx="8"/>
+    <text class="label" x="22" y="35">内容审核</text>
+    <text class="small" x="22" y="61">关键词 + LLM 双向</text>
+    <text class="tiny" x="22" y="79">moderation</text>
+  </g>
+
+  <g transform="translate(512 145)">
+    <rect class="card" width="190" height="92" rx="8"/>
+    <text class="label" x="22" y="35">世界推进</text>
+    <text class="small" x="22" y="61">时间、事件、环境</text>
+    <text class="tiny" x="22" y="79">world tick</text>
+  </g>
+
+  <g transform="translate(752 128)">
+    <rect class="cardStrong" width="230" height="126" rx="8"/>
+    <rect x="22" y="22" width="74" height="22" rx="11" fill="url(#accent)" filter="url(#glow)"/>
+    <text class="tag" x="39" y="37">CORE</text>
+    <text class="label" x="22" y="68">Director Agent</text>
+    <text class="small" x="22" y="94">舞台调度 + 状态意图</text>
+    <text class="tiny" x="22" y="113">scene_direction / state intent</text>
+  </g>
+
+  <path class="mainLine" d="M 242 191 L 292 191"/>
+  <path class="mainLine" d="M 462 191 L 512 191"/>
+  <path class="mainLine" d="M 702 191 L 752 191"/>
+
+  <g transform="translate(752 306)">
+    <rect class="card" width="230" height="108" rx="8"/>
+    <text class="label" x="22" y="39">Narrator Agent</text>
+    <text class="small" x="22" y="66">织合导演意图和 NPC 行动</text>
+    <text class="tiny" x="22" y="87">streaming prose</text>
+  </g>
+
+  <g transform="translate(472 306)">
+    <rect class="card" width="230" height="108" rx="8"/>
+    <text class="label" x="22" y="39">NPC Agents</text>
+    <text class="small" x="22" y="66">私有记忆 + 结构化行动</text>
+    <text class="tiny" x="22" y="87">speak / act / observe</text>
+  </g>
+
+  <g transform="translate(1015 306)">
+    <rect class="card" width="126" height="108" rx="8"/>
+    <text class="label" x="21" y="39">SSE</text>
+    <text class="small" x="21" y="64">正文流式</text>
+    <text class="tiny" x="21" y="86">text_delta</text>
+  </g>
+
+  <path class="mainLine" d="M 867 254 L 867 306"/>
+  <path class="mainLine" d="M 702 360 L 752 360"/>
+  <path class="mainLine" d="M 982 360 L 1015 360"/>
+
+  <g transform="translate(72 326)">
+    <rect class="card" width="294" height="88" rx="8"/>
+    <text class="label" x="22" y="34">思考态进度</text>
+    <text class="small" x="22" y="59">received / reasoning / npcs_entering / writing</text>
+    <text class="tiny" x="22" y="77">真实里程碑，不是装饰性进度条</text>
+  </g>
+  <path class="sideLine" d="M 752 210 C 612 222 500 279 366 348"/>
+
+  <g transform="translate(148 520)">
+    <rect class="store" width="250" height="106" rx="8"/>
+    <text class="label" x="22" y="39">GameState · Postgres</text>
+    <text class="small" x="22" y="66">位置、线索、关系、时间、案件板</text>
+    <text class="tiny" x="22" y="88">optimistic lock / version</text>
+  </g>
+
+  <g transform="translate(472 520)">
+    <rect class="store" width="230" height="106" rx="8"/>
+    <text class="label" x="22" y="39">NPC 私有记忆</text>
+    <text class="small" x="22" y="66">隔离读写 + 语义召回</text>
+    <text class="tiny" x="22" y="88">info propagation</text>
+  </g>
+
+  <g transform="translate(752 520)">
+    <rect class="cardStrong" width="230" height="106" rx="8"/>
+    <text class="label" x="22" y="39">核心结算</text>
+    <text class="small" x="22" y="66">state_updates / events / ending</text>
+    <text class="tiny" x="22" y="88">commit before done</text>
+  </g>
+
+  <g transform="translate(1015 520)">
+    <rect class="card" width="126" height="106" rx="8"/>
+    <text class="label" x="21" y="38">输出</text>
+    <text class="small" x="21" y="63">done / ending</text>
+    <text class="tiny" x="21" y="85">case_board 可补发</text>
+  </g>
+
+  <path class="mainLine" d="M 867 414 L 867 520"/>
+  <path class="mainLine" d="M 982 573 L 1015 573"/>
+  <path class="sideLine" d="M 752 172 C 560 120 358 344 278 520"/>
+  <path class="sideLine" d="M 587 414 L 587 520"/>
+  <path class="sideLine" d="M 752 231 C 668 290 638 422 642 520"/>
+
+  <g transform="translate(72 660)">
+    <rect x="0" y="-23" width="496" height="34" rx="17" fill="rgba(223,194,144,0.08)" stroke="rgba(223,194,144,0.22)"/>
+    <text class="small" x="18" y="-1">关键点：叙事尽早流出；状态在 done 前提交；案件板等重计算可晚一拍补发。</text>
+  </g>
+</svg>

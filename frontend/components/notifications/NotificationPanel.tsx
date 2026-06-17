@@ -3,11 +3,13 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
+  ArrowLeft,
   BadgeCheck,
   Bell,
   Coins,
   Gift,
   Megaphone,
+  MessageSquare,
   ShieldAlert,
   ShieldCheck,
   XCircle,
@@ -25,6 +27,8 @@ import {
   type NotificationType,
 } from "@/lib/notifications";
 
+import { NotificationDetailView, type DetailItem } from "./NotificationDetailView";
+
 type Tab = "notifications" | "announcements";
 
 const TYPE_ICON: Record<string, typeof Bell> = {
@@ -34,6 +38,8 @@ const TYPE_ICON: Record<string, typeof Bell> = {
   content_takedown: ShieldAlert,
   content_restored: ShieldCheck,
   low_credit: Coins,
+  feedback_new: MessageSquare,
+  feedback_update: MessageSquare,
 };
 
 const LEVEL_COLOR: Record<string, string> = {
@@ -63,12 +69,19 @@ function iconFor(type: NotificationType) {
 export function NotificationPanel({
   summary,
   onNavigate,
+  isMobile = false,
+  onOpenDetail,
 }: {
   summary: NotificationSummary | undefined;
   onNavigate: (link: string) => void;
+  /** 移动端：详情就地在面板内展开；桌面：详情用独立弹窗 */
+  isMobile?: boolean;
+  /** 桌面：把详情上抛给 NotificationBell 渲染独立弹窗（脱离会自动关闭的下拉层） */
+  onOpenDetail?: (item: DetailItem) => void;
 }) {
   const t = useTranslations("notifications");
   const [tab, setTab] = useState<Tab>("notifications");
+  const [detail, setDetail] = useState<DetailItem | null>(null);
   const mark = useMarkRead();
 
   const notifQuery = useNotifications(true);
@@ -83,17 +96,50 @@ export function NotificationPanel({
 
   function handleNotificationClick(item: NotificationItem) {
     if (!item.read_at) mark.notification.mutate(item.id);
-    if (item.link) onNavigate(item.link);
+    const d: DetailItem = { kind: "notification", data: item };
+    if (onOpenDetail) onOpenDetail(d);
+    else setDetail(d);
   }
 
   function handleAnnouncementClick(item: AnnouncementItem) {
     if (!item.read) mark.announcement.mutate(item.id);
+    const d: DetailItem = { kind: "announcement", data: item };
+    if (onOpenDetail) onOpenDetail(d);
+    else setDetail(d);
+  }
+
+  function handleGo(link: string) {
+    setDetail(null);
+    onNavigate(link);
   }
 
   const active = tab === "notifications";
   const items = active ? notifItems : annItems;
   const query = active ? notifQuery : annQuery;
   const isEmpty = !query.isLoading && items.length === 0;
+
+  // 移动端：详情就地替换面板内容
+  if (isMobile && detail) {
+    return (
+      <div className="lv-notif-panel">
+        <div className="lv-notif-detail-bar-head">
+          <button type="button" className="lv-notif-back" onClick={() => setDetail(null)}>
+            <ArrowLeft size={16} strokeWidth={1.9} />
+            {t("back")}
+          </button>
+        </div>
+        <div className="lv-notif-detail-scroll">
+          <NotificationDetailView item={detail} onNavigate={handleGo} goLabel={t("goToLink")} />
+        </div>
+        <style jsx global>{`
+          .lv-notif-detail-bar-head { padding: 14px 14px 6px; }
+          .lv-notif-back { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--lv-ink-3); font-size: 13px; cursor: pointer; padding: 4px 2px; }
+          .lv-notif-back:hover { color: var(--lv-ink); }
+          .lv-notif-detail-scroll { overflow-y: auto; padding: 6px 16px 20px; -webkit-overflow-scrolling: touch; }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="lv-notif-panel">

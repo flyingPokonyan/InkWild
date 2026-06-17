@@ -8,15 +8,25 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pydantic import BaseModel
+
 from dependencies import get_current_admin_user, get_db
 from models.user import User
 from schemas.notification import (
     AnnouncementAdminOut,
     AnnouncementCreateIn,
+    AnnouncementImageOut,
     AnnouncementUpdateIn,
 )
 from services import announcement_service as anns
 from services.audit_service import record_admin_action
+from services.image_storage import decode_data_url_image, get_image_storage, make_image_key
+
+_ANNOUNCEMENT_IMAGE_MAX_BYTES = 4 * 1024 * 1024
+
+
+class AnnouncementImageIn(BaseModel):
+    image: str  # base64 data URL
 
 router = APIRouter(prefix="/api/admin", tags=["admin-announcements"])
 
@@ -53,7 +63,7 @@ async def create_announcement(
 ) -> dict:
     a = await anns.create(
         db, created_by=admin.id, title=payload.title, body=payload.body,
-        level=payload.level, expires_at=payload.expires_at,
+        level=payload.level, image_url=payload.image_url, expires_at=payload.expires_at,
     )
     await record_admin_action(
         db, admin_user=admin, action="announcement.create",
@@ -76,7 +86,7 @@ async def update_announcement(
     try:
         a = await anns.update(
             db, announcement_id=announcement_id, title=payload.title, body=payload.body,
-            level=payload.level, expires_at=payload.expires_at,
+            level=payload.level, image_url=payload.image_url, expires_at=payload.expires_at,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -88,6 +98,18 @@ async def update_announcement(
     )
     await db.commit()
     return _ok(AnnouncementAdminOut.model_validate(a).model_dump(mode="json"))
+
+
+@router.post("/announcements/upload-image")
+async def upload_announcement_image(
+    payload: AnnouncementImageIn,
+    admin: User = Depends(get_current_admin_user),
+) -> dict:
+    data, ext = decode_data_url_image(payload.image, max_bytes=_ANNOUNCEMENT_IMAGE_MAX_BYTES)
+    storage = get_image_storage()
+    key = make_image_key("announcements", admin.id, ext)
+    url = await storage.save(data, key)
+    return _ok(AnnouncementImageOut(image_url=url).model_dump(mode="json"))
 
 
 @router.post("/announcements/{announcement_id}/publish")

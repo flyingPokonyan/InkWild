@@ -12,6 +12,7 @@ from middleware.error_handler import AppError
 from models.user import AuthIdentity, User, WebSession
 from services.auth_tokens import consume_token, create_token
 from services.email_service import build_reset_email, build_verify_email, get_email_sender
+from services.system_config_service import ensure_signup_allowed
 from utils import utcnow
 
 SCRYPT_N = 2**14
@@ -198,6 +199,7 @@ class AuthService:
             existing.credential_hash = hash_password(password)
             identity = existing
         else:
+            await ensure_signup_allowed(db)  # 注册放量闸门：仅拦真正的新账号
             user = User(status="active", nickname=nickname)
             db.add(user)
             await db.flush()

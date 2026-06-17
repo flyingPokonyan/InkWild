@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, Clock3, Coins, Compass, Home, LogIn, PenLine, Search, UserRound } from "lucide-react";
+import { ChevronDown, Clock3, Coins, Compass, Home, LogIn, MessageSquare, PenLine, Search, UserRound } from "lucide-react";
 import { useTranslations } from "next-intl";
 
+import { FeedbackDialog } from "@/components/feedback/FeedbackDialog";
 import { LangChip } from "@/components/LangChip";
 import { NotificationBell } from "@/components/NotificationBell";
 import {
@@ -39,6 +40,7 @@ export function ProductNav({ variant = "solid", active = null, search }: Product
   const tNav = useTranslations("nav");
   const tDiscover = useTranslations("discoverPage");
   const tCredits = useTranslations("credits");
+  const tFeedback = useTranslations("feedback");
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const router = useRouter();
@@ -50,6 +52,7 @@ export function ProductNav({ variant = "solid", active = null, search }: Product
 
   const [scrolled, setScrolled] = useState(variant === "solid");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // 桌面积分入口收进头像下拉：只显示轻量余额，点击进入完整积分页面。
   const { data: creditBalance } = useQuery({
@@ -453,6 +456,29 @@ export function ProductNav({ variant = "solid", active = null, search }: Product
                       </Link>
                       <button
                         type="button"
+                        onClick={() => { setMenuOpen(false); setFeedbackOpen(true); }}
+                        className="pn-menu-item"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          width: "100%",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          background: "transparent",
+                          border: 0,
+                          color: "var(--lv-ink-2)",
+                          fontSize: "13px",
+                          textAlign: "left",
+                          cursor: "pointer",
+                          transition: "color 200ms ease, background 200ms ease",
+                        }}
+                      >
+                        <MessageSquare size={14} />
+                        {tFeedback("entry")}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => void handleLogout()}
                         className="pn-menu-item-danger"
                         style={{
@@ -545,6 +571,8 @@ export function ProductNav({ variant = "solid", active = null, search }: Product
           }
         }
       `}</style>
+
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </motion.header>
   );
 }

@@ -18,11 +18,14 @@ from api.admin_audit import router as admin_audit_router
 from api.admin_dashboard import router as admin_dashboard_router
 from api.admin_models import router as admin_models_router
 from api.admin_content import router as admin_content_router
+from api.admin_feedback import router as admin_feedback_router
 from api.admin_review import router as admin_review_router
+from api.admin_system import router as admin_system_router
 from api.admin_users import router as admin_users_router
 from api.auth import dev_router as dev_auth_router
 from api.auth import router as auth_router
 from api.credits import router as credits_router
+from api.feedback import router as feedback_router
 from api.game import router as game_router
 from api.notifications import router as notifications_router
 from api.workshop import router as workshop_router
@@ -110,11 +113,14 @@ app.include_router(admin_audit_router)
 app.include_router(admin_dashboard_router)
 app.include_router(admin_models_router)
 app.include_router(admin_content_router)
+app.include_router(admin_feedback_router)
 app.include_router(admin_review_router)
+app.include_router(admin_system_router)
 app.include_router(admin_users_router)
 app.include_router(auth_router)
 app.include_router(dev_auth_router)
 app.include_router(credits_router)
+app.include_router(feedback_router)
 app.include_router(game_router)
 app.include_router(notifications_router)
 app.include_router(workshop_router)

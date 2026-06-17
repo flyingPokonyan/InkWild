@@ -8,10 +8,6 @@
 > **An AI interactive narrative engine that keeps the world in the database and lets models render the current turn.**
 > Live demo -> **https://inkwild.app**
 
-<!-- Screenshot placeholder: capture a real play page screenshot or 10s GIF from production, put it under docs/assets/, then replace the line below.
-![InkWild](docs/assets/play-screenshot.png)
--->
-
 InkWild is an AI-powered interactive narrative engine. Players act in natural language, and multiple agents collaborate to produce coherent story turns. Its central design is simple: **world state is persisted as structured data; the model does not have to remember the world, it renders the current state into narrative prose.**
 
 Two play modes share the same engine. They differ only in initialization and ending logic:
@@ -20,6 +16,23 @@ Two play modes share the same engine. They differ only in initialization and end
 - **Free mode**: open-world play without hard ending conditions; the world keeps moving forward.
 
 The repository also includes an AI creator workshop for generating worlds and scripts, plus an admin console for model routing, users, content, cost, and audit logs.
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/assets/screenshots/home.jpg" alt="InkWild home" width="760">
+</p>
+
+<details>
+<summary>More screenshots</summary>
+
+| Discover | Play Turn |
+|---|---|
+| ![InkWild discover](docs/assets/screenshots/discover.jpg) | ![InkWild play turn](docs/assets/screenshots/play-turn.jpg) |
+| Creator Workshop | |
+| ![InkWild creator workshop](docs/assets/screenshots/workshop.jpg) | |
+
+</details>
 
 ## Capabilities
 
@@ -31,8 +44,8 @@ The repository also includes an AI creator workshop for generating worlds and sc
 
 The hard part of interactive narrative is not generating one good paragraph. It is **long-range consistency**: after dozens of turns, the world state, character memory, and information boundaries still need to make sense. InkWild handles that with structured state and agent boundaries instead of one ever-growing context window.
 
-- **Externalized world state.** Location, clues, relationships, time, inventory, and the case board live in structured `GameState`, persisted in Postgres.
-- **Multi-agent runtime.** A turn is not one LLM call. Director, NPC agents, and Narrator split responsibility.
+- **Externalized world state.** Location, clues, relationships, time, inventory, and the case board live in structured `GameState`, persisted in Postgres. Each turn reads that state, renders it into narrative through agents, and writes state changes back — the prose is a product of the state, not its only home.
+- **Multi-agent runtime.** A turn is not one LLM call but a small simulation in which Director, NPC agents, and Narrator split responsibility — closer to an interactive narrative engine than a single chat window.
 - **NPC-scoped memory.** Each NPC can only read its own private memories. Information flow between characters is controlled explicitly by `info_propagation`.
 
 ## Multi-Agent Runtime
@@ -48,25 +61,7 @@ The backend is built around a multi-agent runtime:
 
 ## Turn Data Flow
 
-```mermaid
-flowchart TD
-    P[Player natural-language action] --> MOD[Moderation<br/>keywords + LLM]
-    MOD --> TICK[World tick<br/>events, environment, NPC schedules]
-    TICK --> DIR[Director Agent<br/>stage direction + core state intent]
-    DIR --> PROG[Processing milestones<br/>received / reasoning / npcs_entering / writing]
-    DIR --> NPC[NPC Agents<br/>private memory + structured actions]
-    DIR --> READY[scene_direction ready]
-    READY --> NAR[Narrator Agent<br/>streaming prose]
-    NPC --> NAR
-    NAR --> CORE[Core bookkeeping<br/>state_updates / events / ending]
-    CORE --> COMMIT[(Commit GameState<br/>optimistic lock + SessionLock)]
-    COMMIT --> STATE[state_update / ending / done<br/>SSE]
-    STATE --> FOLLOW[case_board_update<br/>script mode follow-up]
-
-    DIR -. read/write .-> STATE_DB[(GameState · Postgres)]
-    NPC -. isolated read/write .-> MEM[(Per-NPC private memory<br/>+ semantic recall)]
-    DIR -. information flow .-> MEM
-```
+![InkWild turn data flow](docs/assets/architecture/turn-data-flow.en.svg)
 
 The current v2 runtime separates latency from bookkeeping. **Narrative starts streaming as soon as `scene_direction` is ready**, so the player sees text earlier. **Core state is committed before `state_update` / `done`**, so the next turn reads a settled world. In script mode, slower case-board reasoning may arrive as a non-blocking `case_board_update` after `done`.
 
@@ -93,7 +88,7 @@ ops/              Operational scripts used by Docker Compose
 | Backend | Python 3.12 · FastAPI · SQLAlchemy 2 async · Alembic · PostgreSQL 16 · Redis 7 · structlog · SSE |
 | Frontend | Next.js 16 · React 19 · TypeScript · Zustand · TanStack Query · Tailwind CSS v4 |
 | Admin | Separate Next.js app for model routing, users, content, cost, and audit logs |
-| LLM | Text: DeepSeek / Claude / Gemini / Grok / OpenAI-compatible providers via dynamic Provider + Slot binding; image: Seedream; search: Tavily |
+| LLM | Text: DeepSeek / Claude / Gemini / Grok / OpenAI-compatible providers via dynamic Provider + Slot binding; image: gpt-image / Grok / Seedream-compatible; search: Tavily |
 | Deployment | Docker Compose |
 
 ## Local Development
@@ -114,7 +109,6 @@ DEEPSEEK_API_KEY=...
 
 Common optional keys:
 
-- `TAVILY_API_KEY` for workshop web research.
 - `GPTIMAGE_API_KEY` for GPT Image generation; without it, image features are limited or use another configured provider.
 - `GROK_API_KEY`, `ANTHROPIC_API_KEY`, Google OAuth, Resend, and OSS keys as needed.
 

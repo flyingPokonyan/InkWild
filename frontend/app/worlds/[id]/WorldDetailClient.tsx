@@ -13,7 +13,7 @@ import { resolveExitHref, withReturn } from "@/lib/play-return";
 import { difficultyLevel } from "@/lib/difficulty";
 import { MobileTopBar, MobileIconButton } from "@/components/MobileTopBar";
 import { LoadingPulse } from "@/components/ui/LoadingPulse";
-import { ossThumb } from "@/lib/oss-image";
+import { ossHero, ossThumb } from "@/lib/oss-image";
 import type { ScriptDTO, WorldDetail } from "@/lib/types";
 
 /* 状态：加载中 — §10.1 中央 8px 暖金脉冲，无文字 */
@@ -143,7 +143,7 @@ export function WorldDetailClient() {
     );
   }
 
-  const cover = ossThumb(world.hero_image || world.cover_image, 900);
+  const cover = ossHero(world.hero_image || world.cover_image);
   const supportsLine = world.has_script_mode ? t("supportsBoth") : t("supportsFreeOnly");
   const desktopScripts = scriptsExpanded
     ? world.scripts
@@ -759,7 +759,7 @@ function MobileWorldDetail({
   scriptHref: (scriptId: string) => string;
 }) {
   const t = useTranslations("worlds");
-  const cover = ossThumb(world.hero_image || world.cover_image, 900);
+  const cover = ossThumb(world.hero_image || world.cover_image, 900, { quality: 90 });
   const [synopsisExpanded, setSynopsisExpanded] = useState(false);
   const [scriptsExpanded, setScriptsExpanded] = useState(false);
   const heroMeta = [compactMobileMeta(world.genre), compactMobileMeta(world.era)].filter(Boolean);

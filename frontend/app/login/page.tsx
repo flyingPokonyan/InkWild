@@ -176,6 +176,13 @@ function LoginPageInner() {
     }
   }, [hasLoaded, user, nextPath, router]);
 
+  // OAuth 注册被放量闸门拦截时回跳带 ?error=signup_closed
+  useEffect(() => {
+    if (searchParams.get("error") === "signup_closed") {
+      setApiError(tp("signupClosed"));
+    }
+  }, [searchParams, tp]);
+
   const switchMode = (nextMode: AuthMode) => {
     setMode(nextMode);
     setApiError(null);

@@ -12,7 +12,7 @@ import { difficultyLevel } from "@/lib/difficulty";
 import { resolvePlayableCharacters } from "@/lib/world-entry";
 import { MobileTopBar, MobileIconButton } from "@/components/MobileTopBar";
 import { LoadingPulse } from "@/components/ui/LoadingPulse";
-import { ossThumb } from "@/lib/oss-image";
+import { ossHero, ossThumb } from "@/lib/oss-image";
 import type { CharacterDTO, ScriptDTO, WorldDetail } from "@/lib/types";
 
 /* 状态：加载中 — §10.1 中央 8px 暖金脉冲，无文字 */
@@ -162,7 +162,7 @@ function ScriptDesktop({
   backHref: string;
   t: ReturnType<typeof useTranslations>;
 }) {
-  const cover = ossThumb(script.cover_image || world.hero_image || world.cover_image, 900);
+  const cover = ossHero(script.cover_image || world.hero_image || world.cover_image);
 
   return (
     <div className="lv-scriptd-desktop">
@@ -429,7 +429,7 @@ function MobileScriptDetail({
   worldHref: string;
 }) {
   const t = useTranslations("worlds");
-  const cover = ossThumb(script.cover_image || world.hero_image || world.cover_image, 900);
+  const cover = ossThumb(script.cover_image || world.hero_image || world.cover_image, 900, { quality: 90 });
 
   return (
     <div

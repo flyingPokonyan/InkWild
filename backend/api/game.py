@@ -99,12 +99,37 @@ def _legacy_game_router() -> LLMRouter:
     )
 
 
-async def get_game_service(db: AsyncSession) -> GameService:
-    game_router = await resolve_slot_router(db, "game_main") or _legacy_game_router()
-    compression_router = await resolve_slot_router(db, "conversation_compression") or game_router
-    ending_summary_router = await resolve_slot_router(db, "ending_summary") or game_router
+def _game_key_affinity(*, world_id: str, script_id: str | None, mode: str) -> str:
+    """Cache-domain affinity for provider key selection.
+
+    Keep this intentionally coarse: all players in the same world/script/mode
+    prefer the same API key, maximizing upstream prefix-cache reuse.
+    """
+
+    return f"game:{mode}:world:{world_id}:script:{script_id or 'none'}"
+
+
+async def _session_key_affinity(db: AsyncSession, *, user_id: str, session_id: str) -> str:
+    row = (
+        await db.execute(
+            select(GameSession.world_id, GameSession.script_id, GameSession.mode)
+            .where(GameSession.id == session_id, GameSession.user_id == user_id)
+        )
+    ).one_or_none()
+    if row is None:
+        return f"game:session:{session_id}"
+    world_id, script_id, mode = row
+    return _game_key_affinity(world_id=str(world_id), script_id=str(script_id) if script_id else None, mode=mode)
+
+
+async def get_game_service(db: AsyncSession, *, key_affinity: str | None = None) -> GameService:
+    game_router = await resolve_slot_router(db, "game_main", key_affinity=key_affinity) or _legacy_game_router()
+    compression_router = await resolve_slot_router(
+        db, "conversation_compression", key_affinity=key_affinity
+    ) or game_router
+    ending_summary_router = await resolve_slot_router(db, "ending_summary", key_affinity=key_affinity) or game_router
     # Optional cheaper slot for NPC dialogue. Falls back to game_main when unbound.
-    npc_router = await resolve_slot_router(db, "npc_agent") or game_router
+    npc_router = await resolve_slot_router(db, "npc_agent", key_affinity=key_affinity) or game_router
     orchestrator = Orchestrator(
         llm_router=game_router,
         compression_llm_router=compression_router,
@@ -114,11 +139,14 @@ async def get_game_service(db: AsyncSession) -> GameService:
     return GameService(orchestrator=orchestrator)
 
 
-async def _resolve_game_service(db: AsyncSession) -> GameService:
+async def _resolve_game_service(db: AsyncSession, *, key_affinity: str | None = None) -> GameService:
     try:
-        service = get_game_service(db)
+        service = get_game_service(db, key_affinity=key_affinity)
     except TypeError:
-        service = get_game_service()
+        try:
+            service = get_game_service(db)
+        except TypeError:
+            service = get_game_service()
     if isawaitable(service):
         return await service
     return service
@@ -295,7 +323,8 @@ async def start_game(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    service = await _resolve_game_service(db)
+    key_affinity = _game_key_affinity(world_id=req.world_id, script_id=req.script_id, mode=req.mode)
+    service = await _resolve_game_service(db, key_affinity=key_affinity)
 
     raw = service.start_game(
         db,
@@ -325,7 +354,8 @@ async def retry_game(
     if not await lock.acquire(session_id):
         raise HTTPException(status_code=429, detail={"code": 42901, "message": "请等待上一轮回复完成"})
 
-    service = await _resolve_game_service(db)
+    key_affinity = await _session_key_affinity(db, user_id=current_user.id, session_id=session_id)
+    service = await _resolve_game_service(db, key_affinity=key_affinity)
     raw = service.retry_action(db, current_user.id, session_id)
 
     async def event_generator():
@@ -365,7 +395,8 @@ async def game_action(
     if not await lock.acquire(session_id):
         raise HTTPException(status_code=429, detail={"code": 42901, "message": "请等待上一轮回复完成"})
 
-    service = await _resolve_game_service(db)
+    key_affinity = await _session_key_affinity(db, user_id=current_user.id, session_id=session_id)
+    service = await _resolve_game_service(db, key_affinity=key_affinity)
     raw = service.process_action(db, current_user.id, session_id, req.action_text)
 
     async def event_generator():
@@ -488,7 +519,8 @@ async def resume_game(
     if not await lock.acquire(session_id):
         raise HTTPException(status_code=429, detail={"code": 42901, "message": "请等待上一轮回复完成"})
 
-    service = await _resolve_game_service(db)
+    key_affinity = await _session_key_affinity(db, user_id=current_user.id, session_id=session_id)
+    service = await _resolve_game_service(db, key_affinity=key_affinity)
 
     async def event_generator():
         try:

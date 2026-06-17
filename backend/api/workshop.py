@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from config import settings
 from database import async_session
@@ -44,6 +45,8 @@ from services.model_management import (
 from services import publish_service
 from services.image_regeneration import (
     ImageRegenerationError,
+    build_script_draft_image_prompt,
+    build_world_draft_image_prompt,
     regenerate_script_draft_image,
     regenerate_world_draft_image,
 )
@@ -366,11 +369,62 @@ class RegenerateWorldImageRequest(BaseModel):
     # "hero" | "cover" | "avatar:<角色名>"
     target: str = Field(min_length=1, max_length=120)
     hint: str = Field(default="", max_length=500)
+    prompt: str | None = Field(default=None, max_length=12000)
 
 
 class RegenerateScriptImageRequest(BaseModel):
     target: Literal["cover"] = "cover"
     hint: str = Field(default="", max_length=500)
+    prompt: str | None = Field(default=None, max_length=12000)
+
+
+class WorldImagePromptRequest(BaseModel):
+    # "hero" | "cover" | "avatar:<角色名>"
+    target: str = Field(min_length=1, max_length=120)
+
+
+class ScriptImagePromptRequest(BaseModel):
+    target: Literal["cover"] = "cover"
+
+
+def _persist_world_draft_image_url(draft: WorldDraft, *, target: str, url: str) -> None:
+    payload = dict(draft.payload or {})
+    if target == "hero":
+        payload["hero_image"] = url
+    elif target == "cover":
+        payload["cover_image"] = url
+    elif target.startswith("avatar:"):
+        character_name = target.removeprefix("avatar:").strip()
+        if not character_name:
+            return
+        character_images = payload.get("character_images") or {}
+        if not isinstance(character_images, dict):
+            character_images = {}
+        character_images = dict(character_images)
+        character_images[character_name] = url
+        payload["character_images"] = character_images
+
+        characters = []
+        for item in payload.get("world_characters") or []:
+            if not isinstance(item, dict):
+                characters.append(item)
+                continue
+            next_item = dict(item)
+            if (next_item.get("name") or "").strip() == character_name:
+                next_item["avatar"] = url
+            characters.append(next_item)
+        payload["world_characters"] = characters
+    else:
+        return
+    draft.payload = _normalize_world_payload(payload)
+    flag_modified(draft, "payload")
+
+
+def _persist_script_draft_image_url(draft: ScriptDraft, *, url: str) -> None:
+    payload = dict(draft.payload or {})
+    payload["cover_image"] = url
+    draft.payload = _normalize_script_payload(payload)
+    flag_modified(draft, "payload")
 
 
 @router.post("/uploads")
@@ -403,6 +457,55 @@ async def upload_image(
     return {"code": 0, "data": {"url": url}, "message": "ok"}
 
 
+@router.post("/world-drafts/{draft_id}/image-prompt")
+async def get_world_draft_image_prompt(
+    draft_id: str,
+    req: WorldImagePromptRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回单张图片重抽将使用的基础 prompt，供前端回显后让用户编辑。"""
+    draft = await db.get(WorldDraft, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="世界草稿不存在")
+    _assert_owner(draft, user, "world draft")
+    llm_router = await resolve_slot_router(db, "admin_generation") or _get_llm_router()
+    try:
+        prompt = await build_world_draft_image_prompt(
+            db,
+            draft,
+            target=req.target,
+            llm_router=llm_router,
+        )
+    except ImageRegenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "data": {"prompt": prompt}, "message": "ok"}
+
+
+@router.post("/script-drafts/{draft_id}/image-prompt")
+async def get_script_draft_image_prompt(
+    draft_id: str,
+    req: ScriptImagePromptRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """返回剧本封面重抽将使用的基础 prompt，供前端回显后让用户编辑。"""
+    draft = await db.get(ScriptDraft, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="剧本草稿不存在")
+    _assert_owner(draft, user, "script draft")
+    llm_router = await resolve_slot_router(db, "admin_generation") or _get_llm_router()
+    try:
+        prompt = await build_script_draft_image_prompt(
+            db,
+            draft,
+            llm_router=llm_router,
+        )
+    except ImageRegenerationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "data": {"prompt": prompt}, "message": "ok"}
+
+
 @router.post("/world-drafts/{draft_id}/regenerate-image")
 async def regenerate_world_draft_image_endpoint(
     draft_id: str,
@@ -428,11 +531,14 @@ async def regenerate_world_draft_image_endpoint(
                 draft,
                 target=req.target,
                 hint=req.hint,
+                prompt=req.prompt,
                 llm_router=llm_router,
                 image_gen=image_gen,
             )
     except ImageRegenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _persist_world_draft_image_url(draft, target=req.target, url=url)
+    await db.commit()
     return {"code": 0, "data": {"url": url}, "message": "ok"}
 
 
@@ -456,11 +562,14 @@ async def regenerate_script_draft_image_endpoint(
                 db,
                 draft,
                 hint=req.hint,
+                prompt=req.prompt,
                 llm_router=llm_router,
                 image_gen=image_gen,
             )
     except ImageRegenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    _persist_script_draft_image_url(draft, url=url)
+    await db.commit()
     return {"code": 0, "data": {"url": url}, "message": "ok"}
 
 

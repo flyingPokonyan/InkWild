@@ -22,3 +22,12 @@ export function ossThumb(
   // m_lfit：限定在目标宽内、保持比例、绝不放大原图
   return `${url}${sep}x-oss-process=image/resize,w_${w},m_lfit/format,webp/quality,q_${quality}`;
 }
+
+/**
+ * Full-bleed hero images need more pixels than card thumbnails, especially on
+ * retina laptops / large desktop monitors. OSS will not upscale smaller source
+ * images because we use m_lfit, so this mainly protects high-resolution uploads.
+ */
+export function ossHero(url: string | null | undefined): string {
+  return ossThumb(url, 1600, { quality: 90 });
+}

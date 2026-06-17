@@ -94,8 +94,8 @@ async def list_announcements(
     )
     items = [
         AnnouncementOut(
-            id=ann.id, title=ann.title, body=ann.body, level=ann.level,
-            published_at=ann.published_at, read=read,
+            id=ann.id, title=ann.title, body=ann.body, image_url=ann.image_url,
+            level=ann.level, published_at=ann.published_at, read=read,
         )
         for ann, read in rows
     ]

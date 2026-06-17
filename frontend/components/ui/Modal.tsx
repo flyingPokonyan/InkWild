@@ -16,6 +16,8 @@ interface ModalProps {
   maxWidth?: number | string;
   /** 阻止点击背景 + Esc 关闭（仅在不可关闭流程用，如必须确认的破坏性操作） */
   dismissable?: boolean;
+  /** 面板色：default = 抬升表面 lv-bg-1；deep = 高级纯黑 lv-bg */
+  tone?: "default" | "deep";
 }
 
 /**
@@ -31,6 +33,7 @@ export function Modal({
   footer,
   maxWidth = 480,
   dismissable = true,
+  tone = "default",
 }: ModalProps) {
   useEffect(() => {
     if (!open) return;
@@ -71,7 +74,7 @@ export function Modal({
         style={{
           width: "100%",
           maxWidth,
-          background: "var(--lv-bg-1)",
+          background: tone === "deep" ? "var(--lv-bg)" : "var(--lv-bg-1)",
           border: "1px solid var(--lv-line)",
           borderRadius: "var(--lv-r-card)",
           padding: "var(--lv-s-6)",

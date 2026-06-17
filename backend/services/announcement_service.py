@@ -32,11 +32,12 @@ async def create(
     title: str,
     body: str,
     level: str = "info",
+    image_url: str | None = None,
     expires_at: datetime | None = None,
 ) -> Announcement:
     a = Announcement(
         created_by=created_by, title=title, body=body, level=level,
-        status="draft", expires_at=expires_at,
+        image_url=image_url, status="draft", expires_at=expires_at,
     )
     db.add(a)
     await db.flush()

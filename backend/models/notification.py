@@ -38,7 +38,8 @@ class Announcement(Base):
 
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String(200))
-    body: Mapped[str] = mapped_column(Text)
+    body: Mapped[str] = mapped_column(Text)  # 详情正文，支持 markdown
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # 配图（OSS）
     level: Mapped[str] = mapped_column(String(16), default="info")  # info / warning / critical
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / published
     published_at: Mapped[datetime | None] = mapped_column(nullable=True)

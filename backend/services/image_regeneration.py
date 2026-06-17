@@ -96,12 +96,121 @@ async def _recognition_for_draft(
     return IPRecognition(kind="known_ip", confidence=1.0, ip_name=ip_name)
 
 
-def _tiers(base: str, fallback: str | None, hint: str) -> list[str]:
+def _clean_prompt_override(prompt: str | None) -> str:
+    return (prompt or "").strip()
+
+
+def _tiers(base: str, fallback: str | None, hint: str, prompt: str | None = None) -> list[str]:
     """Build prompt tiers (with optional IP-fallback escalation), hint appended."""
+    prompt_override = _clean_prompt_override(prompt)
+    if prompt_override:
+        return [prompt_override]
     tiers = [_append_hint(base, hint)]
     if fallback is not None:
         tiers.append(_append_hint(fallback, hint))
     return tiers
+
+
+async def build_world_draft_image_prompt(
+    db: AsyncSession,
+    draft: WorldDraft,
+    *,
+    target: str,
+    llm_router: LLMRouter,
+) -> str:
+    """Return the base image prompt for one world-draft image target."""
+    payload = draft.payload or {}
+    world_data = _world_data_from_payload(payload)
+    recognition = await _recognition_for_draft(db, str(draft.id))
+
+    if target in (TARGET_HERO, TARGET_COVER):
+        world_brief, _ = await derive_world_cover_brief(
+            world_data=world_data,
+            characters=[],
+            recognition=recognition,
+            ip_pack=None,
+            llm=llm_router,
+        )
+        if target == TARGET_HERO:
+            return build_world_hero_prompt(world_brief)
+        return build_world_cover_prompt(world_brief)
+
+    if target.startswith(_AVATAR_PREFIX):
+        char_name = target[len(_AVATAR_PREFIX) :].strip()
+        if not char_name:
+            raise ImageRegenerationError("缺少角色名")
+        chars = payload.get("world_characters") or []
+        char = next(
+            (c for c in chars if (c.get("name") or "").strip() == char_name), None
+        )
+        if char is None:
+            raise ImageRegenerationError(f"角色不存在：{char_name}")
+        char_input = {
+            "name": char_name,
+            "personality": char.get("personality", ""),
+            "gender": char.get("gender", ""),
+            "role_tag": char.get("role_tag", ""),
+            "is_image_target": True,
+        }
+        world_brief, char_briefs = await derive_world_cover_brief(
+            world_data=world_data,
+            characters=[char_input],
+            recognition=recognition,
+            ip_pack=None,
+            llm=llm_router,
+        )
+        char_brief = char_briefs.get(char_name) or CharacterCoverBrief(name=char_name)
+        return build_character_portrait_prompt(world_brief, char_brief)
+
+    raise ImageRegenerationError(f"不支持的图片目标：{target}")
+
+
+async def build_script_draft_image_prompt(
+    db: AsyncSession,
+    draft: ScriptDraft,
+    *,
+    llm_router: LLMRouter,
+) -> str:
+    """Return the base image prompt for a script-draft cover."""
+    payload = draft.payload or {}
+    world = await db.get(World, draft.world_id)
+    if world is None:
+        raise ImageRegenerationError("剧本所属世界不存在")
+
+    world_data = {
+        "name": (world.name or "").strip(),
+        "genre": (getattr(world, "genre", "") or "").strip(),
+        "era": (getattr(world, "era", "") or "").strip(),
+        "description": (world.description or "").strip(),
+    }
+    pack = (
+        (
+            await db.execute(
+                select(IPKnowledgePack).where(IPKnowledgePack.world_id == str(world.id))
+            )
+        )
+        .scalars()
+        .first()
+    )
+    recognition: IPRecognition | None = None
+    if pack is not None and (pack.ip_name or "").strip():
+        recognition = IPRecognition(
+            kind="known_ip", confidence=1.0, ip_name=pack.ip_name.strip()
+        )
+
+    world_brief, _ = await derive_world_cover_brief(
+        world_data=world_data,
+        characters=[],
+        recognition=recognition,
+        ip_pack=None,
+        llm=llm_router,
+    )
+    return build_script_cover_prompt(
+        world_brief,
+        script_title=(payload.get("name") or "").strip(),
+        script_title_english="",
+        script_essence=(payload.get("description") or "").strip(),
+    )
 
 
 async def _generate_one(
@@ -134,6 +243,7 @@ async def regenerate_world_draft_image(
     *,
     target: str,
     hint: str,
+    prompt: str | None = None,
     llm_router: LLMRouter,
     image_gen: ImageGenerator | None,
 ) -> str:
@@ -165,7 +275,7 @@ async def regenerate_world_draft_image(
             aspect, category = "3:2", "worlds/cover"
         return await _generate_one(
             image_gen=image_gen,
-            prompt_tiers=_tiers(base, fallback, hint),
+            prompt_tiers=_tiers(base, fallback, hint, prompt),
             aspect_ratio=aspect,
             category=category,
             name=world_data["name"],
@@ -197,10 +307,10 @@ async def regenerate_world_draft_image(
             llm=llm_router,
         )
         char_brief = char_briefs.get(char_name) or CharacterCoverBrief(name=char_name)
-        prompt = build_character_portrait_prompt(world_brief, char_brief)
+        base_prompt = build_character_portrait_prompt(world_brief, char_brief)
         return await _generate_one(
             image_gen=image_gen,
-            prompt_tiers=[_append_hint(prompt, hint)],
+            prompt_tiers=_tiers(base_prompt, None, hint, prompt),
             aspect_ratio="2:3",
             category="characters",
             name=char_name,
@@ -215,6 +325,7 @@ async def regenerate_script_draft_image(
     draft: ScriptDraft,
     *,
     hint: str,
+    prompt: str | None = None,
     llm_router: LLMRouter,
     image_gen: ImageGenerator | None,
 ) -> str:
@@ -278,7 +389,7 @@ async def regenerate_script_draft_image(
     )
     return await _generate_one(
         image_gen=image_gen,
-        prompt_tiers=_tiers(base, fallback, hint),
+        prompt_tiers=_tiers(base, fallback, hint, prompt),
         aspect_ratio="3:2",
         category="scripts/cover",
         name=script_title or "script",

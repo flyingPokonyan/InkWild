@@ -35,6 +35,7 @@ export interface AnnouncementItem {
   id: string;
   title: string;
   body: string;
+  image_url: string | null;
   level: AnnouncementLevel;
   published_at: string | null;
   read: boolean;
@@ -94,13 +95,13 @@ export function useNotificationSummary(enabled: boolean) {
     queryKey: NOTIF_SUMMARY_KEY,
     queryFn: fetchSummary,
     enabled,
-    refetchInterval: 45_000,
+    refetchInterval: 25_000,
     refetchOnWindowFocus: true,
-    staleTime: 20_000,
+    staleTime: 10_000,
   });
 }
 
-/** 个人通知列表，打开弹窗时才拉。 */
+/** 个人通知列表，打开弹窗时才拉。每次打开/聚焦都拉最新（避免"要刷新才看到新的"）。 */
 export function useNotifications(enabled: boolean) {
   return useInfiniteQuery({
     queryKey: NOTIF_LIST_KEY,
@@ -108,6 +109,9 @@ export function useNotifications(enabled: boolean) {
     enabled,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_before,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }
 
@@ -119,6 +123,9 @@ export function useAnnouncements(enabled: boolean) {
     enabled,
     initialPageParam: null as string | null,
     getNextPageParam: (last) => last.next_before,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }
 

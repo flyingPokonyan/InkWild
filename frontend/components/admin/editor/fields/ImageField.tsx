@@ -3,12 +3,14 @@
 import * as Popover from "@radix-ui/react-popover";
 import { Link2, Loader2, Pencil, Sparkles, Upload } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { type CSSProperties, type ReactNode, useId, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { MobileSheet } from "@/components/ui/MobileSheet";
 import { AVATAR_TYPES, readAsDataUrl } from "@/lib/avatar";
 import { useIsMobile } from "@/lib/use-viewport";
 import {
+  getScriptDraftImagePrompt,
+  getWorldDraftImagePrompt,
   regenerateScriptDraftImage,
   regenerateWorldDraftImage,
   uploadWorkshopImage,
@@ -159,10 +161,37 @@ function ActionPanel({
   const [mode, setMode] = useState<Mode>("menu");
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
-  const [hint, setHint] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [promptLoading, setPromptLoading] = useState(false);
   const [link, setLink] = useState(url ?? "");
   const fileRef = useRef<HTMLInputElement>(null);
   const fileInputId = useId();
+
+  useEffect(() => {
+    if (mode !== "regen" || prompt) return;
+    let cancelled = false;
+    setPromptLoading(true);
+    setError(null);
+    void (async () => {
+      try {
+        if (beforeRegenerate) await beforeRegenerate();
+        const next =
+          draftKind === "world"
+            ? await getWorldDraftImagePrompt(draftId, regenTarget)
+            : await getScriptDraftImagePrompt(draftId);
+        if (!cancelled) setPrompt(next);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : t("promptLoadFailed"));
+        }
+      } finally {
+        if (!cancelled) setPromptLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [beforeRegenerate, draftId, draftKind, mode, prompt, regenTarget, t]);
 
   const onPickFile = async (file: File | undefined) => {
     if (!file) return;
@@ -196,8 +225,8 @@ function ActionPanel({
       if (beforeRegenerate) await beforeRegenerate();
       const next =
         draftKind === "world"
-          ? await regenerateWorldDraftImage(draftId, regenTarget, hint.trim())
-          : await regenerateScriptDraftImage(draftId, hint.trim());
+          ? await regenerateWorldDraftImage(draftId, regenTarget, prompt.trim())
+          : await regenerateScriptDraftImage(draftId, prompt.trim());
       onChange(next);
       onDone();
     } catch (e) {
@@ -213,6 +242,7 @@ function ActionPanel({
   };
 
   const disabled = busy !== null;
+  const regenDisabled = disabled || promptLoading;
 
   return (
     <div className="lv-imgfield-body">
@@ -242,18 +272,21 @@ function ActionPanel({
 
       {mode === "regen" ? (
         <>
+          <div className="lv-t-caps" style={{ color: "var(--lv-ink-3)", padding: "2px 2px 0" }}>
+            {t("promptLabel")}
+          </div>
           <textarea
             className="lv-imgfield-textarea"
-            rows={3}
-            value={hint}
-            onChange={(e) => setHint(e.target.value)}
-            placeholder={t("regenerateHintPlaceholder")}
+            rows={7}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder={promptLoading ? t("promptLoading") : t("regeneratePromptPlaceholder")}
           />
           <div className="lv-imgfield-actions">
             <button type="button" className="lv-imgfield-ghost" onClick={() => setMode("menu")} disabled={disabled}>
               {t("back")}
             </button>
-            <button type="button" className="lv-imgfield-cta" onClick={() => void doRegen()} disabled={disabled}>
+            <button type="button" className="lv-imgfield-cta" onClick={() => void doRegen()} disabled={regenDisabled}>
               {t("regenerateCta")}
             </button>
           </div>
@@ -320,8 +353,9 @@ function ActionRow({
 
 const coverFrameStyle: CSSProperties = {
   width: "100%",
-  background: "var(--lv-bg-2)",
-  border: "1px solid var(--lv-line)",
+  background: "var(--lv-bg-stage)",
+  border: "1px solid rgba(245, 242, 235, 0.08)",
+  boxShadow: "inset 0 1px 0 rgba(245, 242, 235, 0.04)",
   borderRadius: "var(--lv-r-card)",
   overflow: "hidden",
   position: "relative",
@@ -330,8 +364,9 @@ const coverFrameStyle: CSSProperties = {
 const avatarFrameStyle: CSSProperties = {
   width: 76,
   height: 76,
-  background: "var(--lv-bg-2)",
-  border: "1px solid var(--lv-line)",
+  background: "var(--lv-bg-stage)",
+  border: "1px solid rgba(245, 242, 235, 0.08)",
+  boxShadow: "inset 0 1px 0 rgba(245, 242, 235, 0.04)",
   borderRadius: "var(--lv-r-card)",
   overflow: "hidden",
   position: "relative",
@@ -369,14 +404,16 @@ function ImageFieldStyles() {
       }
 
       .lv-theme .lv-imgfield-pop {
-        width: 300px;
+        width: 420px;
         max-width: calc(100vw - 32px);
-        background: var(--lv-bg-1);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(5, 5, 7, 0.94);
+        border: 1px solid rgba(245, 242, 235, 0.10);
         border-radius: var(--lv-r-card);
         box-shadow: 0 20px 56px rgba(0, 0, 0, 0.6);
         padding: 8px;
         z-index: var(--lv-z-modal);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
       }
 
       .lv-theme .lv-imgfield-body {
@@ -404,7 +441,7 @@ function ImageFieldStyles() {
         transition: background var(--lv-dur-fast) var(--lv-ease);
       }
       .lv-theme .lv-imgfield-row:hover:not(:disabled) {
-        background: rgba(255, 255, 255, 0.045);
+        background: rgba(245, 242, 235, 0.045);
       }
       .lv-theme .lv-imgfield-row:disabled {
         opacity: 0.5;
@@ -425,14 +462,18 @@ function ImageFieldStyles() {
       .lv-theme .lv-imgfield-input,
       .lv-theme .lv-imgfield-textarea {
         width: 100%;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        background: rgba(255, 255, 255, 0.045);
+        border: 1px solid rgba(245, 242, 235, 0.11);
+        background: rgba(5, 5, 7, 0.72);
         color: var(--lv-ink);
         font-family: var(--lv-font-sans);
         font-size: 13px;
         outline: none;
+        box-shadow:
+          inset 0 1px 0 rgba(245, 242, 235, 0.04),
+          0 1px 0 rgba(0, 0, 0, 0.35);
         transition: border-color var(--lv-dur-fast) var(--lv-ease),
-          background var(--lv-dur-fast) var(--lv-ease);
+          background var(--lv-dur-fast) var(--lv-ease),
+          box-shadow var(--lv-dur-fast) var(--lv-ease);
       }
       .lv-theme .lv-imgfield-input {
         height: 44px;
@@ -440,19 +481,22 @@ function ImageFieldStyles() {
         border-radius: var(--lv-r-pill);
       }
       .lv-theme .lv-imgfield-textarea {
-        padding: 10px 14px;
-        border-radius: 14px;
+        padding: 12px 14px;
+        border-radius: var(--lv-r-card);
         line-height: 1.6;
         resize: none;
       }
       .lv-theme .lv-imgfield-input::placeholder,
       .lv-theme .lv-imgfield-textarea::placeholder {
-        color: var(--lv-ink-3);
+        color: var(--lv-ink-4);
       }
       .lv-theme .lv-imgfield-input:focus,
       .lv-theme .lv-imgfield-textarea:focus {
-        border-color: rgba(255, 255, 255, 0.22);
-        background: rgba(255, 255, 255, 0.07);
+        border-color: rgba(245, 242, 235, 0.24);
+        background: rgba(5, 5, 7, 0.90);
+        box-shadow:
+          inset 0 1px 0 rgba(245, 242, 235, 0.06),
+          0 0 0 1px rgba(245, 242, 235, 0.03);
       }
 
       .lv-theme .lv-imgfield-actions {

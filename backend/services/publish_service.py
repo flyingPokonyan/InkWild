@@ -41,6 +41,7 @@ from services.world_image_fields import resolve_world_image_fields_from_mapping
 # ---------------------------------------------------------------------------
 
 LOCATION_BLOCK_HEADER = "## 地点列表"
+IMAGE_PLACEHOLDER_URL = "/static/placeholder-cover.png"
 
 # ---------------------------------------------------------------------------
 # Pure payload / coercion helpers  (exported so admin.py can import them)
@@ -77,6 +78,10 @@ def _coerce_difficulty(value, default: int = 3) -> int:
             n = int(normalized)
             return n if 1 <= n <= 5 else default
     return default
+
+
+def _is_placeholder_image(value: object) -> bool:
+    return isinstance(value, str) and value.strip() == IMAGE_PLACEHOLDER_URL
 
 
 def _coerce_world_character(
@@ -197,7 +202,15 @@ def normalize_world_payload(payload: dict) -> dict:
     normalized_chars: list[dict] = []
     for wc in payload.get("world_characters") or []:
         name = wc.get("name") if isinstance(wc, dict) else ""
-        avatar_override = character_images.get(name) if name else None
+        raw_avatar = wc.get("avatar") if isinstance(wc, dict) else None
+        image_avatar = character_images.get(name) if name else None
+        avatar_override = None
+        if image_avatar and (
+            not _is_placeholder_image(image_avatar)
+            or not raw_avatar
+            or _is_placeholder_image(raw_avatar)
+        ):
+            avatar_override = image_avatar
         normalized_chars.append(
             _coerce_world_character(
                 wc,

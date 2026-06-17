@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from models.user import AuthIdentity, User
 from services.auth_service import AuthService
+from services.system_config_service import ensure_signup_allowed
 from utils import utcnow
 
 SUPPORTED_PROVIDERS = ("google", "linuxdo")
@@ -77,6 +78,7 @@ async def upsert_oauth_identity(db: AsyncSession, provider: str, profile: dict) 
         await db.commit()
         return user
 
+    await ensure_signup_allowed(db)  # 注册放量闸门：OAuth 首登即建号，等同新注册
     verified = profile["email_verified"]
     user = User(status="active", nickname=profile.get("name"), avatar_url=profile.get("avatar"))
     db.add(user)

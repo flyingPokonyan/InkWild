@@ -726,3 +726,20 @@ def test_normalize_world_payload_preserves_voice_style():
     assert by_name["苏无名"]["voice_style"] == "VS-A"
     assert by_name["卢凌风"]["voice_style"] == "VS-B"
     assert by_name["苏无名"]["avatar"] == "http://oss/su.png"  # avatar 注入未受影响
+
+
+@pytest.mark.no_db
+def test_normalize_world_payload_does_not_let_placeholder_override_real_avatar():
+    payload = {
+        "name": "权力的游戏",
+        "world_characters": [
+            {
+                "name": "琼恩·雪诺",
+                "personality": "x",
+                "avatar": "https://oss.test/characters/jon.png",
+            }
+        ],
+        "character_images": {"琼恩·雪诺": "/static/placeholder-cover.png"},
+    }
+    out = normalize_world_payload(payload)
+    assert out["world_characters"][0]["avatar"] == "https://oss.test/characters/jon.png"

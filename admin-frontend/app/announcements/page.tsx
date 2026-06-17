@@ -16,6 +16,7 @@ interface AnnouncementItem {
   id: string;
   title: string;
   body: string;
+  image_url: string | null;
   level: string;
   status: string;
   published_at: string | null;
@@ -41,11 +42,21 @@ interface FormState {
   id: string | null;
   title: string;
   body: string;
+  image_url: string;
   level: string;
   expires_at: string; // datetime-local 字符串，空 = 不过期
 }
 
-const EMPTY_FORM: FormState = { id: null, title: "", body: "", level: "info", expires_at: "" };
+const EMPTY_FORM: FormState = { id: null, title: "", body: "", image_url: "", level: "info", expires_at: "" };
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("读取图片失败"));
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function AnnouncementsPage() {
   const qc = useQueryClient();
@@ -65,6 +76,7 @@ export default function AnnouncementsPage() {
         title: f.title.trim(),
         body: f.body.trim(),
         level: f.level,
+        image_url: f.image_url, // "" = 清除配图
         expires_at: f.expires_at ? f.expires_at : null,
       };
       if (f.id) {
@@ -84,6 +96,18 @@ export default function AnnouncementsPage() {
       invalidate();
     },
     onError: (e: unknown) => setErr(e instanceof Error ? e.message : "保存失败"),
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const dataUrl = await readFileAsDataUrl(file);
+      return apiFetch<{ image_url: string }>("/api/admin/announcements/upload-image", {
+        method: "POST",
+        body: JSON.stringify({ image: dataUrl }),
+      });
+    },
+    onSuccess: (res) => setForm((f) => (f ? { ...f, image_url: res.image_url } : f)),
+    onError: (e: unknown) => setErr(e instanceof Error ? e.message : "图片上传失败"),
   });
 
   const toggleMutation = useMutation({
@@ -150,6 +174,7 @@ export default function AnnouncementsPage() {
                           setErr(null);
                           setForm({
                             id: it.id, title: it.title, body: it.body, level: it.level,
+                            image_url: it.image_url ?? "",
                             expires_at: it.expires_at ? it.expires_at.slice(0, 16) : "",
                           });
                         }}
@@ -210,9 +235,43 @@ export default function AnnouncementsPage() {
                 className="input"
                 rows={5}
                 value={form.body}
-                placeholder="公告内容…"
+                placeholder="公告内容…支持 Markdown（**加粗**、[链接](url)、列表等）"
                 onChange={(e) => setForm({ ...form, body: e.target.value })}
               />
+              <span className="field-hint">支持 Markdown · 用户端详情弹窗按富文本渲染</span>
+            </div>
+
+            <div className="field">
+              <label className="field-label">配图（可选）</label>
+              {form.image_url ? (
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={form.image_url}
+                    alt=""
+                    style={{ width: 120, height: 72, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line, #2a2a32)" }}
+                  />
+                  <Btn variant="ghost" onClick={() => setForm({ ...form, image_url: "" })}>
+                    移除
+                  </Btn>
+                </div>
+              ) : (
+                <label className="btn btn-ghost" style={{ cursor: "pointer", display: "inline-flex", width: "fit-content" }}>
+                  {uploadMutation.isPending ? "上传中…" : "上传图片"}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    style={{ display: "none" }}
+                    disabled={uploadMutation.isPending}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadMutation.mutate(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
+              <span className="field-hint">PNG / JPEG / WebP，≤ 4MB</span>
             </div>
             <div className="field-row">
               <div className="field">

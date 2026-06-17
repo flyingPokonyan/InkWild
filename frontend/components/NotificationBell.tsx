@@ -2,13 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { Bell } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { NotificationPanel } from "@/components/notifications/NotificationPanel";
+import { NotificationDetailView, type DetailItem } from "@/components/notifications/NotificationDetailView";
 import { Drawer } from "@/components/ui/Drawer";
+import { Modal } from "@/components/ui/Modal";
 import { useIsMobile } from "@/lib/use-viewport";
-import { badgeText, totalUnread, useNotificationSummary } from "@/lib/notifications";
+import {
+  ANN_LIST_KEY,
+  NOTIF_LIST_KEY,
+  NOTIF_SUMMARY_KEY,
+  badgeText,
+  totalUnread,
+  useNotificationSummary,
+} from "@/lib/notifications";
 import { useAuthStore } from "@/stores/auth";
 
 export function NotificationBell() {
@@ -17,7 +27,17 @@ export function NotificationBell() {
   const user = useAuthStore((s) => s.user);
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<DetailItem | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const qc = useQueryClient();
+
+  // 每次打开铃铛都拉最新（移动端 Drawer 常驻挂载，靠这个而非 remount 刷新）
+  useEffect(() => {
+    if (!open) return;
+    qc.invalidateQueries({ queryKey: NOTIF_SUMMARY_KEY });
+    qc.invalidateQueries({ queryKey: NOTIF_LIST_KEY });
+    qc.invalidateQueries({ queryKey: ANN_LIST_KEY });
+  }, [open, qc]);
 
   const { data: summary } = useNotificationSummary(!!user);
   const unread = totalUnread(summary);
@@ -43,7 +63,14 @@ export function NotificationBell() {
 
   const navigate = (link: string) => {
     setOpen(false);
+    setDetail(null);
     router.push(link);
+  };
+
+  // 桌面：点列表项 → 关下拉、开独立弹窗（弹窗状态在 bell 这层，不随下拉卸载而消失）
+  const openDetail = (item: DetailItem) => {
+    setOpen(false);
+    setDetail(item);
   };
 
   const trigger = (
@@ -68,14 +95,25 @@ export function NotificationBell() {
 
       {!isMobile && open && (
         <div className="lv-notif-pop" role="dialog" aria-label={t("ariaLabel")}>
-          <NotificationPanel summary={summary} onNavigate={navigate} />
+          <NotificationPanel summary={summary} onNavigate={navigate} onOpenDetail={openDetail} />
         </div>
       )}
 
       {isMobile && (
         <Drawer open={open} onClose={() => setOpen(false)} title={t("ariaLabel")}>
-          <NotificationPanel summary={summary} onNavigate={navigate} />
+          <NotificationPanel summary={summary} onNavigate={navigate} isMobile />
         </Drawer>
+      )}
+
+      {/* 桌面详情：独立弹窗，脱离会自动关闭的下拉层 */}
+      {!isMobile && (
+        <Modal open={detail !== null} onClose={() => setDetail(null)} maxWidth={560}>
+          {detail && (
+            <div className="lv-notif-detail-shell">
+              <NotificationDetailView item={detail} onNavigate={navigate} goLabel={t("goToLink")} />
+            </div>
+          )}
+        </Modal>
       )}
 
       <style jsx global>{`
@@ -121,6 +159,13 @@ export function NotificationBell() {
           -webkit-backdrop-filter: blur(22px) saturate(135%);
           overflow: hidden;
           z-index: var(--lv-z-modal);
+        }
+        .lv-notif-detail-shell {
+          max-height: min(62dvh, 540px);
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          margin: -2px;
+          padding: 2px;
         }
         .lv-notif-pop::before {
           content: "";

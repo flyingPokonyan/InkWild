@@ -5,12 +5,13 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Camera, Check, ChevronRight, KeyRound, Loader2, LogOut, PenLine, X } from "lucide-react";
+import { ArrowRight, Camera, Check, ChevronRight, KeyRound, Loader2, LogOut, MessageSquare, PenLine, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { AccountShell } from "@/components/account/AccountShell";
 import { AccountProfile } from "@/components/account/AccountProfile";
 import { ChangePasswordForm } from "@/components/account/ChangePasswordForm";
+import { FeedbackDialog } from "@/components/feedback/FeedbackDialog";
 import { NotificationBell } from "@/components/NotificationBell";
 import { ProductNav } from "@/components/ProductNav";
 import { Modal } from "@/components/ui/Modal";
@@ -85,6 +86,7 @@ export default function MePage() {
   const tc = useTranslations("credits");
   const tNav = useTranslations("nav");
   const ta = useTranslations("account");
+  const tf = useTranslations("feedback");
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -103,6 +105,7 @@ export default function MePage() {
   const [nickDraft, setNickDraft] = useState("");
   const [nickBusy, setNickBusy] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [fbOpen, setFbOpen] = useState(false);
 
   const onPickAvatar = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -383,6 +386,13 @@ export default function MePage() {
               </span>
               <ChevronRight size={15} />
             </button>
+            <button type="button" className="me-more-row" onClick={() => setFbOpen(true)}>
+              <span>
+                <MessageSquare size={16} />
+                {tf("entry")}
+              </span>
+              <ChevronRight size={15} />
+            </button>
           </div>
         </motion.section>
 
@@ -397,6 +407,8 @@ export default function MePage() {
       <Modal open={pwOpen} onClose={() => setPwOpen(false)} title={ta("changePassword")} maxWidth={420}>
         <ChangePasswordForm hasPassword={hasPassword} onDone={() => setPwOpen(false)} />
       </Modal>
+
+      <FeedbackDialog open={fbOpen} onClose={() => setFbOpen(false)} />
 
       <style jsx global>{`
         .me-root {

@@ -8,6 +8,8 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import base64
+import re
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -159,6 +161,34 @@ def make_image_key(category: str, name: str, ext: str = "png") -> str:
     short_id = uuid.uuid4().hex[:8]
     safe_name = name.replace("/", "_").replace(" ", "_")[:40]
     return f"{category}/{short_id}-{safe_name}.{ext}"
+
+
+_UPLOAD_IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+_UPLOAD_DATA_URL_RE = re.compile(r"^data:(?P<mime>image/[a-z+]+);base64,(?P<b64>.+)$", re.DOTALL)
+
+
+def decode_data_url_image(data_url: str, *, max_bytes: int) -> tuple[bytes, str]:
+    """Decode a base64 image data URL → (bytes, ext). Raises AppError on bad input.
+
+    共享给头像 / 公告配图 / 反馈截图等 JSON-base64 上传路径。
+    """
+    from middleware.error_handler import AppError
+
+    match = _UPLOAD_DATA_URL_RE.match(data_url.strip())
+    if not match:
+        raise AppError(42202, "图片格式不正确", status_code=422)
+    ext = _UPLOAD_IMAGE_TYPES.get(match.group("mime"))
+    if not ext:
+        raise AppError(42202, "仅支持 PNG / JPEG / WebP 图片", status_code=422)
+    try:
+        data = base64.b64decode(match.group("b64"), validate=True)
+    except Exception:  # noqa: BLE001 — 任何解码失败都按非法图片处理
+        raise AppError(42204, "图片数据无法解析", status_code=422)
+    if not data:
+        raise AppError(42204, "图片为空", status_code=422)
+    if len(data) > max_bytes:
+        raise AppError(42203, "图片体积超出限制", status_code=422)
+    return data, ext
 
 
 async def save_generated_image_result(storage: ImageStorage, result: ImageResult, key: str) -> str:

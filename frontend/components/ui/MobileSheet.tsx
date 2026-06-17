@@ -9,8 +9,8 @@ interface MobileSheetProps {
   /** 标题，serif 18px；不传则渲染一个可访问的隐藏标题 */
   title?: ReactNode;
   children: ReactNode;
-  /** solid = 实底（积分 / 通知）；glass = 半透模糊（play 浮层） */
-  tone?: "solid" | "glass";
+  /** solid = 实底（积分 / 通知）；glass = 半透模糊（play 浮层）；deep = 高级纯黑 */
+  tone?: "solid" | "glass" | "deep";
   /** 内容区最大高度，默认 72dvh —— 控制「别太大」 */
   maxHeight?: string;
 }
@@ -29,7 +29,7 @@ export function MobileSheet({ open, onClose, title, children, tone = "solid", ma
     display: "flex",
     flexDirection: "column",
     maxHeight,
-    background: tone === "glass" ? "rgba(17, 17, 20, 0.92)" : "var(--lv-bg-1)",
+    background: tone === "glass" ? "rgba(17, 17, 20, 0.92)" : tone === "deep" ? "var(--lv-bg)" : "var(--lv-bg-1)",
     backdropFilter: tone === "glass" ? "blur(28px) saturate(140%)" : undefined,
     WebkitBackdropFilter: tone === "glass" ? "blur(28px) saturate(140%)" : undefined,
     borderTop: "1px solid var(--lv-line)",

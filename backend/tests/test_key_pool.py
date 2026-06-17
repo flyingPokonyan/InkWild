@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 import llm.key_pool as kp
-from llm.key_pool import KeyCooldownProvider, _is_rate_limit
+from llm.key_pool import KeyCooldownProvider, KeySwitchingProvider, _is_rate_limit
 
 
 def setup_function() -> None:
@@ -118,3 +118,67 @@ async def test_wrapper_does_not_cooldown_on_other_errors() -> None:
         async for _ in wrapped.stream_with_tools([], []):
             pass
     assert kp._cooldowns == {}  # no cooldown recorded
+
+
+def _affinity_for_key(provider_id: str, keys: list[str], target: str) -> str:
+    for idx in range(1000):
+        affinity = f"affinity-{idx}"
+        if kp.select_key(provider_id, keys, affinity=affinity)[0] == target:
+            kp.reset_state()
+            return affinity
+    raise AssertionError(f"could not find affinity for {target}")
+
+
+class _KeyedProvider:
+    model = "fake"
+
+    def __init__(self, key: str, calls: list[str]):
+        self._key = key
+        self._calls = calls
+
+    async def stream_with_tools(self, *a, **k):
+        self._calls.append(self._key)
+        if self._key == "k1":
+            raise _FakeRateLimit("429")
+        yield {"type": "text_delta", "text": "ok"}
+
+    async def stream_json(self, *a, **k):
+        self._calls.append(self._key)
+        if self._key == "k1":
+            raise _FakeRateLimit("429")
+        yield {"type": "text_delta", "text": "ok"}
+
+
+async def test_key_switching_provider_tries_next_key_before_yield() -> None:
+    keys = ["k1", "k2"]
+    affinity = _affinity_for_key("p", keys, "k1")
+    calls: list[str] = []
+    wrapped = KeySwitchingProvider(
+        provider_id="p",
+        keys=keys,
+        affinity=affinity,
+        build=lambda key: _KeyedProvider(key, calls),
+        model="fake",
+    )
+
+    events = [event async for event in wrapped.stream_with_tools([], [])]
+
+    assert events == [{"type": "text_delta", "text": "ok"}]
+    assert calls == ["k1", "k2"]
+
+
+async def test_key_switching_provider_single_key_reraises() -> None:
+    calls: list[str] = []
+    wrapped = KeySwitchingProvider(
+        provider_id="p",
+        keys=["k1"],
+        affinity="same",
+        build=lambda key: _KeyedProvider(key, calls),
+        model="fake",
+    )
+
+    with pytest.raises(_FakeRateLimit):
+        async for _ in wrapped.stream_with_tools([], []):
+            pass
+
+    assert calls == ["k1"]

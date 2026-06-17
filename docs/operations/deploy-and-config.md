@@ -277,9 +277,10 @@ docker-compose.prod.yml    # prod override：生产 URL/cookie/CORS + build args
 
 - 每个 provider 可配多个 API key：admin「模型管理 → Provider 编辑 → API Keys（直填，一行一个）」
   直接存进 DB（优先于环境变量名），或让环境变量值逗号分隔。原始 key 在所有响应里打码（`sk-…abcd`）。
-- 运行时按**会话粘连**轮询（`llm/key_pool.py`）：同一局/同一生成任务恒定同一个 key，
-  保住整局 prompt 缓存；不同会话散到不同 key 分摊并发。被 429 命中的 key 自动冷却
-  `KEY_COOLDOWN_SECONDS` 后再用；全部冷却时取最早恢复的那个，不硬失败。
+- 游戏运行时按**缓存域粘连**轮询（`world_id + script_id + mode`），同一世界/剧本/模式
+  优先使用同一个 key，以尽量复用上游 prompt 缓存；生成任务仍按 `task_id` 粘连。认证 / 配额 /
+  限流 / 5xx 这类 key-ish 上游失败会冷却当前 key 并尝试下一把；全部冷却时取最早恢复的那个，
+  不硬失败。
 - **多 key 想真正提总并发，需相应调高 `LLM_GLOBAL_CONCURRENCY`**，否则总并发被这道闸卡住、
   散到每个 key 都远低于其单 key 限额。经验值：`LLM_GLOBAL_CONCURRENCY ≈ key 数 × 单 key 可用并发预算`。
 - 冷却状态是进程内存，多 worker 各自一份（软优化）；跨进程一致后续可接 Redis。

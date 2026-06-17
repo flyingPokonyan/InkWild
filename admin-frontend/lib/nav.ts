@@ -6,6 +6,8 @@ import {
   FileText,
   LayoutDashboard,
   Megaphone,
+  MessageSquare,
+  Settings,
   Sparkles,
   Users,
   Wallet,
@@ -35,6 +37,7 @@ export const NAV: NavSection[] = [
       { id: "users", label: "用户管理", href: "/users", icon: Users },
       { id: "content", label: "内容审核", href: "/content", icon: FileText },
       { id: "announcements", label: "系统公告", href: "/announcements", icon: Megaphone },
+      { id: "feedback", label: "用户反馈", href: "/feedback", icon: MessageSquare },
     ],
   },
   {
@@ -50,6 +53,7 @@ export const NAV: NavSection[] = [
       { id: "cost", label: "成本分析", href: "/cost", icon: Coins },
       { id: "credits", label: "积分经济", href: "/credits", icon: Wallet },
       { id: "audit", label: "审计日志", href: "/audit", icon: ClipboardList },
+      { id: "settings", label: "系统设置", href: "/settings", icon: Settings },
     ],
   },
 ];

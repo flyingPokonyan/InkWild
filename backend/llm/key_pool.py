@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from collections.abc import Callable
 from typing import AsyncIterator
 
 import structlog
@@ -111,11 +112,154 @@ def _is_rate_limit(exc: BaseException) -> bool:
     """Whether an exception is an upstream rate-limit (HTTP 429)."""
     if exc.__class__.__name__ == "RateLimitError":
         return True
+    status = _status_code(exc)
+    return status == 429
+
+
+def _status_code(exc: BaseException) -> int | None:
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None)
-    return status == 429
+    return status if isinstance(status, int) else None
+
+
+_KEY_SWITCH_EXC_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "APITimeoutError",
+        "AuthenticationError",
+        "ConnectError",
+        "ConnectTimeout",
+        "InternalServerError",
+        "PermissionDeniedError",
+        "RateLimitError",
+        "ReadTimeout",
+        "RemoteProtocolError",
+        "ServerDisconnectedError",
+    }
+)
+
+
+def _is_key_switchable(exc: BaseException) -> bool:
+    """Whether another key might succeed for the same request.
+
+    This intentionally covers quota/auth/rate-limit/status failures but avoids
+    retrying arbitrary bad-request errors (for example malformed tool schemas).
+    """
+    if exc.__class__.__name__ in _KEY_SWITCH_EXC_NAMES:
+        return True
+    status = _status_code(exc)
+    if status in {401, 402, 403, 408, 409, 429}:
+        return True
+    return bool(status and status >= 500)
+
+
+def _unique_key_count(keys: list[str]) -> int:
+    return len({fingerprint(k) for k in keys})
+
+
+class KeySwitchingProvider(LLMProvider):
+    """Build a fresh inner provider per attempt and switch keys on key-ish failures.
+
+    Selection remains sticky by affinity while the chosen key is healthy. If the
+    selected key fails before any event is yielded, it is cooled down and the
+    next available key is tried. Once content has streamed, exceptions are
+    propagated to avoid splicing together partial outputs from different keys.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider_id: str,
+        keys: list[str],
+        affinity: str | None,
+        build: Callable[[str], LLMProvider],
+        model: str | None = None,
+    ):
+        if not keys:
+            raise ValueError("KeySwitchingProvider requires at least one key")
+        self._provider_id = provider_id
+        self._keys = keys
+        self._affinity = affinity
+        self._build = build
+        self._model = model
+
+    @property
+    def model(self):  # noqa: ANN201
+        return self._model
+
+    async def stream_with_tools(self, *args, **kwargs) -> AsyncIterator[dict]:
+        attempted: set[str] = set()
+        key_count = _unique_key_count(self._keys)
+        last_exc: BaseException | None = None
+
+        while len(attempted) < key_count:
+            key, fp = select_key(self._provider_id, self._keys, self._affinity)
+            if fp in attempted:
+                break
+            attempted.add(fp)
+            inner = self._build(key)
+            yielded_any = False
+            try:
+                async for ev in inner.stream_with_tools(*args, **kwargs):
+                    yielded_any = True
+                    yield ev
+                return
+            except Exception as exc:  # noqa: BLE001 - key switch decision below
+                if yielded_any or key_count <= 1 or not _is_key_switchable(exc):
+                    raise
+                last_exc = exc
+                report_rate_limited(self._provider_id, fp)
+                logger.warning(
+                    "llm.key_switch",
+                    provider_id=self._provider_id,
+                    fp=fp,
+                    error_type=exc.__class__.__name__,
+                    status_code=_status_code(exc),
+                    attempted=len(attempted),
+                    key_count=key_count,
+                )
+                continue
+
+        if last_exc is not None:
+            raise last_exc
+
+    async def stream_json(self, *args, **kwargs) -> AsyncIterator[dict]:
+        attempted: set[str] = set()
+        key_count = _unique_key_count(self._keys)
+        last_exc: BaseException | None = None
+
+        while len(attempted) < key_count:
+            key, fp = select_key(self._provider_id, self._keys, self._affinity)
+            if fp in attempted:
+                break
+            attempted.add(fp)
+            inner = self._build(key)
+            yielded_any = False
+            try:
+                async for ev in inner.stream_json(*args, **kwargs):
+                    yielded_any = True
+                    yield ev
+                return
+            except Exception as exc:  # noqa: BLE001 - key switch decision below
+                if yielded_any or key_count <= 1 or not _is_key_switchable(exc):
+                    raise
+                last_exc = exc
+                report_rate_limited(self._provider_id, fp)
+                logger.warning(
+                    "llm.key_switch",
+                    provider_id=self._provider_id,
+                    fp=fp,
+                    error_type=exc.__class__.__name__,
+                    status_code=_status_code(exc),
+                    attempted=len(attempted),
+                    key_count=key_count,
+                )
+                continue
+
+        if last_exc is not None:
+            raise last_exc
 
 
 class KeyCooldownProvider(LLMProvider):

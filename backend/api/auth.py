@@ -222,7 +222,15 @@ async def oauth_callback(
         resp = await client.get("https://connect.linux.do/api/user", token=token)
         userinfo = resp.json()
     profile = normalize_profile(provider, dict(userinfo))
-    user = await upsert_oauth_identity(db, provider, profile)
+    try:
+        user = await upsert_oauth_identity(db, provider, profile)
+    except AppError as exc:
+        # 注册放量闸门拦截：OAuth 是浏览器跳转流，回登录页带错误提示而非抛 JSON。
+        if exc.code in (40310, 40311):
+            return RedirectResponse(
+                url=f"{settings.public_web_url}/login?error=signup_closed", status_code=302
+            )
+        raise
     web_session = _auth_service()._build_session(
         user_id=user.id,
         user_agent=request.headers.get("user-agent"),

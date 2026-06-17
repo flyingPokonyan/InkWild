@@ -288,8 +288,11 @@
         "noImage": "NO IMAGE",
         "upload": "上传本地图片",
         "regenerate": "重新生成",
-        "regenerateHintPlaceholder": "补充方向（可选）：更冷一点 / 带雨 / 黄昏…",
-        "regenerateCta": "开始重抽",
+        "promptLabel": "这张图的 Prompt",
+        "regeneratePromptPlaceholder": "可以直接编辑完整 prompt",
+        "promptLoading": "正在读取这张图的 prompt…",
+        "promptLoadFailed": "Prompt 读取失败，可手动输入",
+        "regenerateCta": "按此 Prompt 重抽",
         "pasteLink": "粘贴链接",
         "pasteLinkPlaceholder": "图片 URL",
         "confirm": "确定",
@@ -792,6 +795,7 @@
     "draftWaiting": "草稿，等待你补完。"
   },
   "loginPage": {
+    "signupClosed": "注册名额暂时已满或注册未开放，请稍后再试。",
     "brandTagline": "AI 互动叙事引擎",
     "showcaseEyebrow": "InkWild Sandbox",
     "showcaseSlogan": "走进一个世界，开始游玩。",
@@ -1005,6 +1009,28 @@
     "markAllRead": "全部已读",
     "loadMore": "加载更多",
     "empty": "暂无通知",
-    "emptyAnnouncements": "暂无公告"
+    "emptyAnnouncements": "暂无公告",
+    "back": "返回",
+    "goToLink": "前往查看"
+  },
+  "feedback": {
+    "entry": "帮助与反馈",
+    "title": "帮助与反馈",
+    "catBug": "问题反馈",
+    "catSuggestion": "优化建议",
+    "contentLabel": "详细描述",
+    "contentPlaceholder": "请描述你遇到的问题或想法，越具体越好…",
+    "screenshot": "添加截图（可选）",
+    "removeImage": "移除",
+    "contactLabel": "联系方式（可选）",
+    "contactPlaceholder": "邮箱或其他，方便我们回复你",
+    "submit": "提交反馈",
+    "submitting": "提交中…",
+    "successTitle": "已收到，谢谢！",
+    "successBody": "我们会尽快查看你的反馈。",
+    "close": "关闭",
+    "errorGeneric": "提交失败，请稍后再试",
+    "imageTooLarge": "图片不能超过 4MB",
+    "imageType": "仅支持 PNG / JPEG / WebP 图片"
   }
 }

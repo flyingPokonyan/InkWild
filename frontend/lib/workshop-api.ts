@@ -156,15 +156,36 @@ export async function uploadWorkshopImage(
   return url;
 }
 
+/** Fetch the exact base prompt for one world-draft image. */
+export async function getWorldDraftImagePrompt(
+  draftId: string,
+  target: string,
+): Promise<string> {
+  const { prompt } = await workshopFetch<{ prompt: string }>(
+    `/api/workshop/world-drafts/${draftId}/image-prompt`,
+    { method: "POST", body: JSON.stringify({ target }) },
+  );
+  return prompt;
+}
+
+/** Fetch the exact base prompt for one script-draft cover. */
+export async function getScriptDraftImagePrompt(draftId: string): Promise<string> {
+  const { prompt } = await workshopFetch<{ prompt: string }>(
+    `/api/workshop/script-drafts/${draftId}/image-prompt`,
+    { method: "POST", body: JSON.stringify({ target: "cover" }) },
+  );
+  return prompt;
+}
+
 /** Regenerate one world-draft image. ``target`` ∈ "hero" | "cover" | "avatar:<名>". */
 export async function regenerateWorldDraftImage(
   draftId: string,
   target: string,
-  hint: string,
+  prompt: string,
 ): Promise<string> {
   const { url } = await workshopFetch<{ url: string }>(
     `/api/workshop/world-drafts/${draftId}/regenerate-image`,
-    { method: "POST", body: JSON.stringify({ target, hint }) },
+    { method: "POST", body: JSON.stringify({ target, prompt }) },
   );
   return url;
 }
@@ -172,11 +193,11 @@ export async function regenerateWorldDraftImage(
 /** Regenerate a script-draft cover. */
 export async function regenerateScriptDraftImage(
   draftId: string,
-  hint: string,
+  prompt: string,
 ): Promise<string> {
   const { url } = await workshopFetch<{ url: string }>(
     `/api/workshop/script-drafts/${draftId}/regenerate-image`,
-    { method: "POST", body: JSON.stringify({ target: "cover", hint }) },
+    { method: "POST", body: JSON.stringify({ target: "cover", prompt }) },
   );
   return url;
 }

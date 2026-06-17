@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     # ReadTimeout-ing the lot. Cap keeps the pool from collapsing under
     # burst; calls above the cap queue rather than fail. 8 fits a single
     # mid-tier DeepSeek/xAI quota; bump in env if running a larger pool.
-    llm_global_concurrency: int = 100
+    llm_global_concurrency: int = 1000
     # 单个 API key 被 429/限流命中后冷却多少秒再被轮询选中（见 llm/key_pool.py）。
     key_cooldown_seconds: float = 45.0
     # Research pack capacity limits — constraint on Tavily search results integration.
