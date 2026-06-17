@@ -31,7 +31,8 @@ BANNED_TITLE_WORDS = (
 _MAX_RESEARCH_QUERIES = 1
 _MAX_SUMMARY_CHARS = 1800
 # 外部 grok 调用硬上限——失败 / 慢时绝不能让选题挂住（曾观测到 401 重试风暴烧 6min）。
-_GROK_RESEARCH_TIMEOUT_S = 70.0
+# 研究=web_search(~60s 正常成本)+摘要，给到 100s 留余量，避免擦边回退丢掉 grok 联网。
+_GROK_RESEARCH_TIMEOUT_S = 100.0
 _SYNTH_TIMEOUT_S = 60.0
 
 
