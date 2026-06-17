@@ -114,7 +114,7 @@ director_v2.early_field_lengths
 
 它只记录 `scene_brief_chars` / `per_npc_focus_max_chars` / `per_npc_focus_avg_chars` / `active_npc_count`，不记录剧情内容。若 truncation 很少但长度仍贴近上限，说明模型基本遵守但 early decode 仍偏胖；若长度已经明显下降而 TTFT 不动，瓶颈更可能转到 narrator 首字或 NPC block wait。
 
-## 附：评测 run 台账（VPS `backend/research/`）
+## 附：评测 run 台账
 
 | run | 节点 | provider | 关键结论 |
 |---|---|---|---|

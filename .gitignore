@@ -35,6 +35,7 @@ pnpm-debug.log*
 test_outputs/
 backend/_*.txt
 backend/eval/runs/
+backend/research/
 
 # Local tools, IDEs, and agent scratch space
 .DS_Store
@@ -57,3 +58,7 @@ backend/static/images/*
 # One-off production SQL patches may contain provider keys or live data.
 prod_model_cfg_*.sql
 *.bak
+
+# Internal-only working docs (AI-agent process logs, raw research dumps, eval run reports).
+# Kept locally for the author; not part of the open-source distribution.
+_internal/
