@@ -454,13 +454,14 @@ lib/              纯逻辑工具 + API 封装
 |---|---|
 | [data/schema](./data/schema.md) | 所有表 + 字段说明 + Alembic head 演进 |
 
-### 7.6 设计规范（保留原位）
+### 7.6 设计规范
 
 | 文档 | 内容 |
 |---|---|
-| [design/visual-principles.md](./design/visual-principles.md) | UI 视觉原则 v2.1 |
-| [design/frontend-spec.md](./design/frontend-spec.md) | 设计令牌 |
-| [design/cover-art-spec.md](./design/cover-art-spec.md) | 封面规范 v1.1 |
+| [../frontend/AGENTS.md](../frontend/AGENTS.md) | 前端唯一参考：视觉气质 / 设计令牌速查 / play 例外 / 基础设施（参考非律法，真相源是 `globals.css`） |
+| [design/cover-art-spec.md](./design/cover-art-spec.md) | 封面 / 生图产物规范 v1.1 |
+
+> 旧 visual-principles / frontend-spec / play-mode-spec / audit 已合并精简进 `frontend/AGENTS.md`，原文归档在 [`_archive/`](./_archive/)。
 
 ### 7.7 产品
 

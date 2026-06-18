@@ -23,7 +23,11 @@
 - 关键决策：ESLint 最小约束（仅锁旧 token）、Storybook 砍掉用 dev 路由代替、admin 控制台独立项目
 - v2.2 → v2.3 色板换皮记录（accent 改香槟金、accent-2 苔绿 → 银雾、danger 暖珊瑚）
 
-视觉规范现以 `docs/design/visual-principles.md` v2.3 + `frontend-spec.md` v2.3 为准。
+### 前端规范（2026-06-18 合并归档）
+
+`visual-principles.md` / `frontend-spec.md` / `play-mode-spec.md` / `audit-2026-05.md` / `audit-2026-05-typography.md`。
+
+这几份原在 `docs/design/`，是 v2.1 → v2.3 期写下的视觉规范 + 设计令牌 + play 例外 + 自审报告。2026-06-18 合并精简成 **一份参考型说明 `frontend/AGENTS.md`**（律法口吻改为约定，token 值不再文档复制、改以 `globals.css` 为真相源）。原文保留备查决策追溯，**不再维护**——前端现状一律以 `frontend/AGENTS.md` + `globals.css` + 现成组件为准。
 
 ### `ip-fidelity-phase1-zhuyu-baseline.md`
 

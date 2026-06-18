@@ -156,7 +156,7 @@ There are many project documents. Start from [`docs/README.md`](docs/README.md).
 | Run locally or deploy | [`docs/operations/quick-deploy.md`](docs/operations/quick-deploy.md), [`docs/operations/deploy-and-config.md`](docs/operations/deploy-and-config.md) |
 | Change game turns, multi-agent runtime, or SSE | [`docs/modules/README.md`](docs/modules/README.md), [`docs/modules/orchestrator.md`](docs/modules/orchestrator.md), [`docs/modules/sse-protocol.md`](docs/modules/sse-protocol.md) |
 | Change generation agent or creator workshop | [`docs/modules/world-creator.md`](docs/modules/world-creator.md), [`docs/design/cover-art-spec.md`](docs/design/cover-art-spec.md) |
-| Change frontend visual design | [`docs/design/visual-principles.md`](docs/design/visual-principles.md), [`docs/design/frontend-spec.md`](docs/design/frontend-spec.md), [`frontend/AGENTS.md`](frontend/AGENTS.md) |
+| Change frontend visual design | [`frontend/AGENTS.md`](frontend/AGENTS.md) (single frontend reference; tokens live in `frontend/app/globals.css`) |
 | Inspect database schema | [`docs/data/schema.md`](docs/data/schema.md) |
 
 ## Status / License

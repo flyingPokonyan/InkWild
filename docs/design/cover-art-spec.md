@@ -122,4 +122,4 @@
 > 最后更新：2026-05-19 v2.0
 > 配套文档：
 > - `docs/plans/cover-image-prompt-redesign-2026-05.md`（实施 spec + 验证证据）
-> - `docs/design/visual-principles.md`（视觉克制原则，与本文不冲突）
+> - `frontend/AGENTS.md`（前端视觉参考，与本文不冲突；旧 visual-principles 已并入并归档到 `docs/_archive/`）

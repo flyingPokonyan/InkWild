@@ -6,7 +6,7 @@
  * 视觉：黑底 + AmbientAura（月光白 7s 呼吸 + edge vignette）+ 中央 3 行文字 + 8px 脉冲圆。
  * 字体：世界名 serif h1（§1.1 ③ 卡片世界名）；剧本名 serif italic h3 + 《》（§1.1 ② italic 高亮、④ 引文）；
  *      角色行 sans meta（中文禁用 mono caps/micro）。
- * 文案规则：见 docs/design/visual-principles.md §10.1（禁假步骤、禁"正在加载…"）+ §9.1（删修饰词，保情绪）。
+ * 文案规则：见 frontend/AGENTS.md「三态约定」（禁假步骤、禁"正在加载…"，删修饰词保情绪）。
  *
  * 不做实际进度条 — 后端是 LLM 流（开始/收到/结束三态），没有 0-100%，假进度违规。
  */

@@ -156,7 +156,7 @@ make dev-infra
 | 本地启动 / 生产部署 | [`docs/operations/quick-deploy.md`](docs/operations/quick-deploy.md), [`docs/operations/deploy-and-config.md`](docs/operations/deploy-and-config.md) |
 | 改游戏回合 / 多 Agent / SSE | [`docs/modules/README.md`](docs/modules/README.md), [`docs/modules/orchestrator.md`](docs/modules/orchestrator.md), [`docs/modules/sse-protocol.md`](docs/modules/sse-protocol.md) |
 | 改生成 Agent / 创作工坊 | [`docs/modules/world-creator.md`](docs/modules/world-creator.md), [`docs/design/cover-art-spec.md`](docs/design/cover-art-spec.md) |
-| 改前端视觉 | [`docs/design/visual-principles.md`](docs/design/visual-principles.md), [`docs/design/frontend-spec.md`](docs/design/frontend-spec.md), [`frontend/AGENTS.md`](frontend/AGENTS.md) |
+| 改前端视觉 | [`frontend/AGENTS.md`](frontend/AGENTS.md)（前端唯一参考；令牌真相源 `frontend/app/globals.css`） |
 | 查数据库结构 | [`docs/data/schema.md`](docs/data/schema.md) |
 
 ## 状态 / 许可证

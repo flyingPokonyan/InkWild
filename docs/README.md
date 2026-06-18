@@ -19,7 +19,8 @@
 | 改创作工坊 / 生成 Agent / 参考型复刻 | [`modules/world-creator.md`](modules/world-creator.md), [`design/cover-art-spec.md`](design/cover-art-spec.md) |
 | 改登录 / admin / audit | [`modules/auth-and-admin.md`](modules/auth-and-admin.md) |
 | 改数据库 schema | [`data/schema.md`](data/schema.md), [`MIGRATION_NOTES.md`](MIGRATION_NOTES.md) |
-| 改主站视觉 / Play 页 / 封面图 | [`design/visual-principles.md`](design/visual-principles.md), [`design/frontend-spec.md`](design/frontend-spec.md), [`design/play-mode-spec.md`](design/play-mode-spec.md), [`design/cover-art-spec.md`](design/cover-art-spec.md) |
+| 改主站视觉 / Play 页 | [`../frontend/AGENTS.md`](../frontend/AGENTS.md)（前端唯一参考；旧 visual-principles / frontend-spec / play-mode-spec 已合并归档到 `_archive/`） |
+| 改封面 / 生图产物 | [`design/cover-art-spec.md`](design/cover-art-spec.md) |
 | 理解产品方向 | [`product/product-spec.md`](product/product-spec.md) |
 
 ## 目录含义

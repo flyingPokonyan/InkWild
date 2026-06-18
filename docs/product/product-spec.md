@@ -405,4 +405,4 @@ voice_rules:
   - `docs/ARCHITECTURE.md`
   - `docs/modules/orchestrator.md`
   - `docs/modules/world-creator.md`
-  - `docs/design/play-mode-spec.md`
+  - `frontend/AGENTS.md`「Play 页」（旧 play-mode-spec 已并入并归档到 `docs/_archive/`）

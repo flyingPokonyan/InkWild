@@ -116,16 +116,15 @@ docker compose up -d db redis
 ### 前端
 
 **当前状态 v2.3 cinematic gold 已落地**（2026-05-23）：主入口页面 landing / discover / history / workshop / login / worlds[id] / play[id] 全部按 v2.3 上线。
-重构日志归档在 [`docs/_archive/frontend-refactor-2026-05.md`](docs/_archive/frontend-refactor-2026-05.md)。日常以 `frontend/AGENTS.md` 为权威快速参考。
+重构日志归档在 [`docs/_archive/frontend-refactor-2026-05.md`](docs/_archive/frontend-refactor-2026-05.md)。
 
-视觉与令牌：
-- 遵循 [`docs/design/visual-principles.md`](docs/design/visual-principles.md) **v2.3**（视觉原则）+ [`docs/design/frontend-spec.md`](docs/design/frontend-spec.md) v2.3（设计令牌）
-- 主色 `--lv-accent: #dfc290` 香槟金；自由模式辅助色 `--lv-accent-2: #aeb4b8` 银雾；底色 `--lv-bg: #08080a`；主文本 `--lv-ink: #f5f2eb` 暖象牙
-- **canonical 在 `frontend/app/globals.css :root` 的 `.lv-theme` 块（唯一定义，禁止 per-page override）**
-- 全局 Navbar 已移除：桌面用 `<ProductNav variant="transparent|solid" active="..." />`，移动用 `<BottomTabBar />`（layout.tsx 挂载）
-- 字号 9 档钉死（display/h1/h2/h3/narrative/body/meta/caps/micro），全部用 `.lv-t-*` 工具类。约定级：**不写** inline `text-[Xrem]` / `style={{fontSize:数字}}`（`var(--lv-t-*)` 算合规）。**机器不拦**，由 PR 走查 + 设计师眼睛把关
-- 颜色用 `var(--lv-*)`。**ESLint 唯一硬规则**（CI 卡死）：禁引用旧 token `--color-accent` / `--font-size-*` / `--ta-*`（见 `frontend/eslint.config.mjs` + visual-principles §14.5）
-- 字体样张：开 dev server 后访问 `/dev/type` 查 9 档真实展示
+**前端唯一参考文档是 [`frontend/AGENTS.md`](frontend/AGENTS.md)**（参考，不是律法；原 `docs/design/` 的 visual-principles / frontend-spec / play-mode-spec / audit 几份规范已合并精简进它并归档）。改前端先读那一份。
+
+视觉与令牌（详见 `frontend/AGENTS.md`）：
+- **真相源是代码**：设计令牌在 `frontend/app/globals.css` 的 `.lv-theme` 块（`--lv-*` 唯一定义，禁止 per-page override）；字号实物看 `/dev/type`；组件写法看现成组件。文档与代码冲突以代码为准
+- 主色 `--lv-accent: #dfc290` 香槟金；底色 `--lv-bg: #08080a`；主文本 `--lv-ink: #f5f2eb` 暖象牙；字号用 `.lv-t-*` 工具类
+- 导航：桌面 `<ProductNav variant="transparent|solid" active="..." />`，移动 `<BottomTabBar />`（layout.tsx 挂载）；全局 Navbar 已移除
+- **唯一会卡 CI 的硬规则**：禁引用旧 token `--color-accent` / `--font-size-*` / `--ta-*`，统一 `var(--lv-*)`（见 `frontend/eslint.config.mjs`）。其余全是约定，由 PR 走查 + 设计师眼睛把关
 - PR 自检表见 `.github/pull_request_template.md`，前端 PR 必填
 
 基础设施层（已就位，新页面必须用）：
@@ -212,12 +211,9 @@ docker compose up -d db redis
 | 部署 + env 配置 | `docs/operations/deploy-and-config.md` |
 | 可观测 + 备份 | `docs/operations/observability-backup.md` |
 | 延迟 / TTFT 优化（缓存进展 + decode 地板 + 杠杆清单） | `docs/operations/latency-ttft.md` |
-| **UI 视觉原则 v2.3（必读）** | `docs/design/visual-principles.md` |
-| **设计令牌值 v2.3** | `docs/design/frontend-spec.md` |
-| **Play 页专属规范**（例外清单 + 实现细节） | `docs/design/play-mode-spec.md` |
-| 前端开发快速参考（v2.3 状态、令牌速查） | `frontend/AGENTS.md` |
-| 封面图规范 v1.1 | `docs/design/cover-art-spec.md` |
-| 设计规范自审报告（v2.2 期，2026-05-09） | `docs/design/audit-2026-05.md` |
+| **前端说明（视觉/令牌/play/基础设施，唯一参考，必读）** | `frontend/AGENTS.md` |
+| 封面图规范 v1.1（AI 生图产物，属创作工坊） | `docs/design/cover-art-spec.md` |
+| 旧前端规范（已合并进 AGENTS.md，备查） | `docs/_archive/`（visual-principles / frontend-spec / play-mode-spec / audit-2026-05） |
 | Admin 控制台计划 | `docs/plans/admin-console-2026-05.md` |
 | 产品方向 | `docs/product/product-spec.md` |
 

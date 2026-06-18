@@ -3,7 +3,7 @@
 - 日期：2026-05-29
 - 状态：✅ **已落地（2026-05-30）**。实现记录见 §11。
 - 范围：play 页"首包前展示"重设 + `done` 时序真修（消 gap）
-- 相关：`docs/design/visual-principles.md` §10.1（加载态）、`docs/design/play-mode-spec.md`、记忆 `play-perf-optimization-2026-05`（L1/性能模型）
+- 相关：`frontend/AGENTS.md`「三态约定」+「Play 页」（旧 visual-principles §10.1 / play-mode-spec 已并入并归档到 `docs/_archive/`）、记忆 `play-perf-optimization-2026-05`（L1/性能模型）
 
 ---
 
