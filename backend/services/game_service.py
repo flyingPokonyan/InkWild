@@ -29,6 +29,72 @@ from utils import utcnow
 logger = structlog.get_logger()
 
 
+class _AttachedNPC:
+    """Runtime stand-in for a script-owned 反哺 character (no world_characters
+    row). The engine handles NPCs entirely by name (game_state.npc_relations /
+    npc_locations, stance inference, NPCRelation rows all key on name), so a
+    plain duck-typed object carrying the attributes the runtime reads is enough.
+    Only the *player* character must be a real WorldCharacter; attached
+    characters are NPC-only.
+    """
+
+    __slots__ = (
+        "id", "name", "personality", "voice_style", "secret", "knowledge",
+        "schedule", "initial_location", "description", "narrative_weight",
+        "initial_peer_relations", "playable", "mode", "gender", "abilities",
+        "starting_inventory",
+    )
+
+    def __init__(self, data: dict):
+        self.id = None  # no DB row — never used as an NPC (name-keyed runtime)
+        self.name = str(data.get("name", ""))
+        self.personality = data.get("personality", "") or ""
+        self.voice_style = data.get("voice_style") or None
+        self.secret = data.get("secret") or None
+        self.knowledge = data.get("knowledge") or []
+        self.schedule = data.get("schedule") or {}
+        self.initial_location = data.get("initial_location", "") or ""
+        self.description = data.get("description") or None
+        self.narrative_weight = int(data.get("narrative_weight") or 0)
+        # Character schema peer relations use {target, trust, kind}; the relation
+        # seeder reads {target, trust, label, history_summary}. Map kind→label.
+        self.initial_peer_relations = [
+            {
+                "target": r.get("target"),
+                "trust": r.get("trust", 0),
+                "label": r.get("label") or r.get("kind"),
+                "history_summary": r.get("history_summary"),
+            }
+            for r in (data.get("initial_peer_relations") or [])
+            if isinstance(r, dict) and r.get("target")
+        ]
+        self.playable = False
+        self.mode = data.get("mode", "both")
+        self.gender = data.get("gender", "")
+        self.abilities = data.get("abilities") or []
+        self.starting_inventory = data.get("starting_inventory") or []
+
+
+def _attached_npcs_from_script(
+    script: Script | None, *, taken_names: set[str]
+) -> list[_AttachedNPC]:
+    """Build runtime NPCs from ``Script.local_characters`` (反哺), skipping any
+    whose name collides with a real world character or the player."""
+    if script is None:
+        return []
+    out: list[_AttachedNPC] = []
+    seen = set(taken_names)
+    for raw in (getattr(script, "local_characters", None) or []):
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name", "")).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        out.append(_AttachedNPC(raw))
+    return out
+
+
 async def load_recent_messages(
     db: AsyncSession, session_id: str, limit: int | None = None
 ) -> list[dict]:
@@ -199,12 +265,13 @@ class GameService:
             elif not world.script_setting:
                 raise AppError(40008, "当前世界没有可用剧本")
 
-        npcs = (await db.execute(
-            select(WorldCharacter).where(
-                WorldCharacter.world_id == world.id,
-                WorldCharacter.id != character.id,
-            )
-        )).scalars().all()
+        npcs = await self._load_session_npcs(
+            db,
+            world_id=world.id,
+            exclude_character_id=character.id,
+            player_name=character.name,
+            script_id=resolved_script_id,
+        )
         # Seed each NPC's OPENING attitude toward the player from the player's
         # public identity × the NPC's profile (one cheap LLM call). Generated
         # worlds carry no authored player↔NPC relations, so without this every
@@ -438,13 +505,14 @@ class GameService:
         ]
 
         world = await db.get(World, session.world_id)
-        npcs = (await db.execute(
-            select(WorldCharacter).where(
-                WorldCharacter.world_id == world.id,
-                WorldCharacter.id != session.character_id,
-            )
-        )).scalars().all()
         character = await db.get(WorldCharacter, session.character_id)
+        npcs = await self._load_session_npcs(
+            db,
+            world_id=world.id,
+            exclude_character_id=session.character_id,
+            player_name=character.name,
+            script_id=session.script_id,
+        )
         world_data = await self._load_world_data(db, world, npcs, script_id=session.script_id, player_character=character)
 
         # AOP token recording: every LLM event yielded by the orchestrator
@@ -638,13 +706,14 @@ class GameService:
 
         game_state = GameState.from_dict(session.game_state)
         world = await db.get(World, session.world_id)
-        npcs = (await db.execute(
-            select(WorldCharacter).where(
-                WorldCharacter.world_id == world.id,
-                WorldCharacter.id != session.character_id,
-            )
-        )).scalars().all()
         character = await db.get(WorldCharacter, session.character_id)
+        npcs = await self._load_session_npcs(
+            db,
+            world_id=world.id,
+            exclude_character_id=session.character_id,
+            player_name=character.name,
+            script_id=session.script_id,
+        )
         world_data = await self._load_world_data(db, world, npcs, script_id=session.script_id, player_character=character)
         recap_prompt = (
             "玩家刚从中断中回来。用一段简短的叙述帮玩家回忆之前发生了什么，"
@@ -1099,6 +1168,31 @@ class GameService:
             "new_state": current_state,
             "usage": None,
         }
+
+    async def _load_session_npcs(
+        self,
+        db: AsyncSession,
+        *,
+        world_id: str,
+        exclude_character_id,
+        player_name: str,
+        script_id: str | None,
+    ) -> list:
+        """Session NPC roster = world characters (minus the player) ∪ the
+        script's 反哺 characters (``Script.local_characters``). The world is
+        never mutated by a script; attached characters live only here at
+        runtime, unioned by name."""
+        npcs = list((await db.execute(
+            select(WorldCharacter).where(
+                WorldCharacter.world_id == world_id,
+                WorldCharacter.id != exclude_character_id,
+            )
+        )).scalars().all())
+        if script_id:
+            script = await db.get(Script, script_id)
+            taken = {n.name for n in npcs} | {player_name}
+            npcs.extend(_attached_npcs_from_script(script, taken_names=taken))
+        return npcs
 
     async def _load_world_data(self, db: AsyncSession, world: World, npcs: list[WorldCharacter], script_id: str | None = None, player_character: WorldCharacter | None = None) -> dict:
         script_type = "mystery"

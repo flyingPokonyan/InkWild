@@ -2491,6 +2491,39 @@ class WorldCreatorAgentV2:
             script_name=script_base.get("name", ""),
         )
 
+        # ==== Stage B.5: roster augmentation (反哺) ====
+        # 把本剧本需要、但世界名册里没有的原作 canonical 角色补成「剧本外挂角色」，
+        # 加入下游事件/结局可用的工作卡司。世界一律不动；这些角色随剧本走，发布时
+        # 落到 Script.local_characters，运行时按 name 与世界角色并集。fail-soft：
+        # 补不到就退回「锁世界名册」的旧行为。
+        local_characters: list[dict] = []
+        if settings.script_roster_augmentation_enabled:
+            try:
+                from services.script_roster_augmentation import augment_script_roster
+
+                added = await augment_script_roster(
+                    world_characters=characters,
+                    script_base=script_base,
+                    outline=outline,
+                    ip_pack=ip_pack_obj,
+                    fidelity_mode=self._fidelity_mode,
+                    ip_canon=research_pack.ip_canon,
+                    research_passages=research_pack.passages,
+                    locations=location_names,
+                    llm_router=self.llm,
+                    max_additions=settings.script_roster_augmentation_max_additions,
+                )
+            except Exception as exc:  # noqa: BLE001 — never block script gen.
+                logger.warning("script_roster_augmentation_failed", error=str(exc))
+                added = []
+            if added:
+                characters = characters + added
+                local_characters = [c.model_dump() for c in added]
+                all_warnings.append(
+                    "[roster_augmented] 本剧本外挂了世界名册外的原作角色（随剧本走，未改世界）："
+                    + "、".join(c.name for c in added)
+                )
+
         # ==== Stage C: events ====
         yield progress_event(
             "events", "started",
@@ -2611,7 +2644,8 @@ class WorldCreatorAgentV2:
             "events_data": [e.model_dump() for e in events_data],
             "endings": endings_data,
             "playable": playable,
-            "world_characters": world_characters,
+            # 含外挂角色，让 shape 校验 + moderation 覆盖到新补的角色文本。
+            "world_characters": world_characters + local_characters,
             "locations": locations,
         }
 
@@ -2809,6 +2843,9 @@ class WorldCreatorAgentV2:
             "endings": endings_data,
             "playable": playable,
             "playable_character_ids": playable_character_ids,
+            # 剧本外挂角色（反哺产物）：随剧本走，发布时落 Script.local_characters，
+            # 运行时与世界角色并集。世界不被改动。
+            "local_characters": local_characters,
             "research_pack": research_pack.model_dump(),
             "cover_image": script_cover_url,
             "quality_warnings": all_warnings,

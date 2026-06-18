@@ -182,6 +182,14 @@ class Settings(BaseSettings):
     workshop_world_generations_per_day: int = 2
     workshop_script_generations_per_day: int = 3
 
+    # Script roster augmentation (反哺): when a script needs canonical IP
+    # characters the parent world roster lacks, back-fill them as script-owned
+    # NPCs (Script.local_characters) so script events don't get disabled. The
+    # world is never mutated. canonical-only (needs an IP knowledge pack);
+    # capped per script. Off → falls back to old "locked to world roster".
+    script_roster_augmentation_enabled: bool = True
+    script_roster_augmentation_max_additions: int = 6
+
     # Runtime architecture v2 — NPC agency + director-as-stage-manager refactor
     # (see docs/plans/runtime-architecture-overhaul-2026-05.md). When True,
     # orchestrator goes through the v2 path: director v2 schema, structured

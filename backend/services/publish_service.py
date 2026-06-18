@@ -271,6 +271,8 @@ def normalize_script_payload(payload: dict) -> dict:
     for v2_key in ("events_data", "research_pack", "quality_warnings", "cover_image"):
         if payload.get(v2_key) is not None:
             normalized[v2_key] = payload[v2_key]
+    # 剧本外挂角色（反哺）：随剧本走的 NPC，发布时落 Script.local_characters。
+    normalized["local_characters"] = list(payload.get("local_characters", []) or [])
     return normalized
 
 
@@ -383,6 +385,8 @@ def apply_script_payload(
     script.events_data = payload["events"]
     script.clues_data = payload["clues"]
     script.endings_data = payload["endings"]
+    # 剧本外挂角色（反哺）：随剧本走，不触及 world_characters。
+    script.local_characters = list(payload.get("local_characters", []) or [])
     if payload.get("cover_image"):
         script.cover_image = payload["cover_image"]
 
@@ -635,8 +639,12 @@ async def _materialize_script_draft(
         ).scalars().all()
         # 发布期世界现存的可玩角色 id 集合，用来过滤剧本可玩名单中已失效/已转 NPC 的 id。
         valid_playable_ids = {str(c.id) for c in world_chars if c.playable}
+        # 有效角色命名空间 = 世界角色 ∪ 剧本外挂角色（反哺）。外挂角色随剧本走、
+        # 不入 world_characters，但事件可以引用它们，所以校验时要并进世界视图。
+        local_chars = payload.get("local_characters") or []
         world_view = {
-            "characters": [{"name": c.name} for c in world_chars],
+            "characters": [{"name": c.name} for c in world_chars]
+            + [{"name": lc.get("name")} for lc in local_chars if isinstance(lc, dict) and lc.get("name")],
             "events_data": world_row.events_data or [],
         }
         script_view = {

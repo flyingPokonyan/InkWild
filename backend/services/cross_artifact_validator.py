@@ -27,19 +27,27 @@ def validate_cross_artifact(world: dict, script: dict) -> None:
 
     Checks:
       - Every (world|script) event's present_npcs ⊆ world characters
-      - Every script ending's required_clues ⊆ world events' spawn_clues
+        (``world["characters"]`` is the effective namespace: world roster ∪
+        script-owned 反哺 characters — callers pass the union)
+      - Every script ending's required_clues ⊆ clues spawned by world OR
+        script events
     """
     character_names = {
         c.get("name")
         for c in (world.get("characters") or [])
         if isinstance(c, dict) and c.get("name")
     }
-    world_clue_ids = _collect_clue_ids(world.get("events_data") or [])
+    # Clues an ending may require can be spawned by EITHER world-level events or
+    # the script's own events. Collecting from world events only (the previous
+    # behaviour) falsely rejected endings that depend on script-spawned clues.
+    known_clue_ids = _collect_clue_ids(world.get("events_data") or []) | _collect_clue_ids(
+        script.get("events_data") or []
+    )
 
     errors: list[str] = []
     errors.extend(_event_npc_errors(world.get("events_data") or [], character_names, "world"))
     errors.extend(_event_npc_errors(script.get("events_data") or [], character_names, "script"))
-    errors.extend(_ending_clue_errors(script.get("endings_data") or [], world_clue_ids))
+    errors.extend(_ending_clue_errors(script.get("endings_data") or [], known_clue_ids))
 
     if errors:
         raise CrossArtifactError("; ".join(errors))

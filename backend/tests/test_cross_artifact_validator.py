@@ -39,6 +39,33 @@ def test_event_npc_not_in_characters_raises():
     assert "evt_1" in str(exc.value)
 
 
+def test_ending_clue_spawned_by_script_event_passes():
+    # Regression: a clue required by an ending may be spawned by a SCRIPT event,
+    # not only a world event. Previously this falsely raised.
+    world = {"characters": [{"name": "Alice"}], "events_data": []}
+    script = {
+        "events_data": [
+            {"id": "sevt_1", "effects": {"spawn_clues": [{"id": "clue_s"}]}}
+        ],
+        "endings_data": [{"hard_conditions": {"required_clues": ["clue_s"]}}],
+    }
+    validate_cross_artifact(world, script)  # must not raise
+
+
+def test_local_character_in_namespace_passes():
+    # 反哺: when the effective namespace (world ∪ script-owned characters) is
+    # passed in, a script event referencing an attached character is valid.
+    world = {
+        "characters": [{"name": "Alice"}, {"name": "关羽"}],  # 关羽 is a 反哺 char
+        "events_data": [],
+    }
+    script = {
+        "events_data": [{"id": "sevt_1", "present_npcs": ["关羽"]}],
+        "endings_data": [],
+    }
+    validate_cross_artifact(world, script)  # must not raise
+
+
 def test_ending_references_unknown_clue_raises():
     world = {
         "characters": [{"name": "Alice"}],
