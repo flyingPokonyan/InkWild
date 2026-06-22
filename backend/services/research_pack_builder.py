@@ -78,14 +78,29 @@ _IP_PROBE_SYSTEM = """你是一个 IP / 题材识别助手。
 {"title_guesses":[],"canonical_names":[],"canonical_places":[],"iconic_objects":[],"lingo":[],"notable_events":[]}"""
 
 
-async def _collect_stream_text(llm_router: Any, *, system: str, messages: list[dict], max_tokens: int) -> str:
-    """通过 stream_with_tools(tools=[]) 收集纯文本输出。"""
+async def _collect_stream_text(
+    llm_router: Any,
+    *,
+    system: str,
+    messages: list[dict],
+    max_tokens: int,
+    reasoning: bool | None = None,
+) -> str:
+    """通过 stream_with_tools(tools=[]) 收集纯文本输出。
+
+    ``reasoning`` per-call 覆盖路由默认（None=不覆盖）。规划/约束满足类步骤
+    （如 roster 花名册）传 True 重新打开 CoT；批量 JSON 生成步骤保持默认（关）。
+    """
+    # Only forward ``reasoning`` when explicitly set, so test fakes / providers
+    # that predate the kwarg keep working (None = router default behavior).
+    extra: dict = {"reasoning": reasoning} if reasoning is not None else {}
     parts: list[str] = []
     async for event in llm_router.stream_with_tools(
         messages=messages,
         tools=[],
         system=system,
         max_tokens=max_tokens,
+        **extra,
     ):
         if event.get("type") == "text_delta":
             parts.append(event.get("text", ""))

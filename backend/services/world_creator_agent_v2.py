@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import time
 from typing import Any, AsyncIterator, Coroutine, TypeVar
 
@@ -187,6 +188,64 @@ def _stage_failure_warning(
         error_type=type(exc).__name__,
         error=str(exc)[:500],
     )
+
+
+def _backfill_missing_must_have(
+    world_characters: list[dict],
+    ip_pack_ref: Any,
+) -> tuple[list[dict], list[str]]:
+    """确定性兜底：保证 ip_pack 的 must_have 角色都出现在最终 world_characters。
+
+    roster 阶段的 `_ensure_must_have` 已保证 must_have ∈ roster，但角色详情批
+    （`build_characters_in_batches`）对漏掉的 roster 角色只 warn 不补占位，所以
+    must_have 仍可能在详情阶段被静默丢掉。这里在 critic 阶段做最后一道确定性闸：
+    用 ip_pack 数据为缺失的 must_have 合成一个最小 Character dict 补回（薄但不缺），
+    避免主角凭空消失。上游 `_ensure_must_have` + 此处 backstop 构成 must_have 闭环。
+
+    返回 (可能扩展过的列表, 被补回的名字)。
+    """
+    if ip_pack_ref is None:
+        return world_characters, []
+    must_have_chars = [
+        c for c in getattr(ip_pack_ref, "characters", [])
+        if getattr(c, "must_have", False)
+    ]
+    if not must_have_chars:
+        return world_characters, []
+
+    def _norm(n: str) -> str:
+        return re.sub(r"[\s·•・]", "", str(n or "")).strip()
+
+    existing = {
+        _norm(c.get("name", "")) for c in world_characters if isinstance(c, dict)
+    }
+    ip_name = getattr(ip_pack_ref, "ip_name", "") or ""
+    injected: list[str] = []
+    for c in must_have_chars:
+        if _norm(c.name) in existing:
+            continue
+        traits = "，".join(getattr(c, "traits", []) or [])
+        anchor = f"《{ip_name}》中的{c.name}" if ip_name else c.name
+        tail = traits or (c.role_in_story or "")
+        personality = f"{anchor}。{tail}" if tail else f"{anchor}。"
+        world_characters.append({
+            "name": c.name,
+            "role_tag": c.role_in_story or "主要角色",
+            "is_image_target": True,
+            "personality": personality,
+            "voice_style": getattr(c, "voice_style", "") or "",
+            "description": getattr(c, "story_arc", "") or "",
+            "secret": "",
+            "knowledge": [],
+            "abilities": [],
+            "starting_inventory": [],
+            "schedule": {},
+            "initial_location": "",
+            "initial_peer_relations": [],
+        })
+        existing.add(_norm(c.name))
+        injected.append(c.name)
+    return world_characters, injected
 
 
 # Fail-fast thresholds. Below these counts the pipeline aborts before
@@ -1789,6 +1848,26 @@ class WorldCreatorAgentV2:
                     "critic", "heavy_critic_characters_failed", exc,
                     "深度角色质检失败，角色 personality/secret 一致性未审查，未自动修复",
                 )
+
+            # 确定性兜底闸：must_have 角色若在详情阶段被丢掉，用 ip_pack 数据补回（薄但不缺）。
+            # 与 roster 的 _ensure_must_have 构成 must_have 闭环——主角绝不凭空消失。
+            backfilled, injected_mh = _backfill_missing_must_have(
+                payload.get("world_characters") or [], ip_pack_ref,
+            )
+            if injected_mh:
+                payload["world_characters"] = backfilled
+                logger.warning(
+                    "must_have_backfilled_after_build",
+                    ip_name=getattr(ip_pack_ref, "ip_name", ""),
+                    injected=injected_mh,
+                )
+                all_warnings.append(warning_event(
+                    "critic", code="must_have_backfilled",
+                    message=(
+                        f"必含角色 {', '.join(injected_mh)} 在详情阶段丢失，"
+                        f"已用原作数据补回（信息较薄，建议人工复核）"
+                    ),
+                ))
 
             try:
                 current_chars = payload.get("world_characters") or []

@@ -1,16 +1,21 @@
-"""IP Research Pipeline：多源抓取 → RAG 抽取 IPKnowledgePack → 4 维度完整性自检 → 补抓。
+"""IP Research Pipeline：grok 多角度并行研究 → 按轴抽取 merge → 接地核查 → 自检补抓。
 
-Phase 2.1 升级为 4 步流程：
-1. Grok web_search 主搜索 → grok_summary + candidate_names
-2. 多源并发深抓 → grok + 百度剧主页 + 百度角色页 (top N) + wiki + tavily fallback
-3. RAG 抽取 IPKnowledgePack（context = grok 优先 + 百度细节）
-4. 完整性自检 4 维度（characters/places/factions/key_events），≤ 2 轮补抓
+流程（2026-06-22 重写，C 阶段）：
+1. per-axis pre-extract：4 个聚焦轴（核心 / 对立 / 外围 NPC / 设定）并发凭训练知识抽取 → merge
+2. grok fan-out：同 4 轴并发 web_search → 富 passages + 候选名并集（**生产唯一活源**）
+3. ground & augment：用 passages 核查 / 补 / 增删（单次，验证非生成）
+4. 完整性自检 + grok 补抓（≤ 2 轮）
+5. quality gate：characters < 按 IP 规模缩放的下限 → IPPackUnderfilledError
 
-前置：Stage 0 已识别出 IPRecognition (kind=known_ip 或 hybrid)。
-fidelity_mode=none 时不应调用此 pipeline。
+校正（2026-06-22）：百度 / wiki / tavily 在生产是死源（403 / 无 key / 抓不到），已退役，
+不再空转。grok 是唯一活源，因此把它做成多角度并行 + 抽取目标按题材规模放开（替掉旧"至少 8"
+一刀切），专门解决"单 query 只捞到最有名几个 → 世界从源头就薄"。
+
+前置：Stage 0 已识别出 IPRecognition (kind=known_ip 或 hybrid)。fidelity_mode=none 时不调用。
 """
 import asyncio
 import json
+import re
 from typing import Any, TypeVar
 
 import structlog
@@ -23,21 +28,48 @@ from schemas.ip_knowledge_pack import (
 
 _TModel = TypeVar("_TModel", bound=BaseModel)
 from schemas.research_pack import Passage
-from services.ip_pack_extractors.wikipedia import fetch_wikipedia
-from services.ip_pack_extractors.tavily_site import fetch_via_tavily_site
 from services.ip_pack_extractors.grok_search import fetch_via_grok_search
-from services.ip_pack_extractors.baidu_baike import (
-    fetch_baike_show, fetch_baike_characters_batch,
-)
 from services.ip_recognizer import IPRecognition
 
 logger = structlog.get_logger()
 
-MAX_PASSAGES = 30
+MAX_PASSAGES = 40
 MAX_PASSAGE_CHARS = 2000
-MAX_BAIDU_CHARACTERS = 8
-MAX_REFETCH_ROUNDS = 2  # Phase 2.1: 升级自 Phase 1 的 1 轮
-MIN_PACK_CHARACTERS = 3  # quality gate: 抽不到 3 个就当 underfilled
+MAX_REFETCH_ROUNDS = 2
+
+# ── 多角度 fan-out 轴（C1/C2）────────────────────────────────────────────────
+# 固定 4 类 coverage role 保证 merge 稳定；grok query 措辞 + pre-extract 聚焦提示按轴定。
+# 题材无关（按"故事功能"切分，非"主角/反派"字面）——推理无明面反派、武侠是门派、群像无单
+# 主角时也成立。原创世界（kind != known_ip/hybrid）整条 pipeline 跳过。
+# (axis_key, grok_focus, preextract_focus_hint)
+_RESEARCH_AXES: list[tuple[str, str, str]] = [
+    ("core", "主要角色 核心人物 主角",
+     "本作核心 / 中心人物（主角一方）"),
+    ("opposing", "反派 对手 对立势力 竞争者 嫌疑人",
+     "与主角对立 / 竞争 / 制造冲突的人物（反派 / 对手 / 嫌疑人 / 敌对势力）"),
+    ("supporting", "配角 次要角色 全部登场人物 龙套 工具人",
+     "外围配角与功能性角色——尽量穷举次要人物，别只给最有名的几个"),
+    ("world", "世界观 设定 地点 势力 组织 重要事件 规矩",
+     "世界设定：地点 / 势力 / 重要事件 / 规矩黑话"),
+]
+
+
+def _target_characters(ip_type: str) -> int:
+    """按题材规模给目标角色数（替掉旧'至少 8'一刀切）。长篇剧/小说取大。"""
+    return {
+        "tv": 26, "novel": 26, "anime": 22, "game": 22,
+        "movie": 15, "other": 15,
+    }.get(ip_type or "other", 15)
+
+
+def _min_pack_characters(ip_type: str) -> int:
+    """quality gate 下限：低于此当 underfilled。按规模抬高，避免'抽到 3 个就放行'。"""
+    return max(5, _target_characters(ip_type) // 4)
+
+
+def _norm_name(name: str) -> str:
+    """规范化人名用于 merge 去重：去空白与中点。"""
+    return re.sub(r"[\s·•・]", "", str(name or "")).strip()
 
 
 class IPPackUnderfilledError(Exception):
@@ -70,13 +102,20 @@ _MISSING_CHECK_SYSTEM = """检查 IPKnowledgePack 完整性，列出 4 维度的
 某维度看着完整则对应数组返回 []。每个维度最多 5 个名字。只输出 JSON。"""
 
 
-async def _collect_text(llm_router: Any, system: str, user: str, max_tokens: int = 4096) -> str:
+async def _collect_text(
+    llm_router: Any, system: str, user: str, max_tokens: int = 4096,
+    *, reasoning: bool | None = None,
+) -> str:
+    # 规划/抽取类步骤（pre-extract / self-check）传 reasoning=True 重新打开 CoT；
+    # _ground（8192 大输出，截断风险）保持默认关。只在显式设置时透传，兼容旧 fakes。
+    extra: dict = {"reasoning": reasoning} if reasoning is not None else {}
     parts: list[str] = []
     async for ev in llm_router.stream_with_tools(
         messages=[{"role": "user", "content": user}],
         tools=[],
         system=system,
         max_tokens=max_tokens,
+        **extra,
     ):
         if ev.get("type") == "text_delta":
             parts.append(ev.get("text", ""))
@@ -154,6 +193,41 @@ def _safe_build_list(
     return out
 
 
+def _coerce_str_list(items: Any) -> list[str]:
+    """tone_lingo 等 list[str] 字段抗 LLM 漂移：dict 取 term/name/word，否则 str()。
+
+    实测 ground 阶段 LLM 把 tone_lingo 写成 [{"term":"一丈红",...}] → 直接进
+    IPKnowledgePack(list[str]) 会 ValidationError 炸掉整个 build。这里统一压成字符串。
+    """
+    out: list[str] = []
+    for it in items or []:
+        if isinstance(it, str):
+            s = it.strip()
+        elif isinstance(it, dict):
+            s = str(it.get("term") or it.get("name") or it.get("word") or "").strip()
+        else:
+            s = str(it).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def _prep_char_dicts(items: Any) -> list[Any]:
+    """角色 dict 抗漂移：补 must_have 默认值，避免漏填一个 bool 就被整条丢掉。
+
+    实测 LLM 偶尔漏 must_have（IPCharacter 里它是 required）→ _safe_build_list 丢掉整个
+    角色（如温实初）→ 平白损失厚度。这里给缺失的必填项兜个默认。
+    """
+    out: list[Any] = []
+    for it in items or []:
+        if isinstance(it, dict):
+            it.setdefault("must_have", False)
+            it.setdefault("relation_to_protagonist", "")
+            it.setdefault("role_in_story", "")
+        out.append(it)
+    return out
+
+
 def _empty_pack(rec: IPRecognition, fidelity_mode: FidelityMode) -> IPKnowledgePack:
     return IPKnowledgePack(
         ip_name=rec.ip_name or "",
@@ -187,7 +261,10 @@ async def _self_check_missing_v2(
         f"已有 key_events: {', '.join(e.name for e in pack.key_events)}"
     )
     try:
-        text = await _collect_text(llm_router, _MISSING_CHECK_SYSTEM, user, max_tokens=512)
+        # 不开 reasoning：输出小但 max_tokens=512 极小，开 CoT 必截断（见 _pre_extract 注）。
+        text = await _collect_text(
+            llm_router, _MISSING_CHECK_SYSTEM, user, max_tokens=512,
+        )
         data = _extract_json(text) or {}
     except Exception as exc:  # noqa: BLE001
         logger.warning("self_check_v2_failed", error=str(exc))
@@ -222,7 +299,10 @@ _PRE_EXTRACT_SYSTEM = """你是 IP 知识抽取助手。给你一个已知作品
 }
 
 要求：
-1. characters 至少 8 个，包含核心主角 / 反派 / 配角；男女主和首要反派标 must_have=true（3~5 个），其余 must_have=false。
+1. characters 尽量收全（参考下方给的目标数量），包含核心主角 / 反派 / 配角 / 次要人物 / 功能性 NPC；
+   **别只给最有名的几个**——撑起世界靠的是有名有姓的配角群。
+   must_have：**只标剧情离不开、必须在场的最核心 5-8 个**（男女主 + 首要反派），其余一律 false。
+   must_have 不是"重要 / 出彩"的意思——配角再精彩、戏份再多，只要剧情没他也能成立，就设 false。
 2. places ≥ 5，factions ≥ 3，key_events ≥ 5，timeline ≥ 3。
 3. **不需要填 source_passage_ids**（下游会做事实核查再补）。
 4. 如果你不熟悉这个作品，宁可少给也不要瞎编 —— 把 characters/places 等数组留空，summary 也留空，下游会走兜底。
@@ -243,6 +323,8 @@ _GROUND_SYSTEM = """你是 IP 知识包事实核查助手。
 3. **删除**候选里**与 passages 明确矛盾**的项（比如名字写错、派系明显不对）。
 4. **新增** passages 中提到但候选漏掉的核心角色 / 地点 / 势力 / 事件。
 5. 更新 summary 让它更贴近 passages 的事实描述（保留候选里没有的细节）。
+6. **must_have 纪律**：只有剧情离不开、必须在场的最核心 5-8 个角色（男女主 + 首要反派）才标 must_have=true，
+   其余一律 false。配角再精彩也设 false；**绝不要把保留下来的角色都标 must_have**。
 
 输出严格 JSON（schema 与候选完全相同）：
 {
@@ -258,15 +340,36 @@ _GROUND_SYSTEM = """你是 IP 知识包事实核查助手。
 
 
 async def _pre_extract_canon(
-    rec: IPRecognition, llm_router: Any
+    rec: IPRecognition,
+    llm_router: Any,
+    *,
+    focus_hint: str = "",
+    target_chars: int = 8,
 ) -> IPKnowledgePack:
     """Stage 1: 凭主 LLM 训练知识列候选 pack（不喂 passages）。
 
+    ``focus_hint`` 为多角度 fan-out 的某一轴——告诉模型这次重点挖哪一片，多轴并发后
+    merge，比单次"一把抓"更不容易停在最有名的几个。``target_chars`` 把目标数量写进
+    user content（按题材规模缩放）。
+
+    注：本步**不开 reasoning**——它输出大块 JSON，开 CoT 会让隐藏推理吃掉 token 预算、
+    正文 JSON 被截断成空（2026-06-22 e2e 实测：reasoning+4096 → 0 角色）。厚度靠 4 轴
+    fan-out + 目标数缩放，不靠 CoT。约束满足类的 roster 才开 reasoning（输出小、风险低）。
+
     冷门 IP 模型不熟悉时返回空数组，由调用方判断 fallback。
     """
-    user = f"IP 名：{rec.ip_name}\nIP 类型：{rec.ip_type or 'other'}"
+    focus_line = (
+        f"\n本次重点挖掘：{focus_hint}（这一片尽量挖全、穷举；其他维度可顺带给）"
+        if focus_hint else ""
+    )
+    user = (
+        f"IP 名：{rec.ip_name}\nIP 类型：{rec.ip_type or 'other'}\n"
+        f"目标：characters 力求 {target_chars} 个以上，尽量收全有名有姓的角色{focus_line}"
+    )
     try:
-        text = await _collect_text(llm_router, _PRE_EXTRACT_SYSTEM, user, max_tokens=4096)
+        text = await _collect_text(
+            llm_router, _PRE_EXTRACT_SYSTEM, user, max_tokens=4096,
+        )
         data = _extract_json(text) or {}
     except Exception as exc:  # noqa: BLE001
         logger.warning("ip_pre_extract_failed", ip_name=rec.ip_name, error=str(exc))
@@ -278,12 +381,12 @@ async def _pre_extract_canon(
         ip_type=rec.ip_type or "other",
         fidelity_mode="none",  # placeholder; set on final pack
         summary=data.get("summary", ""),
-        characters=_safe_build_list(IPCharacter, data.get("characters"), ip_name=ip_name, field="characters"),
+        characters=_safe_build_list(IPCharacter, _prep_char_dicts(data.get("characters")), ip_name=ip_name, field="characters"),
         places=_safe_build_list(IPPlace, data.get("places"), ip_name=ip_name, field="places"),
         factions=_safe_build_list(IPFaction, data.get("factions"), ip_name=ip_name, field="factions"),
         iconic_objects=_safe_build_list(IPObject, data.get("iconic_objects"), ip_name=ip_name, field="iconic_objects"),
         key_events=_safe_build_list(IPEvent, data.get("key_events"), ip_name=ip_name, field="key_events"),
-        tone_lingo=list(data.get("tone_lingo") or []),
+        tone_lingo=_coerce_str_list(data.get("tone_lingo")),
         timeline=_safe_build_list(IPTimelineEntry, data.get("timeline"), ip_name=ip_name, field="timeline"),
         passages=[],
     )
@@ -295,6 +398,8 @@ async def _ground_and_augment(
     passages: list[Passage],
     fidelity_mode: FidelityMode,
     llm_router: Any,
+    *,
+    target_chars: int = 8,
 ) -> IPKnowledgePack:
     """Stage 3: 第二轮 LLM —— 用 passages 验证 / 补 source_passage_ids / 增删。"""
     candidate_json = json.dumps(
@@ -311,7 +416,8 @@ async def _ground_and_augment(
         ensure_ascii=False,
     )
     user = (
-        f"# IP\n名：{rec.ip_name}\n类型：{rec.ip_type or 'other'}\n\n"
+        f"# IP\n名：{rec.ip_name}\n类型：{rec.ip_type or 'other'}\n"
+        f"目标：characters 力求 {target_chars} 个以上，passages 里出现的有名有姓角色尽量都收进来\n\n"
         f"# 候选（凭训练知识生成，待核查）\n{candidate_json}\n\n"
         f"# 权威 passages\n{_passages_as_context_v2(passages)}"
     )
@@ -333,59 +439,267 @@ async def _ground_and_augment(
         ip_type=rec.ip_type or "other",
         fidelity_mode=fidelity_mode,
         summary=data.get("summary", "") or candidates.summary,
-        characters=_safe_build_list(IPCharacter, data.get("characters"), ip_name=ip_name, field="characters"),
+        characters=_safe_build_list(IPCharacter, _prep_char_dicts(data.get("characters")), ip_name=ip_name, field="characters"),
         places=_safe_build_list(IPPlace, data.get("places"), ip_name=ip_name, field="places"),
         factions=_safe_build_list(IPFaction, data.get("factions"), ip_name=ip_name, field="factions"),
         iconic_objects=_safe_build_list(IPObject, data.get("iconic_objects"), ip_name=ip_name, field="iconic_objects"),
         key_events=_safe_build_list(IPEvent, data.get("key_events"), ip_name=ip_name, field="key_events"),
-        tone_lingo=list(data.get("tone_lingo") or candidates.tone_lingo or []),
+        tone_lingo=_coerce_str_list(data.get("tone_lingo")) or candidates.tone_lingo,
         timeline=_safe_build_list(IPTimelineEntry, data.get("timeline"), ip_name=ip_name, field="timeline"),
         passages=passages,
     )
+
+
+def _char_info_len(c: IPCharacter) -> int:
+    """角色信息量（merge 去重时取信息最全的那条）。"""
+    return (
+        len("".join(c.traits or []))
+        + len(c.role_in_story or "")
+        + len(c.story_arc or "")
+        + len(c.voice_style or "")
+    )
+
+
+def _merge_packs(
+    packs: list[IPKnowledgePack], rec: IPRecognition, fidelity_mode: FidelityMode,
+) -> IPKnowledgePack:
+    """实体级 merge 多个 per-axis pack（C2）。
+
+    characters：按 _norm_name 并集去重，同名取信息最全的记录，must_have = OR 合并
+    （任一轴标了 must_have 即 must_have）。places / factions / objects / events / timeline：
+    按 name 并集去重。summary 取最长。tone_lingo 并集。
+    """
+    ip_name = rec.ip_name or ""
+
+    # characters：richer + must_have OR
+    char_by: dict[str, IPCharacter] = {}
+    for p in packs:
+        for c in p.characters:
+            k = _norm_name(c.name)
+            if not k:
+                continue
+            cur = char_by.get(k)
+            if cur is None:
+                char_by[k] = c
+            else:
+                richer = c if _char_info_len(c) > _char_info_len(cur) else cur
+                char_by[k] = richer.model_copy(
+                    update={"must_have": cur.must_have or c.must_have}
+                )
+
+    def _union_by_name(getter) -> list:
+        seen: set[str] = set()
+        out: list = []
+        for p in packs:
+            for item in getter(p):
+                k = _norm_name(getattr(item, "name", ""))
+                if not k or k in seen:
+                    continue
+                seen.add(k)
+                out.append(item)
+        return out
+
+    summary = max((p.summary for p in packs), key=len, default="")
+    tone: list[str] = []
+    seen_tone: set[str] = set()
+    for p in packs:
+        for t in p.tone_lingo or []:
+            if t not in seen_tone:
+                seen_tone.add(t)
+                tone.append(t)
+    # timeline 无 name 字段，按 (when,event) 去重
+    tl_seen: set[tuple] = set()
+    timeline: list[IPTimelineEntry] = []
+    for p in packs:
+        for t in p.timeline or []:
+            key = (getattr(t, "when", ""), getattr(t, "event", ""))
+            if key not in tl_seen:
+                tl_seen.add(key)
+                timeline.append(t)
+
+    return IPKnowledgePack(
+        ip_name=ip_name,
+        ip_type=rec.ip_type or "other",
+        fidelity_mode=fidelity_mode,
+        summary=summary,
+        characters=list(char_by.values()),
+        places=_union_by_name(lambda p: p.places),
+        factions=_union_by_name(lambda p: p.factions),
+        iconic_objects=_union_by_name(lambda p: p.iconic_objects),
+        key_events=_union_by_name(lambda p: p.key_events),
+        tone_lingo=tone,
+        timeline=timeline,
+        passages=[],
+    )
+
+
+_CONSOLIDATE_SYSTEM = """你是角色去重助手。给你同一作品的一批角色名，其中有些是同一个人的不同
+称呼（本名 / 封号 / 全名 / 带括注 / 别名），把指代同一人的归为一组。
+
+输出严格 JSON：
+{"groups":[{"canonical":"最完整最正式的原作名","aliases":["该人的所有其他写法（含 canonical 本身）"]}]}
+
+规则：
+- canonical 取信息最全、最正式的原作名（如有封号+本名，用最常用的全称）。
+- **只合并确实是同一人**的不同写法（如"华妃"/"年世兰"/"华妃（年世兰）"是同一人；
+  "雍正"/"爱新觉罗·胤禛"/"皇帝（雍正）"是同一人）。不同的人（如端妃 vs 敬妃）**绝不合并**。
+- 输入里每个名字都必须出现在某一组的 aliases 里（哪怕独自成组）。
+- 只输出 JSON，无解释文字。"""
+
+
+async def _consolidate_characters(
+    chars: list[IPCharacter], rec: IPRecognition, llm_router: Any,
+) -> list[IPCharacter]:
+    """LLM 归并同一角色的名称变体（fan-out 多轴并发的副作用）。
+
+    4 路并发各自给同一人不同叫法（华妃/年世兰/华妃（年世兰）），_norm_name 认不出
+    "胤禛=雍正"这类需要知识的等价 → 同一角色在 roster 出现多次。这里用一次 LLM
+    调用拿到别名分组，按规范名合并：取信息最全记录，must_have = OR。失败则原样返回。
+    """
+    if len(chars) < 2:
+        return chars
+    names = [c.name for c in chars]
+    user = f"作品：{rec.ip_name}\n角色名列表：\n" + "\n".join(f"- {n}" for n in names)
+    try:
+        text = await _collect_text(llm_router, _CONSOLIDATE_SYSTEM, user, max_tokens=4096)
+        data = _extract_json(text) or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ip_consolidate_failed", ip_name=rec.ip_name, error=str(exc))
+        return chars
+    groups = data.get("groups") or []
+    if not groups:
+        return chars
+
+    alias_to_canon: dict[str, str] = {}
+    for g in groups:
+        if not isinstance(g, dict):
+            continue
+        canon = (g.get("canonical") or "").strip()
+        if not canon:
+            continue
+        for a in [canon] + list(g.get("aliases") or []):
+            key = _norm_name(a)
+            if key:
+                alias_to_canon[key] = canon
+
+    by_canon: dict[str, IPCharacter] = {}
+    for c in chars:
+        canon = alias_to_canon.get(_norm_name(c.name), c.name)
+        ck = _norm_name(canon)
+        cur = by_canon.get(ck)
+        if cur is None:
+            by_canon[ck] = c.model_copy(update={"name": canon})
+        else:
+            richer = c if _char_info_len(c) > _char_info_len(cur) else cur
+            by_canon[ck] = richer.model_copy(
+                update={"name": canon, "must_have": cur.must_have or c.must_have}
+            )
+    merged = list(by_canon.values())
+    if len(merged) < len(chars):
+        logger.info(
+            "ip_consolidated_characters",
+            ip_name=rec.ip_name, before=len(chars), after=len(merged),
+        )
+    return merged
+
+
+async def _gather_via_grok_fanout(
+    rec: IPRecognition, grok_provider: Any | None,
+) -> tuple[list[Passage], list[str]]:
+    """C1: 同 4 轴并发 grok web_search → 富 passages + 候选名并集去重。
+
+    grok 是生产唯一活源；多角度并行的并集远宽于单条大杂烩 query。
+    """
+    if grok_provider is None or not rec.ip_name:
+        return [], []
+    ip_type = rec.ip_type or "other"
+    results = await asyncio.gather(
+        *[
+            fetch_via_grok_search(rec.ip_name, ip_type, grok_provider, focus=grok_focus)
+            for _, grok_focus, _ in _RESEARCH_AXES
+        ],
+        return_exceptions=True,
+    )
+    passages: list[Passage] = []
+    names: list[str] = []
+    seen: set[str] = set()
+    for r in results:
+        if isinstance(r, BaseException):
+            logger.warning("grok_fanout_axis_failed", ip_name=rec.ip_name, error=str(r))
+            continue
+        ps, cs = r
+        passages.extend(ps)
+        for n in cs:
+            nn = _norm_name(n)
+            if nn and nn not in seen:
+                seen.add(nn)
+                names.append(n)
+    logger.info(
+        "grok_fanout_done",
+        ip_name=rec.ip_name, passages=len(passages), candidates=len(names),
+    )
+    return passages[:MAX_PASSAGES], names
 
 
 async def build_ip_knowledge_pack(
     rec: IPRecognition,
     fidelity_mode: FidelityMode,
     llm_router: Any,
-    tavily: Any,
+    tavily: Any,  # retained for signature compat; baidu/wiki/tavily 已退役不再使用
     grok_provider: Any | None = None,
 ) -> IPKnowledgePack:
-    """主入口（RAG-first，2026-05 重写）。
+    """主入口（grok 多角度并行研究，2026-06-22 重写）。
 
     流程：
-        Stage 1  _pre_extract_canon          (no passages, 主 LLM 凭训练知识)
-        Stage 2  _gather_passages_v3         (grok web_search + baike + wiki + tavily)
-        Stage 3  _ground_and_augment         (passages 核查 + 补 source_passage_ids + 增删)
-        Stage 4  self-check + refetch loop   (最多 MAX_REFETCH_ROUNDS 轮补抓)
-        Stage 5  quality gate                (characters < MIN_PACK_CHARACTERS → 抛 IPPackUnderfilledError)
+        Stage 1  per-axis pre-extract → merge   (4 轴并发凭训练知识抽取，按 _norm_name 合并)
+        Stage 2  _gather_via_grok_fanout        (同 4 轴并发 grok web_search → 富 passages)
+        Stage 3  _ground_and_augment            (passages 核查 + 补 source_passage_ids + 增删)
+        Stage 4  self-check + grok 补抓 loop     (最多 MAX_REFETCH_ROUNDS 轮)
+        Stage 5  quality gate                   (characters < _min_pack_characters → IPPackUnderfilledError)
 
-    冷门 IP 主 LLM 不熟悉 → Stage 1 给空 / 单薄。Stage 2/3 仍照常跑（retrieve-first 兜底）。
-    Stage 5 仍能跑出 ≥ MIN_PACK_CHARACTERS 才算成功；否则抛异常让上层 emit warning。
+    冷门 IP 主 LLM 不熟悉 → Stage 1 给空 / 单薄；grok 无果时走 pre-extract 兜底。
     """
     if rec.kind not in ("known_ip", "hybrid") or not rec.ip_name:
         return _empty_pack(rec, fidelity_mode)
 
-    # === Stage 1: pre-extract canon (RAG-first) ===
-    candidates_pack = await _pre_extract_canon(rec, llm_router)
-    pre_names = [c.name for c in candidates_pack.characters[:MAX_BAIDU_CHARACTERS]]
+    ip_type = rec.ip_type or "other"
+    target = _target_characters(ip_type)
+    # 每轴目标取整体目标的一半——四轴并集覆盖整体目标，各轴聚焦自己那片挖深。
+    per_axis_target = max(6, target // 2)
+
+    # === Stage 1: per-axis pre-extract (并发) → merge ===
+    pre_results = await asyncio.gather(
+        *[
+            _pre_extract_canon(
+                rec, llm_router, focus_hint=hint, target_chars=per_axis_target,
+            )
+            for _, _, hint in _RESEARCH_AXES
+        ],
+        return_exceptions=True,
+    )
+    pre_packs = [p for p in pre_results if isinstance(p, IPKnowledgePack)]
+    for r in pre_results:
+        if isinstance(r, BaseException):
+            logger.warning("ip_pre_extract_axis_failed", ip_name=rec.ip_name, error=str(r))
+    candidates_pack = (
+        _merge_packs(pre_packs, rec, "none") if pre_packs else _empty_pack(rec, "none")
+    )
     logger.info(
-        "ip_pre_extract_done",
+        "ip_pre_extract_fanout_done",
         ip_name=rec.ip_name,
+        axes=len(pre_packs),
         characters=len(candidates_pack.characters),
         places=len(candidates_pack.places),
         factions=len(candidates_pack.factions),
         summary_len=len(candidates_pack.summary),
     )
 
-    # === Stage 2: gather passages (RAG candidate names drive baike fetching) ===
-    passages, _ = await _gather_passages_v3(
-        rec, tavily, grok_provider, prefer_candidates=pre_names,
-    )
+    # === Stage 2: grok fan-out passages ===
+    passages, _cand_names = await _gather_via_grok_fanout(rec, grok_provider)
 
     # === Stage 3: ground & augment ===
     if not passages:
-        # No external corpus — return pre-extract pack as best effort with warning.
+        # 无外部语料（grok 无果 / 未配置）→ 返回 merge 后的 pre-extract pack 兜底。
         logger.warning("ip_research_no_passages", ip_name=rec.ip_name)
         pack = candidates_pack
         pack.fidelity_mode = fidelity_mode
@@ -393,37 +707,33 @@ async def build_ip_knowledge_pack(
     else:
         pack = await _ground_and_augment(
             rec, candidates_pack, passages, fidelity_mode, llm_router,
+            target_chars=target,
         )
 
-    # === Stage 4: self-check + refetch loop ===
+    # === Stage 4: self-check + grok 补抓 loop ===
     for _ in range(MAX_REFETCH_ROUNDS):
         missing = await _self_check_missing_v2(pack, llm_router)
-        missing_chars = missing["missing_characters"]
-        missing_places = missing["missing_places"]
-        if not missing_chars and not missing_places:
+        missing_names = missing["missing_characters"] + missing["missing_places"]
+        if not missing_names:
             break
-
-        extra_passages: list[Passage] = []
-        if missing_chars:
-            chars_extra = await fetch_baike_characters_batch(
-                missing_chars, max_chars=MAX_PASSAGE_CHARS, concurrency=4,
-            )
-            extra_passages.extend(chars_extra)
-        if missing_places:
-            for place_name in missing_places:
-                place_passages = await fetch_via_tavily_site(
-                    place_name, rec.ip_type or "other", tavily, max_per_site=1,
-                )
-                extra_passages.extend(place_passages)
-
+        if grok_provider is None:
+            break
+        # 退死源后，补抓也走 grok：用缺失名拼一条聚焦 query。
+        extra_passages, _ = await fetch_via_grok_search(
+            rec.ip_name, ip_type, grok_provider, focus=" ".join(missing_names),
+        )
         if not extra_passages:
             break
-
         passages = (passages + extra_passages)[:MAX_PASSAGES]
-        pack = await _ground_and_augment(rec, pack, passages, fidelity_mode, llm_router)
+        pack = await _ground_and_augment(
+            rec, pack, passages, fidelity_mode, llm_router, target_chars=target,
+        )
+
+    # === Stage 4.5: 归并名称变体（fan-out 多轴并发会让同一人出现多种叫法）===
+    pack.characters = await _consolidate_characters(pack.characters, rec, llm_router)
 
     # === Stage 5: quality gate ===
-    if len(pack.characters) < MIN_PACK_CHARACTERS:
+    if len(pack.characters) < _min_pack_characters(ip_type):
         raise IPPackUnderfilledError(
             ip_name=rec.ip_name,
             character_count=len(pack.characters),
@@ -440,63 +750,3 @@ async def build_ip_knowledge_pack(
         passages=len(pack.passages),
     )
     return pack
-
-
-async def _gather_passages_v3(
-    rec: IPRecognition,
-    tavily: Any,
-    grok_provider: Any | None,
-    *,
-    prefer_candidates: list[str] | None = None,
-) -> tuple[list[Passage], list[str]]:
-    """4 步多源抓取（v3：候选名优先来自 RAG-first 阶段，Grok 退化为补充源）。
-
-    Step 1: Grok 主搜索（拿额外候选名 + 一段权威总结）
-    Step 2: 用 prefer_candidates ∪ grok candidates 去抓百度角色页
-    Step 3: 并发 baike_show + wiki + tavily_site
-    """
-    ip_name = rec.ip_name or ""
-    ip_type = rec.ip_type or "other"
-    if not ip_name:
-        return [], []
-
-    grok_passages, grok_candidates = await fetch_via_grok_search(ip_name, ip_type, grok_provider)
-
-    # union candidates: pre-extract 优先，grok 补
-    union: list[str] = []
-    seen: set[str] = set()
-    for n in list(prefer_candidates or []) + grok_candidates:
-        n = (n or "").strip()
-        if n and n not in seen:
-            seen.add(n)
-            union.append(n)
-    top_candidates = union[:MAX_BAIDU_CHARACTERS]
-
-    async def _baidu_chars() -> list[Passage]:
-        if not top_candidates:
-            return []
-        return await fetch_baike_characters_batch(
-            top_candidates, max_chars=MAX_PASSAGE_CHARS, concurrency=4,
-        )
-
-    results = await asyncio.gather(
-        fetch_baike_show(ip_name, max_chars=MAX_PASSAGE_CHARS),
-        _baidu_chars(),
-        fetch_wikipedia(ip_name, max_chars=MAX_PASSAGE_CHARS),
-        fetch_via_tavily_site(ip_name, ip_type, tavily, max_chars=MAX_PASSAGE_CHARS),
-        return_exceptions=True,
-    )
-    baike_show, baike_chars, wiki, site = [
-        r if not isinstance(r, BaseException) else [] for r in results
-    ]
-    for i, r in enumerate(results):
-        if isinstance(r, BaseException):
-            logger.warning("ip_gather_source_failed", index=i, error=str(r))
-
-    all_passages: list[Passage] = []
-    all_passages.extend(grok_passages)
-    all_passages.extend(list(baike_show))
-    all_passages.extend(list(baike_chars))
-    all_passages.extend(list(wiki))
-    all_passages.extend(list(site))
-    return all_passages[:MAX_PASSAGES], union

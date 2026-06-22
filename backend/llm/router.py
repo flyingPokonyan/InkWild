@@ -297,7 +297,12 @@ class LLMRouter:
         max_tokens: int = 2048,
         response_format: dict | None = None,
         tool_choice: str | dict | None = None,
+        reasoning: bool | None = None,
     ) -> AsyncIterator[dict]:
+        # ``reasoning`` is a per-call override of the router-level ``self._reasoning``.
+        # None = use the router default (slot binding); True/False = force on/off for
+        # this call only. Used by generation planning steps (roster / ip extraction)
+        # to re-enable CoT on a generation slot that's otherwise reasoning-off.
         # BUGS #20 — gate on global concurrency to keep bursts from
         # collapsing the provider connection pool.
         sem = await _acquire_global_concurrency_slot()
@@ -310,6 +315,7 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 response_format=response_format,
                 tool_choice=tool_choice,
+                reasoning=reasoning,
             ):
                 yield event
         finally:
@@ -325,6 +331,7 @@ class LLMRouter:
         max_tokens: int,
         response_format: dict | None,
         tool_choice: str | dict | None,
+        reasoning: bool | None = None,
     ) -> AsyncIterator[dict]:
         chain = [provider_name] if provider_name else []
         chain.extend(name for name in self.fallback_chain if name not in chain)
@@ -352,8 +359,9 @@ class LLMRouter:
                 extra["response_format"] = response_format
             if tool_choice is not None:
                 extra["tool_choice"] = tool_choice
-            if self._reasoning is not None:
-                extra["reasoning"] = self._reasoning
+            effective_reasoning = reasoning if reasoning is not None else self._reasoning
+            if effective_reasoning is not None:
+                extra["reasoning"] = effective_reasoning
             stamped_provider_name = self.identity.get("provider_name")
             stamped_model_id = self.identity.get("model_id") or getattr(provider, "model", None)
 
@@ -377,7 +385,7 @@ class LLMRouter:
                             provider=name,
                             provider_name=stamped_provider_name,
                             model_id=stamped_model_id,
-                            reasoning_requested=self._reasoning,
+                            reasoning_requested=effective_reasoning,
                         )
                         # Don't clobber identity keys a provider already set;
                         # only fill in what's missing.

@@ -1,14 +1,21 @@
-"""Tests for IP research pipeline (mock LLM + mock extractors)."""
-import pytest
-from unittest.mock import AsyncMock, patch
+"""Tests for IP research pipeline (grok 多角度并行研究架构，2026-06-22 重写)。"""
+from types import SimpleNamespace
 
+import pytest
+from unittest.mock import AsyncMock
+
+from schemas.ip_knowledge_pack import IPCharacter, IPKnowledgePack
 from schemas.research_pack import Passage
 from services.ip_recognizer import IPRecognition
-from services.ip_research_pipeline import build_ip_knowledge_pack
+from services.ip_research_pipeline import (
+    build_ip_knowledge_pack,
+    _gather_via_grok_fanout,
+    _merge_packs,
+)
 
 
 class FakeLLM:
-    """Sequential text streamer — each call yields the next predefined text."""
+    """Sequential text streamer — swallows reasoning/extra kwargs."""
     def __init__(self, *texts: str):
         self._texts = list(texts)
         self._idx = 0
@@ -20,12 +27,62 @@ class FakeLLM:
             yield {"type": "text_delta", "text": ch}
 
 
+def _pe(chars, must_have=None, summary="一段足够长的剧情概述用于测试覆盖。") -> str:
+    """Build a pre-extract JSON with the given character names."""
+    must = set(must_have or [])
+    cj = ",".join(
+        f'{{"name":"{n}","role_in_story":"角色","relation_to_protagonist":"x",'
+        f'"traits":["t"],"must_have":{"true" if n in must else "false"},'
+        f'"source_passage_ids":[]}}'
+        for n in chars
+    )
+    return (
+        f'{{"summary":"{summary}","characters":[{cj}],"places":[],"factions":[],'
+        f'"iconic_objects":[],"key_events":[],"tone_lingo":[],"timeline":[]}}'
+    )
+
+
+class DispatchLLM:
+    """Returns canned JSON by which system prompt the call uses (concurrency-safe)."""
+    def __init__(self, *, preextract, ground=None,
+                 missing='{"missing_characters":[],"missing_places":[]}'):
+        self.preextract = preextract  # str | callable(user)->str
+        self.ground = ground
+        self.missing = missing
+        self.calls = {"preextract": 0, "ground": 0, "missing": 0}
+
+    async def stream_with_tools(self, *, messages, system, **_kwargs):
+        user = messages[0]["content"] if messages else ""
+        if "知识抽取助手" in system:  # pre-extract（注意它正文里也含"事实核查"，须先判这条）
+            self.calls["preextract"] += 1
+            text = self.preextract(user) if callable(self.preextract) else self.preextract
+        elif "完整性" in system:
+            self.calls["missing"] += 1
+            text = self.missing
+        else:  # ground（事实核查助手）
+            self.calls["ground"] += 1
+            text = self.ground if self.ground is not None else self.preextract
+        for ch in text:
+            yield {"type": "text_delta", "text": ch}
+
+
+class FakeGrok:
+    def __init__(self, text="演员A 饰演 甄嬛，演员B 饰演 皇后"):
+        self.text = text
+        self.calls = []
+
+    async def web_search(self, query, max_tokens=2048):
+        self.calls.append(query)
+        return SimpleNamespace(text=self.text, citations=[])
+
+
+# ---- guards ----
+
 @pytest.mark.asyncio
 async def test_pipeline_returns_empty_when_kind_is_original():
     rec = IPRecognition(kind="original", confidence=0.0)
     pack = await build_ip_knowledge_pack(rec, "strict", llm_router=FakeLLM(""), tavily=AsyncMock())
     assert pack.characters == []
-    assert pack.places == []
     assert pack.ip_name == ""
 
 
@@ -36,75 +93,155 @@ async def test_pipeline_returns_empty_when_no_ip_name():
     assert pack.characters == []
 
 
+# ---- C2: 实体级 merge ----
+
+def _ipchar(name, must_have=False, traits=None, story_arc=""):
+    return IPCharacter(
+        name=name, role_in_story="角色", relation_to_protagonist="x",
+        traits=traits or [], must_have=must_have, story_arc=story_arc,
+    )
+
+
+def test_merge_packs_dedup_and_must_have_or():
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="测试", ip_type="tv")
+    pack_a = IPKnowledgePack(
+        ip_name="测试", ip_type="tv", fidelity_mode="none", summary="短",
+        characters=[_ipchar("甄嬛", must_have=False, traits=["机敏"])],
+        places=[], factions=[], iconic_objects=[], key_events=[], tone_lingo=[],
+        passages=[], timeline=[],
+    )
+    pack_b = IPKnowledgePack(
+        ip_name="测试", ip_type="tv", fidelity_mode="none", summary="长一点的概述",
+        characters=[
+            _ipchar("甄 嬛", must_have=True, traits=["机敏", "隐忍"], story_arc="成长弧"),
+            _ipchar("华妃", must_have=True),
+        ],
+        places=[], factions=[], iconic_objects=[], key_events=[], tone_lingo=[],
+        passages=[], timeline=[],
+    )
+    merged = _merge_packs([pack_a, pack_b], rec, "strict")
+    names = sorted(c.name for c in merged.characters)
+    assert names == ["华妃", "甄 嬛"] or names == ["华妃", "甄嬛"]  # 甄嬛 去重（空格规范化）
+    assert len(merged.characters) == 2
+    # must_have OR：甄嬛在 a=False/b=True → 合并后 True
+    zhen = next(c for c in merged.characters if "甄" in c.name)
+    assert zhen.must_have is True
+    assert "隐忍" in zhen.traits  # 取信息更全的 b 记录
+    assert merged.summary == "长一点的概述"  # 取最长
+    assert merged.fidelity_mode == "strict"
+
+
+# ---- C1: grok fan-out ----
+
 @pytest.mark.asyncio
-async def test_pipeline_extracts_pack_from_passages():
-    rec = IPRecognition(kind="known_ip", confidence=0.9, ip_name="逐玉", ip_type="tv")
-    extract_json = '{"summary":"屠户女与落难侯爷的故事","characters":[{"name":"樊长玉","role_in_story":"女主","relation_to_protagonist":"本人","traits":[],"must_have":true,"source_passage_ids":["p1"]}],"places":[{"name":"临安镇","description":"","must_have":true,"source_passage_ids":["p1"]}],"factions":[],"iconic_objects":[],"key_events":[],"tone_lingo":[]}'
-    missing_json = '{"missing_names":[]}'
-    llm = FakeLLM(extract_json, missing_json)
-    tavily = AsyncMock()
-    tavily.search.return_value = [{"content": "樊长玉 谢征 临安镇", "url": "x", "title": "t"}]
+async def test_gather_via_grok_fanout_runs_4_axes():
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="甄嬛传", ip_type="tv")
+    grok = FakeGrok()
+    passages, names = await _gather_via_grok_fanout(rec, grok)
+    assert len(grok.calls) == 4  # 四轴并发
+    assert len(passages) == 4
+    # 候选名跨轴并集去重（每轴同样返回甄嬛/皇后 → 去重后 2 个）
+    assert set(names) == {"甄嬛", "皇后"}
 
-    with patch("services.ip_research_pipeline.fetch_wikipedia",
-               new=AsyncMock(return_value=[Passage(id="p1", text="...", tags=[], source="wikipedia")])):
-        pack = await build_ip_knowledge_pack(rec, "strict", llm_router=llm, tavily=tavily)
 
-    assert pack.ip_name == "逐玉"
+@pytest.mark.asyncio
+async def test_gather_via_grok_fanout_no_provider_returns_empty():
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="甄嬛传", ip_type="tv")
+    passages, names = await _gather_via_grok_fanout(rec, None)
+    assert passages == [] and names == []
+
+
+# ---- pipeline 集成 ----
+
+@pytest.mark.asyncio
+async def test_pipeline_merges_per_axis_preextract_union():
+    """四轴 pre-extract 各挖一片 → merge 并集（无 grok，pack=merged candidates）。"""
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="甄嬛传", ip_type="tv")
+
+    def pe_by_focus(user: str) -> str:
+        if "对立" in user:
+            return _pe(["华妃", "皇后"], must_have=["华妃", "皇后"])
+        if "外围" in user:
+            return _pe(["苏培盛", "崔槿汐", "温实初", "流朱"])
+        if "设定" in user:
+            return _pe([])  # 世界轴不出角色
+        return _pe(["甄嬛", "沈眉庄"], must_have=["甄嬛"])
+
+    llm = DispatchLLM(preextract=pe_by_focus)
+    pack = await build_ip_knowledge_pack(rec, "strict", llm_router=llm, tavily=AsyncMock())
+    names = {c.name for c in pack.characters}
+    assert {"甄嬛", "沈眉庄", "华妃", "皇后", "苏培盛", "崔槿汐", "温实初", "流朱"} <= names
+    assert set(pack.must_have_character_names()) == {"甄嬛", "华妃", "皇后"}
+    assert llm.calls["preextract"] == 4  # 四轴并发
+
+
+@pytest.mark.asyncio
+async def test_pipeline_grounds_with_grok_passages():
+    """有 grok passages 时走 ground；ground 输出替换 characters。"""
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="甄嬛传", ip_type="tv")
+    ground_json = _pe(
+        ["甄嬛", "华妃", "皇后", "沈眉庄", "安陵容", "苏培盛", "温实初"],
+        must_have=["甄嬛", "华妃", "皇后"],
+    )
+    llm = DispatchLLM(preextract=_pe(["甄嬛", "华妃"], must_have=["甄嬛"]), ground=ground_json)
+    pack = await build_ip_knowledge_pack(
+        rec, "strict", llm_router=llm, tavily=AsyncMock(), grok_provider=FakeGrok(),
+    )
+    assert llm.calls["ground"] >= 1
+    assert "安陵容" in {c.name for c in pack.characters}
     assert pack.fidelity_mode == "strict"
-    assert "樊长玉" in pack.must_have_character_names()
-    assert "临安镇" in pack.must_have_place_names()
+
+
+# ---- LLM 漂移鲁棒性（e2e 实测暴露）+ 名称变体归并 ----
+
+def test_coerce_str_list_handles_dicts():
+    from services.ip_research_pipeline import _coerce_str_list
+    # tone_lingo 实测被 LLM 写成 [{"term":...}] → 须压成 str，否则 pydantic 炸
+    assert _coerce_str_list(["甲", {"term": "一丈红"}, {"name": "x"}, 5, ""]) == ["甲", "一丈红", "x", "5"]
+
+
+def test_prep_char_dicts_fills_missing_must_have():
+    from services.ip_research_pipeline import _prep_char_dicts
+    out = _prep_char_dicts([{"name": "温实初", "role_in_story": "挚友"}])
+    assert out[0]["must_have"] is False  # 漏 must_have 不再被整条丢掉
 
 
 @pytest.mark.asyncio
-async def test_pipeline_self_check_triggers_extra_fetch():
-    rec = IPRecognition(kind="known_ip", confidence=0.9, ip_name="逐玉", ip_type="tv")
-    first_extract = '{"summary":"long enough summary","characters":[{"name":"樊长玉","role_in_story":"女主","relation_to_protagonist":"本人","traits":[],"must_have":true,"source_passage_ids":[]}],"places":[],"factions":[],"iconic_objects":[],"key_events":[],"tone_lingo":[]}'
-    missing_json = '{"missing_names":["李怀安","谢征"]}'
-    second_extract = '{"summary":"S2","characters":[{"name":"樊长玉","role_in_story":"女主","relation_to_protagonist":"本人","traits":[],"must_have":true,"source_passage_ids":[]},{"name":"李怀安","role_in_story":"配角","relation_to_protagonist":"师兄","traits":[],"must_have":true,"source_passage_ids":[]}],"places":[],"factions":[],"iconic_objects":[],"key_events":[],"tone_lingo":[]}'
-    llm = FakeLLM(first_extract, missing_json, second_extract)
-    tavily = AsyncMock()
-    tavily.search.return_value = [{"content": "李怀安相关", "url": "x", "title": "t"}]
-
-    with patch("services.ip_research_pipeline.fetch_wikipedia",
-               new=AsyncMock(return_value=[Passage(id="p1", text="...", tags=[], source="wikipedia")])):
-        pack = await build_ip_knowledge_pack(rec, "strict", llm_router=llm, tavily=tavily)
-    char_names = [c.name for c in pack.characters]
-    assert "李怀安" in char_names
-
-
-@pytest.mark.asyncio
-async def test_pipeline_no_passages_returns_skeleton():
-    rec = IPRecognition(kind="known_ip", confidence=0.9, ip_name="冷门IP", ip_type="other")
-    tavily = AsyncMock()
-    tavily.search.return_value = []
-
-    with patch("services.ip_research_pipeline.fetch_wikipedia",
-               new=AsyncMock(return_value=[])), \
-         patch("services.ip_research_pipeline.fetch_via_tavily_site",
-               new=AsyncMock(return_value=[])):
-        pack = await build_ip_knowledge_pack(rec, "loose", llm_router=FakeLLM(""), tavily=tavily)
-    assert pack.ip_name == "冷门IP"
-    assert pack.characters == []
-    assert pack.summary == ""
+async def test_consolidate_merges_name_variants():
+    from services.ip_research_pipeline import _consolidate_characters
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="甄嬛传", ip_type="tv")
+    chars = [
+        _ipchar("华妃"), _ipchar("年世兰", must_have=True),
+        _ipchar("华妃（年世兰）"), _ipchar("端妃"),
+    ]
+    groups = (
+        '{"groups":[{"canonical":"华妃（年世兰）","aliases":["华妃","年世兰","华妃（年世兰）"]},'
+        '{"canonical":"端妃","aliases":["端妃"]}]}'
+    )
+    merged = await _consolidate_characters(chars, rec, FakeLLM(groups))
+    names = sorted(c.name for c in merged)
+    assert names == ["华妃（年世兰）", "端妃"]  # 三个变体合并为一
+    hf = next(c for c in merged if "华妃" in c.name)
+    assert hf.must_have is True  # must_have OR 合并
 
 
 @pytest.mark.asyncio
-async def test_pipeline_missing_names_but_empty_supplementary_returns_first_pack():
-    """When self-check says missing names but supplementary tavily returns nothing,
-    the original pack (not a degraded re-extract) is returned."""
-    rec = IPRecognition(kind="known_ip", confidence=0.9, ip_name="逐玉", ip_type="tv")
-    first_extract = '{"summary":"S","characters":[{"name":"樊长玉","role_in_story":"女主","relation_to_protagonist":"本人","traits":[],"must_have":true,"source_passage_ids":[]}],"places":[],"factions":[],"iconic_objects":[],"key_events":[],"tone_lingo":[]}'
-    missing_json = '{"missing_names":["李怀安","谢征"]}'
-    # Note: no third LLM response — pipeline should NOT call extract a second time
-    llm = FakeLLM(first_extract, missing_json)
+async def test_consolidate_noop_on_llm_failure():
+    from services.ip_research_pipeline import _consolidate_characters
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="x", ip_type="tv")
+    chars = [_ipchar("甲"), _ipchar("乙")]
+    merged = await _consolidate_characters(chars, rec, FakeLLM("不是JSON"))
+    assert {c.name for c in merged} == {"甲", "乙"}  # 解析失败原样返回
 
-    with patch("services.ip_research_pipeline.fetch_wikipedia",
-               new=AsyncMock(return_value=[Passage(id="p1", text="...", tags=[], source="wikipedia")])), \
-         patch("services.ip_research_pipeline.fetch_via_tavily_site",
-               new=AsyncMock(return_value=[])):  # supplementary returns empty
-        pack = await build_ip_knowledge_pack(rec, "strict", llm_router=llm, tavily=AsyncMock())
-    char_names = [c.name for c in pack.characters]
-    assert char_names == ["樊长玉"]  # only the original 1, no re-extract happened
+
+@pytest.mark.asyncio
+async def test_pipeline_underfilled_raises():
+    """合并后 characters 低于按规模缩放的下限 → IPPackUnderfilledError。"""
+    from services.ip_research_pipeline import IPPackUnderfilledError
+    rec = IPRecognition(kind="known_ip", confidence=1.0, ip_name="冷门IP", ip_type="other")
+    llm = DispatchLLM(preextract=_pe(["独苗"], must_have=["独苗"]))
+    with pytest.raises(IPPackUnderfilledError):
+        await build_ip_knowledge_pack(rec, "strict", llm_router=llm, tavily=AsyncMock())
 
 
 @pytest.mark.asyncio

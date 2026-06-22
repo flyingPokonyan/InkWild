@@ -16,17 +16,21 @@ from schemas.research_pack import Passage
 logger = structlog.get_logger()
 
 
-def _build_query(ip_name: str, ip_type: str) -> str:
+def _build_query(ip_name: str, ip_type: str, focus: str = "") -> str:
     base = f"《{ip_name}》"
     if ip_type in ("tv", "movie"):
-        return f"电视剧/电影{base} 主要角色 演员表 角色介绍 人物关系 剧情"
-    if ip_type == "novel":
-        return f"小说{base} 主要人物 角色介绍 人物关系 剧情简介"
-    if ip_type == "anime":
-        return f"动漫{base} 主要角色 声优 人物关系 剧情"
-    if ip_type == "game":
-        return f"游戏{base} 主要角色 剧情 角色介绍"
-    return f"{base} 主要角色 介绍 关系"
+        q = f"电视剧/电影{base} 主要角色 演员表 角色介绍 人物关系 剧情"
+    elif ip_type == "novel":
+        q = f"小说{base} 主要人物 角色介绍 人物关系 剧情简介"
+    elif ip_type == "anime":
+        q = f"动漫{base} 主要角色 声优 人物关系 剧情"
+    elif ip_type == "game":
+        q = f"游戏{base} 主要角色 剧情 角色介绍"
+    else:
+        q = f"{base} 主要角色 介绍 关系"
+    # 多角度 fan-out：focus 把一条大杂烩 query 收窄到某一片（核心/对立/外围/设定），
+    # 多条并发的并集比单条更宽，专门解决"单 query 只捞到最有名几个"。
+    return f"{q} {focus}".strip() if focus else q
 
 
 def _extract_candidate_names(grok_text: str) -> list[str]:
@@ -52,14 +56,16 @@ async def fetch_via_grok_search(
     grok_provider: Any | None,
     *,
     max_chars: int = 4000,
+    focus: str = "",
 ) -> tuple[list[Passage], list[str]]:
     """跑一次 Grok web_search，返回 (passages, candidate_names)。
 
+    ``focus`` 为多角度 fan-out 的某一轴（核心人物 / 对立方 / 外围 NPC / 设定）。
     grok_provider 为 None / web_search 失败 → 返回 ([], [])。
     """
     if grok_provider is None or not ip_name:
         return [], []
-    query = _build_query(ip_name, ip_type)
+    query = _build_query(ip_name, ip_type, focus)
     try:
         result = await grok_provider.web_search(query, max_tokens=2048)
     except Exception as exc:  # noqa: BLE001

@@ -41,14 +41,22 @@ async def _collect_stream_text(
     system: str,
     messages: list[dict],
     max_tokens: int,
+    reasoning: bool | None = None,
 ) -> str:
-    """通过 stream_with_tools(tools=[]) 收集纯文本输出。"""
+    """通过 stream_with_tools(tools=[]) 收集纯文本输出。
+
+    ``reasoning`` per-call 覆盖路由默认（None=不覆盖）。规划/约束满足类步骤
+    （如 roster 花名册）传 True 重新打开 CoT；批量 JSON 生成步骤保持默认（关）。
+    只在显式设置时透传，避免 test fakes / 旧 provider 收到未知 kwarg。
+    """
+    extra: dict = {"reasoning": reasoning} if reasoning is not None else {}
     parts: list[str] = []
     async for event in llm_router.stream_with_tools(
         messages=messages,
         tools=[],
         system=system,
         max_tokens=max_tokens,
+        **extra,
     ):
         if event.get("type") == "text_delta":
             parts.append(event.get("text", ""))
@@ -84,17 +92,21 @@ _ROSTER_SYSTEM = """你是一个互动叙事世界的人物策划助手。
 输出严格 JSON，格式：
 {"roster":[{"name":"人物名","role_tag":"角色定位","faction":"派系（可空）","is_image_target":true/false},...]}
 
-规则：
-- name: 符合世界风格的人物名，优先复用 ip_canon.canonical_names 中已知名字
+规则（按重要性排序）：
+- **完整性第一**：宁可多收，不可漏掉核心角色。一个有名有姓、推动剧情的角色被漏掉，
+  比多收一个配角严重得多。下方若给出「必含角色」清单，**清单内每一个都必须出现，缺一即不合格**。
+- 人物数量：描述中明确指定数量时按指定数量；否则按题材规模——长篇剧集 / 长篇小说取 **20-30 个**，
+  中短篇 / 电影取 **12-18 个**，小品世界 **8-12 个**。把主要 + 次要角色尽量收全，别只给最有名的几个。
+- name: 符合世界风格的人物名，优先复用已知原作人名
 - role_tag: 简短定位，如"主角"/"宿敌"/"心腹"/"市井小贩"/"神秘客"
 - faction: 派系归属，无明确派系可留空字符串
-- is_image_target: 标给"最值得玩家扮演、有独立鲜明视角的核心角色"。
-  ✅ 设 true：主角、男女主；**主要反派（反派大女主 / BOSS / 派系老大 / 当家主母）**——反派视角是宝贵卖点，玩家会想从反派重玩；
-     以及性格鲜明、处境独立、能撑起一条剧情线的关键配角（核心盟友、宿敌、王公、谋士、痴情医者等）。
-  ❌ 设 false：次要妃嫔 / 随从 / 侍女 / 太监 / 同党小角色 / 工具人 / 路人 / 一次性出场 —— 即使有派系归属也不标。
-  目标数量：挑**最有戏的核心阵容，约 6-12 个**（小世界更少）；既别只标 1-2 个主角，也别把半数配角都标上。
-     宁缺毋滥——每个可玩角色都要能独立撑起一条剧情线。
-- 人物数量：描述中明确指定数量时按指定数量，否则根据题材规模生成 12-30 个
+- is_image_target（= 可玩角色）：标给"玩家真正会想扮演、有独立鲜明视角、能撑起一条剧情线的主角级角色"。
+  这是**精选的一小撮**，不是"所有重要角色"——和"必含角色 / 完整 roster"是两回事，别混。
+  ✅ 设 true：主角、男女主；**主要反派（反派大女主 / BOSS / 派系老大 / 当家主母）**——反派视角是宝贵卖点；
+     以及性格鲜明、处境独立、玩家有理由想扮演的关键配角（核心盟友、宿敌、王公、谋士、痴情医者等）。
+  ❌ 设 false（他们是让世界鲜活的 NPC，**不是可玩角色**）：侍女 / 丫鬟 / 太监 / 随从 / 低位嫔妃（答应·常在）/
+     工具人 / 路人 / 孩童 / 一次性出场。即使有戏份、即使在必含清单里，只要不是"玩家会想扮演的主角级"就设 false。
+  数量：**按世界规模浮动，宁缺毋滥**——大 IP 约 10-15 个、中小世界 3-8 个；不设硬上限，但绝不要把半数角色都标可玩。
 - 只输出 JSON，不含任何解释文字
 """
 
@@ -136,6 +148,43 @@ def _prune_to_canon(
             dropped_names=dropped_names[:20],
         )
     return kept
+
+
+def _ensure_must_have(
+    entries: list["CharacterRosterEntry"], ip_pack: IPKnowledgePack
+) -> list["CharacterRosterEntry"]:
+    """硬保证 must_have ⊆ roster：LLM 漏掉的 must_have 角色强制补回。
+
+    与 _prune_to_canon（只删白名单外）配成闭环——删多余 + 补必含。补回的角色用
+    ip_pack 里的 role_in_story 作 role_tag，is_image_target=True（must_have 是世界主心骨，
+    都应可玩）。后续 character-detail 阶段会按 name 补全 persona / traits。
+
+    这是代码级安全网：不依赖 LLM 是否听话。甄嬛传漏掉皇帝/华妃/皇后的直接修复点。
+    """
+    existing = {_norm_name(e.name) for e in entries}
+    injected: list[str] = []
+    for c in ip_pack.characters:
+        if not c.must_have:
+            continue
+        if _norm_name(c.name) in existing:
+            continue
+        entries.append(CharacterRosterEntry(
+            name=c.name,
+            role_tag=(c.role_in_story or "主要角色"),
+            faction="",
+            is_image_target=True,
+        ))
+        existing.add(_norm_name(c.name))
+        injected.append(c.name)
+    if injected:
+        logger.warning(
+            "roster_must_have_force_injected",
+            ip_name=ip_pack.ip_name,
+            injected=injected,
+            roster_size=len(entries),
+            reason="llm_dropped_must_have_characters",
+        )
+    return entries
 
 
 async def build_character_roster(
@@ -193,13 +242,15 @@ async def build_character_roster(
         if must_have:
             if fidelity_mode == "strict":
                 user_content += (
-                    f"\n\n{_CONSTRAINT_HEADER_STRICT}本世界为「严格复刻」，角色清单**只能由以下原作角色组成，"
-                    f"name 字段用原作名**，**禁止新增任何原创 / 路人 / 工具人角色**"
-                    f"（前文若提到生成 12-30 个，一律以本清单为准，宁少勿编）：\n"
-                    f"必含主线角色：{', '.join(must_have)}\n"
+                    f"\n\n{_CONSTRAINT_HEADER_STRICT}本世界为「严格复刻」，角色只能用原作角色、"
+                    f"name 字段用原作名、**禁止新增任何原创 / 路人 / 工具人角色**。\n"
+                    f"⚠️ 必含角色（**以下每一个都必须出现在 roster 里，缺一即不合格**；是否可玩"
+                    f"按上面 is_image_target 规则各自判断，别因为必含就全标可玩）：{', '.join(must_have)}\n"
                 )
                 if optional:
-                    user_content += f"其余原作角色（尽量收全）：{', '.join(optional)}\n"
+                    user_content += (
+                        f"其余原作角色（**尽量全部收进来，别只挑有名的**）：{', '.join(optional)}\n"
+                    )
                 user_content += "所有角色按原作 traits / relation 设定，勿改名、勿杜撰。\n"
             else:  # loose
                 user_content += (
@@ -215,11 +266,17 @@ async def build_character_roster(
             # Don't inject anything — there's no must-have constraint to enforce
 
     try:
+        # roster 是约束满足/规划任务（读 must_have、规划人数、保证主角在场、分配
+        # image_target），per-call 打开 CoT —— admin_generation 槽默认 reasoning-off
+        # 是为批量 JSON 生成防截断，对这一步反而伤害约束遵守（甄嬛传漏掉皇帝/华妃/皇后
+        # 的直接诱因之一）。批量角色详情阶段（下方 build_characters_in_batches）不传，
+        # 保持关。
         text = await _collect_stream_text(
             llm_router,
             system=_ROSTER_SYSTEM,
             messages=[{"role": "user", "content": user_content}],
             max_tokens=8192,
+            reasoning=True,
         )
         data = _extract_json_from_text(text)
         if data is None:
@@ -248,6 +305,9 @@ async def build_character_roster(
         # 严格复刻：硬裁掉原作白名单外的角色，保证 0 原创（loose 不裁，允许扩展）。
         if fidelity_mode == "strict" and ip_pack is not None:
             entries = _prune_to_canon(entries, ip_pack)
+        # 删多余之后补必含：LLM 漏掉的 must_have 强制注入（strict + loose 都跑）。
+        if fidelity_mode in ("strict", "loose") and ip_pack is not None:
+            entries = _ensure_must_have(entries, ip_pack)
         return entries
 
     except Exception as exc:  # noqa: BLE001

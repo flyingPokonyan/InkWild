@@ -28,6 +28,37 @@ class FailingProvider(LLMProvider):
         raise Exception("down")
 
 
+class CapturingProvider(LLMProvider):
+    """Records the kwargs each call receives (for reasoning-override assertions)."""
+    def __init__(self):
+        self.calls = []
+
+    async def stream_with_tools(self, messages, tools, system=None, max_tokens=2048, **kwargs):
+        self.calls.append(kwargs)
+        yield {"type": "text_delta", "text": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_router_per_call_reasoning_overrides_default():
+    """per-call reasoning=True 覆盖路由默认 reasoning=False（生成 planning 步用法）。"""
+    provider = CapturingProvider()
+    router = LLMRouter(providers={"fake": provider}, reasoning=False)
+
+    # 默认调用：用路由默认 False
+    async for _ in router.stream_with_tools([], [], provider_name="fake"):
+        pass
+    # per-call 覆盖为 True
+    async for _ in router.stream_with_tools([], [], provider_name="fake", reasoning=True):
+        pass
+    # per-call None：仍用路由默认
+    async for _ in router.stream_with_tools([], [], provider_name="fake", reasoning=None):
+        pass
+
+    assert provider.calls[0].get("reasoning") is False
+    assert provider.calls[1].get("reasoning") is True
+    assert provider.calls[2].get("reasoning") is False
+
+
 @pytest.mark.asyncio
 async def test_router_selects_provider():
     provider = FakeProvider("你好")

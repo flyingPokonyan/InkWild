@@ -63,9 +63,10 @@ class CapturingLLM:
         self.captured_messages: list = []
         self.captured_systems: list = []
 
-    async def stream_with_tools(self, *, messages, tools, system, max_tokens):
+    async def stream_with_tools(self, *, messages, tools, system, max_tokens, reasoning=None):
         self.captured_messages.append(messages)
         self.captured_systems.append(system)
+        self.captured_reasoning = reasoning
         # Yield the response in one delta — keeps tests fast and deterministic.
         yield {"type": "text_delta", "text": self._response}
 
