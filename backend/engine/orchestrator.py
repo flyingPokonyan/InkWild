@@ -1432,6 +1432,39 @@ class Orchestrator:
 
             # 每个 active NPC 预取上下文（DB queries），然后并行跑 NPC LLM
             time_slot = _extract_time_slot(game_state.current_time or "")
+
+            # Batch-load the three per-NPC DB lookups in one round trip each
+            # (reflections / voice anchors / peer relations) instead of 3×N
+            # serial queries inside the loop below. db is a single shared
+            # AsyncSession so these can't be gathered — batching is the win.
+            # On failure each NPC just falls back to empty (same as before).
+            reflections_by_npc: dict = {}
+            voice_anchors_by_npc: dict[str, list[str]] = {}
+            peer_rel_by_npc: dict[str, list[dict]] = {}
+            if db and session_id and active_set:
+                try:
+                    from services.npc_reflection_service import batch_get_reflections
+                    reflections_by_npc = await batch_get_reflections(db, session_id, active_set)
+                except Exception:
+                    logger.warning("npc_reflection_batch_load_failed", exc_info=True)
+                try:
+                    voice_anchors_by_npc = (
+                        await self.memory_manager.batch_get_npc_recent_utterances(
+                            db, session_id, active_set, limit=3
+                        )
+                    )
+                except Exception:
+                    logger.warning("npc_voice_anchor_batch_load_failed", exc_info=True)
+                if settings.npc_peer_relations_enabled:
+                    try:
+                        peer_rel_by_npc = (
+                            await self.memory_manager.batch_get_npc_peer_relations(
+                                db, session_id, active_set
+                            )
+                        )
+                    except Exception:
+                        logger.warning("npc_peer_relations_batch_load_failed", exc_info=True)
+
             npc_kwargs_by_name: dict[str, dict] = {}
             for name in active_set:
                 npc_info = npc_lookup.get(name) or {}
@@ -1442,32 +1475,13 @@ class Orchestrator:
                 npc_relation = game_state.npc_relations.get(name, {})
 
                 reflection_text: str | None = None
-                if db and session_id:
-                    try:
-                        from services.npc_reflection_service import get_reflection
-                        reflection_row = await get_reflection(db, session_id, name)
-                        if reflection_row:
-                            reflection_text = reflection_row.summary
-                    except Exception:
-                        logger.warning("npc_reflection_load_failed", npc_name=name, exc_info=True)
+                _reflection_row = reflections_by_npc.get(name)
+                if _reflection_row is not None:
+                    reflection_text = _reflection_row.summary
 
-                voice_anchor: list[str] = []
-                if db and session_id:
-                    try:
-                        voice_anchor = await self.memory_manager.get_npc_recent_utterances(
-                            db, session_id, name, limit=3
-                        )
-                    except Exception:
-                        logger.warning("npc_voice_anchor_load_failed", npc_name=name, exc_info=True)
+                voice_anchor: list[str] = voice_anchors_by_npc.get(name, [])
 
-                peer_rel: list[dict] = []
-                if settings.npc_peer_relations_enabled and db and session_id:
-                    try:
-                        peer_rel = await self.memory_manager.get_npc_peer_relations(
-                            db, session_id, name
-                        )
-                    except Exception:
-                        logger.warning("npc_peer_relations_load_failed", npc_name=name, exc_info=True)
+                peer_rel: list[dict] = peer_rel_by_npc.get(name, [])
 
                 my_location = (
                     npc_info.get("schedule", {}).get(time_slot)

@@ -60,6 +60,28 @@ async def get_reflection(
     return result.scalar_one_or_none()
 
 
+async def batch_get_reflections(
+    db: AsyncSession,
+    session_id: str,
+    npc_names: list[str],
+) -> dict[str, NPCReflection]:
+    """Single-SQL batch version of get_reflection.
+
+    Loads reflections for ALL ``npc_names`` in one query (eliminates the
+    per-NPC N+1 the orchestrator's NPC prefetch loop otherwise incurs).
+    Returns ``{npc_name: NPCReflection}`` containing only NPCs that have a
+    reflection row — callers should treat a missing key as "no reflection".
+    """
+    if not npc_names:
+        return {}
+    stmt = select(NPCReflection).where(
+        NPCReflection.session_id == session_id,
+        NPCReflection.npc_name.in_(npc_names),
+    )
+    result = await db.execute(stmt)
+    return {row.npc_name: row for row in result.scalars().all()}
+
+
 async def should_reflect(
     db: AsyncSession,
     session_id: str,

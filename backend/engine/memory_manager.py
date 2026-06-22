@@ -344,6 +344,100 @@ class MemoryManager:
             for row in rows
         ]
 
+    async def batch_get_npc_peer_relations(
+        self,
+        db,
+        session_id: str,
+        npc_names: list[str],
+    ) -> dict[str, list[dict]]:
+        """Single-SQL batch version of get_npc_peer_relations.
+
+        Pulls the outgoing relations for ALL ``npc_names`` in one query and
+        groups them per asking NPC in Python. Same information-isolation
+        contract as the single-NPC version (only npc_a's own outgoing view).
+        Returns ``{npc_name: [relation_dict, ...]}``; NPCs with no relations
+        get an empty list.
+        """
+        if not npc_names:
+            return {}
+        from models.npc_relation import NPCRelation
+
+        stmt = (
+            select(NPCRelation)
+            .where(
+                NPCRelation.session_id == session_id,
+                NPCRelation.npc_a.in_(npc_names),
+            )
+            .order_by(NPCRelation.npc_b.asc())
+        )
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        by_npc: dict[str, list[dict]] = {n: [] for n in npc_names}
+        for row in rows:
+            bucket = by_npc.get(row.npc_a)
+            if bucket is None:
+                continue
+            bucket.append(
+                {
+                    "target": row.npc_b,
+                    "trust": row.trust,
+                    "label": row.relationship_label,
+                    "history_summary": row.history_summary,
+                }
+            )
+        return by_npc
+
+    async def batch_get_npc_recent_utterances(
+        self,
+        db,
+        session_id: str,
+        npc_names: list[str],
+        limit: int = 3,
+    ) -> dict[str, list[str]]:
+        """Single-SQL batch version of get_npc_recent_utterances.
+
+        Pulls one window of recent assistant messages ONCE and extracts each
+        NPC's most recent utterances from it in Python — instead of every NPC
+        re-reading an overlapping window. Returns ``{npc_name: [utterance,
+        ...]}`` (newest first, up to ``limit`` each); NPCs with no past
+        utterances get an empty list.
+        """
+        if not npc_names:
+            return {}
+        from models.game import Message
+
+        # Same absolute candidate window as the single-NPC path: "the most
+        # recent N assistant messages" is NPC-independent (every NPC looks at
+        # the same window), so batching over one window of this size yields
+        # results identical to calling the single-NPC method per NPC.
+        candidate_window = max(limit * 4, 8)
+        stmt = (
+            select(Message)
+            .where(
+                Message.session_id == session_id,
+                Message.role == "assistant",
+                Message.npc_dialogues.is_not(None),
+            )
+            .order_by(Message.id.desc())
+            .limit(candidate_window)
+        )
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+
+        name_set = set(npc_names)
+        out: dict[str, list[str]] = {n: [] for n in npc_names}
+        for row in rows:
+            if not isinstance(row.npc_dialogues, dict):
+                continue
+            for name in name_set:
+                bucket = out[name]
+                if len(bucket) >= limit:
+                    continue
+                text = row.npc_dialogues.get(name)
+                if isinstance(text, str) and text.strip():
+                    bucket.append(text.strip())
+        return out
+
     async def get_npc_recent_utterances(
         self,
         db,
