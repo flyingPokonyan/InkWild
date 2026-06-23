@@ -138,6 +138,13 @@ async def _generate_image_with_fallback(
 
 PLACEHOLDER_COVER_URL = "/static/placeholder-cover.png"
 
+# Hard wall-clock cap for a SINGLE image (all retry/fallback tiers combined). The
+# images stage waits for every image, so one stuck portrait holds the whole stage
+# hostage — observed 2026-06-23 when 13/14 finished in ~2 min but one looped retries
+# for ~18 min. Past this deadline we give up and ship a placeholder (admin can
+# regenerate from the draft) so the stage finishes promptly instead of stalling.
+_PER_IMAGE_DEADLINE_S = 240.0
+
 # Stage index map (used in progress events)
 _STAGE_INDEX = {
     "research_pack": 0,
@@ -2212,11 +2219,19 @@ class WorldCreatorAgentV2:
             async with semaphore:
                 storage_name = world_name if not key.startswith("npc:") else key[4:]
                 storage_key = make_image_key(category, storage_name)
-                url, result = await _generate_image_with_fallback(
-                    self.image_gen, prompt_tiers,
-                    aspect_ratio=aspect_ratio, storage=image_storage,
-                    storage_key=storage_key, log_key=key,
-                )
+                try:
+                    url, result = await asyncio.wait_for(
+                        _generate_image_with_fallback(
+                            self.image_gen, prompt_tiers,
+                            aspect_ratio=aspect_ratio, storage=image_storage,
+                            storage_key=storage_key, log_key=key,
+                        ),
+                        timeout=_PER_IMAGE_DEADLINE_S,
+                    )
+                except (asyncio.TimeoutError, TimeoutError):
+                    logger.warning("image_gen_deadline_exceeded", key=key,
+                                   deadline_s=_PER_IMAGE_DEADLINE_S)
+                    return key, IMAGE_PLACEHOLDER_URL, None
                 # ImageResult returned so the caller can reuse bytes for cropping.
                 return key, url, result
 
