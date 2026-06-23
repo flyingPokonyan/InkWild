@@ -461,23 +461,19 @@ _WORLD_BASE_SYSTEM = """你是一个互动叙事世界设计师。
 """
 
 
-def _location_target_range(
-    ip_pack: "IPKnowledgePack | None", ip_type: str
-) -> tuple[int, int]:
-    """地点数量按世界规模浮动（与角色 roster 同理，不再写死 3-8）。
+def _ip_location_band(ip_pack: "IPKnowledgePack | None") -> tuple[int, int] | None:
+    """IP 世界地点护栏区间，以研究层抓到的地点数为锚（grounded fact）。
 
-    IP 世界：研究层抓到的地点数 + 角色数就是规模信号（research 已按 ip_type 缩放过），
-    用它推导一个目标区间——角色越多越需要更多舞台。原创世界缺强信号，按题材给适中默认。
+    下限 = 尽量用全原作地点；上限 = 留出按剧情/角色规模增补的头部空间。
+    刻意**不**用角色数硬耦合公式去算——「角色多是否要多铺舞台」交给 world_base 那次
+    LLM 读完整上下文自己判断，这里只给一个有据可依的护栏防它压缩/失控。
+
+    返回 None = 无研究信号（原创世界）→ 不注入硬数字，让 LLM 读世界描述自行判断体量。
     """
-    if ip_pack and ip_pack.places:
-        n_places = len(ip_pack.places)
-        n_chars = len(ip_pack.characters)
-        # 角色多 → 需要更多居所/舞台；研究地点数也是规模上界参考
-        high = min(18, max(n_places, n_chars // 2 + 3, 6))
-        low = max(5, high - 4)
-        return low, high
-    base = {"tv": 12, "novel": 12, "anime": 10, "game": 10}.get(ip_type or "", 8)
-    return max(4, base - 4), base
+    if not (ip_pack and ip_pack.places):
+        return None
+    n_places = len(ip_pack.places)
+    return max(5, n_places), min(20, n_places + 5)
 
 
 class WorldCreatorAgentV2:
@@ -1088,16 +1084,30 @@ class WorldCreatorAgentV2:
         ip_pack = self._last_ip_pack
         fidelity = self._fidelity_mode
 
-        ip_type = ip_pack.ip_type if ip_pack else ""
-        loc_low, loc_high = _location_target_range(ip_pack, ip_type)
+        loc_band = _ip_location_band(ip_pack)
 
         user_message = (
             f"世界描述：{description}\n"
             f"题材：{genre or '未指定'}\n"
             f"时代：{era or '未指定'}\n"
-            f"\n【地点规模】本世界目标地点数约 {loc_low}-{loc_high} 个"
-            f"（按世界体量定，宁缺毋滥但不要压缩）。\n"
         )
+        if loc_band:
+            # IP 世界：给 grounded 事实（研究抓到多少地点/角色）+ 护栏区间，让 LLM 在区间内
+            # 按剧情判断要不要增补舞台，而不是我硬塞一个数。
+            loc_low, loc_high = loc_band
+            user_message += (
+                f"\n【地点规模】研究层从原作抓到 {len(ip_pack.places)} 个地点、"
+                f"{len(ip_pack.characters)} 个角色。locations 以原作地点为基础**尽量用全**，"
+                f"再按剧情与角色规模判断是否增补（如主要角色的居所、关键事件场景），"
+                f"总数约 {loc_low}-{loc_high} 个，宁缺毋滥但世界大就要充实。\n"
+            )
+        else:
+            # 原创世界：无研究信号，不塞死数 —— 让 LLM 读世界描述自己判断体量。
+            user_message += (
+                f"\n【地点规模】请先读上面的世界描述判断这个世界的体量："
+                f"单一场景 / 短篇格局给 4-6 个地点即可；多线索 / 多势力 / 宏大世界"
+                f"应铺到 12-18 个，让主要角色和势力各有舞台。按描述自己拿捏，宁缺毋滥但不要压缩。\n"
+            )
 
         # ONLY render IP context when pack exists AND fidelity is non-none
         if ip_pack and fidelity in ("strict", "loose") and ip_pack.summary:
