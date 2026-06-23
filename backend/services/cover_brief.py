@@ -171,11 +171,14 @@ _CINEMATIC_COHESION = (
 )
 
 # The site UI is near-black (--lv-bg #08080a). Without a nudge the model tends
-# to muddy images into that darkness; covers then disappear on the page. This
-# is defensive (avoid murky/oppressive), NOT a hard "make it bright" — so a
-# deliberately moody world (e.g. 民国 watercolor grey) keeps its tone while
-# staying legible. Feedback: 图配暗色网站要通透、别压抑死黑.
-_DARK_UI_HINT = "画面会在深色网站上陈列，整体保持通透、避免晦暗压抑。"
+# to muddy images into that darkness; covers then disappear on the page.
+# 2026-06-23: 用户偏好"清新亮色"——在原来的"通透不死黑"基础上再往清新明亮、干净高调的
+# 光线推一档（晨光 / 柔和高调 / 通透色调）。仍保留逃生口"除非世界本身气质压抑"，让刻意
+# 阴郁的世界（民国谍战、唐诡 grimdark）不被强行洗白。
+_DARK_UI_HINT = (
+    "画面会在深色网站上陈列，光线倾向清新明亮、干净通透（如晨光、柔和高调光），"
+    "色彩清爽不浑浊；除非世界本身气质就压抑，否则避免暗沉死黑。"
+)
 
 
 def _world_subject_and_essence(brief: CoverBrief, ip_fallback: bool = False) -> tuple[str, str]:
@@ -338,6 +341,7 @@ def build_character_portrait_prompt(
         f"为《{world_brief.world_name}》中的角色「{char.name}」（{descriptor}）"
         f"创作一幅{style_cue}2:3 人物海报。"
         "眼线落在画面上三分位附近（前端将自动裁出圆形头像）。"
+        "光线倾向清新明亮、干净通透，肤色与画面色彩清爽不浑浊（除非角色气质本就阴郁）。"
         "画面中不要出现任何文字、姓名标签或字幕。"
         f"{_LOGO_NEGATIVE}"
         "2:3 竖版。"
