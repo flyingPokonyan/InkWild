@@ -191,9 +191,9 @@ export function GenerationLoadingScreen({
                 <div
                   className="lv-t-micro tabular-nums"
                   style={{
-                    fontFamily: "var(--lv-font-mono)",
+                    fontFamily: "var(--lv-font-sans)",
                     color: "var(--lv-ink-4)",
-                    letterSpacing: "0.04em",
+                    letterSpacing: "0.02em",
                   }}
                 >
                   <span style={{ color: "var(--lv-ink-3)" }}>{progressPct}%</span>
@@ -259,7 +259,7 @@ export function GenerationLoadingScreen({
               <span
                 className="lv-t-micro tabular-nums"
                 style={{
-                  fontFamily: "var(--lv-font-mono)",
+                  fontFamily: "var(--lv-font-sans)",
                   color: "var(--lv-ink-4)",
                 }}
               >
