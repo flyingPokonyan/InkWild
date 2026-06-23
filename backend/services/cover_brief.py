@@ -150,19 +150,24 @@ def derive_character_reference_anchor(
 
 # Shared trailing negative. Kept short — the validation experiments showed that
 # long negative lists do not improve compliance and sometimes confuse the model.
-_LOGO_NEGATIVE = "不要 logo、品牌、奖项、发行日期、电视台署名。"
+# 演员表 added 2026-06-23: gpt-image-2 likes to render a cast-credit strip at the
+# bottom of poster-style key art; naming it explicitly removes it (user feedback).
+_LOGO_NEGATIVE = "不要出现 logo、品牌、演员表、奖项、发行日期、电视台署名。"
 
-# Cinematic film-still framing + anti-collage. For big known IPs the dominant
-# failure mode is the "promo key-art montage" — the model stacks every iconic
-# symbol (throne + dragon + sigils + map …) into one over-saturated poster,
-# because that IS the IP's most common key-art on the open web. Asking for a
-# single cohesive film still and explicitly naming the collage/poster form as
-# off-limits pulls it off that mean — without specifying a concrete scene (the
-# cover stays a portrait of the IP's overall mood, not a depiction of one
-# moment). Feedback 2026-06-15.
+# Cinematic KEY ART framing + anti-collage.
+#
+# 2026-06-15 这里曾改成"电影剧照 / 像一帧电影镜头" + 明令"不要海报感"，目的是治大 IP 的
+# montage 失败模式（模型把龙椅+龙纹+地图所有标志元素堆成一张过饱和拼贴海报）。但这是
+# 矫枉过正：剧照=平铺单帧截图，把 gpt-image-2 最擅长的"讲究构图 + 戏剧光影"的影视级 key
+# art 能力一起压住了。2026-06-23 用户实测「影视级海报 + 不要 logo/演员表」远好于现状——
+# 真正的病不是"海报形态"而是 montage + logo/演员表/字幕这些商业垃圾。
+#
+# 现版本：拥抱影视级海报 / 电影 key art 的质感（构图、光影、景深、高级感），但保留反 montage
+# （单一统一焦点、不堆砌拼贴）。商业垃圾交给 _LOGO_NEGATIVE 兜。
 _CINEMATIC_COHESION = (
-    "整体呈现电影剧照质感：浑然一体、有统一焦点与景深的单一画面，像一帧电影镜头。"
-    "不要做成多个标志性元素拼贴、分屏或海报式堆叠的合成图，也不要高饱和的商业宣传海报感。"
+    "整体呈现影视级海报 / 电影 key art 的质感：构图讲究、有明确视觉主体、"
+    "戏剧性的光影与景深，精致考究、有高级感。"
+    "保持单一、浑然一体的画面与统一焦点，不要把多个标志性元素拼贴、分屏或堆叠成大杂烩。"
 )
 
 # The site UI is near-black (--lv-bg #08080a). Without a nudge the model tends

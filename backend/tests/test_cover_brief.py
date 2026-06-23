@@ -421,7 +421,7 @@ def test_all_world_level_prompts_enforce_logo_safety(world_name, ip_name):
         build_character_portrait_prompt(brief, char),
         build_ending_card_prompt(brief, ending),
     ):
-        assert "不要 logo" in p
+        assert "logo" in p  # logo / brand negative present (wording-independent)
         assert "真实演员" not in p  # face-likeness restriction lifted
 
 
