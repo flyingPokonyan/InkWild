@@ -16,6 +16,7 @@
 import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 import structlog
@@ -650,6 +651,7 @@ async def build_ip_knowledge_pack(
     llm_router: Any,
     tavily: Any,  # retained for signature compat; baidu/wiki/tavily 已退役不再使用
     grok_provider: Any | None = None,
+    progress_cb: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> IPKnowledgePack:
     """主入口（grok 多角度并行研究，2026-06-22 重写）。
 
@@ -661,14 +663,28 @@ async def build_ip_knowledge_pack(
         Stage 5  quality gate                   (characters < _min_pack_characters → IPPackUnderfilledError)
 
     冷门 IP 主 LLM 不熟悉 → Stage 1 给空 / 单薄；grok 无果时走 pre-extract 兜底。
+
+    progress_cb(code, message)：在每个真实子阶段边界回报，让前端 loading 标题/进度随检索→
+    抽取→核对→查漏→整理逐步推进（而不是整段卡在"IP 知识抽取"+静止进度条）。
     """
+    async def _emit(code: str, message: str) -> None:
+        if progress_cb is None:
+            return
+        try:
+            await progress_cb(code, message)
+        except Exception:  # noqa: BLE001 — 进度回报不能影响主流程
+            pass
+
     if rec.kind not in ("known_ip", "hybrid") or not rec.ip_name:
         return _empty_pack(rec, fidelity_mode)
 
     ip_type = rec.ip_type or "other"
     target = _target_characters(ip_type)
+    ip_disp = rec.ip_name
     # 每轴目标取整体目标的一半——四轴并集覆盖整体目标，各轴聚焦自己那片挖深。
     per_axis_target = max(6, target // 2)
+
+    await _emit("searching", f"正在联网检索《{ip_disp}》的原作资料…")
 
     # === Stage 1 + 2 并发：pre-extract(训练知识) ∥ grok fan-out(网络语料) ===
     # 两者互相独立（pre-extract 不喂 passages、grok 用固定 axes 不依赖 pre-extract 结果），
@@ -704,6 +720,11 @@ async def build_ip_knowledge_pack(
         factions=len(candidates_pack.factions),
         summary_len=len(candidates_pack.summary),
     )
+    await _emit(
+        "extracted",
+        f"已检索原作资料，抽取到 {len(candidates_pack.characters)} 个角色 · "
+        f"{len(candidates_pack.places)} 个地点",
+    )
 
     # === Stage 3: ground & augment ===
     if not passages:
@@ -713,6 +734,7 @@ async def build_ip_knowledge_pack(
         pack.fidelity_mode = fidelity_mode
         pack.passages = []
     else:
+        await _emit("grounding", "正在核对史料、补全人物与设定细节…")
         pack = await _ground_and_augment(
             rec, candidates_pack, passages, fidelity_mode, llm_router,
             target_chars=target,
@@ -726,6 +748,7 @@ async def build_ip_knowledge_pack(
             break
         if grok_provider is None:
             break
+        await _emit("refining", "查漏补缺，补抓遗漏的角色与设定…")
         # 退死源后，补抓也走 grok：用缺失名拼一条聚焦 query。
         extra_passages, _ = await fetch_via_grok_search(
             rec.ip_name, ip_type, grok_provider, focus=" ".join(missing_names),
@@ -738,6 +761,7 @@ async def build_ip_knowledge_pack(
         )
 
     # === Stage 4.5: 归并名称变体（fan-out 多轴并发会让同一人出现多种叫法）===
+    await _emit("consolidating", "正在整理角色档案、归并别名…")
     pack.characters = await _consolidate_characters(pack.characters, rec, llm_router)
 
     # === Stage 5: quality gate ===

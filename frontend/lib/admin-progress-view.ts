@@ -33,9 +33,11 @@ const PHASE_LABELS: Record<string, string> = {
   script_images: "剧本配图",
 };
 
-// 世界生成 14 阶段权重（v2 _STAGE_INDEX 顺序），总和 100。
+// 世界生成阶段权重（v2 _STAGE_INDEX 顺序）。ip_research 仅 IP/复刻世界出现（原创即时跳过），
+// 它是最长的单步阶段之一，给足权重让进度条在那 3-4 分钟里真往前走而不是卡死。
 const WORLD_PHASE_WEIGHTS: Record<string, number> = {
   boot:             2,
+  ip_research:     10,
   research_pack:    7,
   world_base:       7,
   lore_dimensions:  5,
@@ -67,6 +69,7 @@ const SCRIPT_PHASE_WEIGHTS: Record<string, number> = {
 
 const WORLD_PHASE_ORDER = [
   "boot",
+  "ip_research",
   "research_pack",
   "world_base",
   "lore_dimensions",
@@ -131,6 +134,17 @@ const PHASE_CODE_PROGRESS: Record<string, Record<string, number>> = {
     started: 0.42,
     drafting_pulse: 0.74,
     subtask_completed: 0.85,
+    completed: 1,
+  },
+  // ip_research 内部真实子阶段（backend ip_research_pipeline 的 progress_cb 边界）。
+  // max() 取值 → 单调推进；pulse 无项走 0.32 fallback，被 max 吃掉不回退。
+  ip_research: {
+    started: 0.05,
+    searching: 0.15,
+    extracted: 0.45,
+    grounding: 0.65,
+    refining: 0.82,
+    consolidating: 0.92,
     completed: 1,
   },
   research_pack: {

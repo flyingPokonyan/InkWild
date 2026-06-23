@@ -28,6 +28,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Callable
 from typing import Any, AsyncIterator, Coroutine, TypeVar
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -834,6 +835,15 @@ class WorldCreatorAgentV2:
         pack = None
         underfill_error: IPPackUnderfilledError | None = None
         build_error: Exception | None = None
+        # 子阶段里程碑通道：pipeline 在检索/抽取/核对/查漏/整理边界 push (code, message)，
+        # 经 _run_with_pulse 的 side_channel 变成 loading 标题更新；pulse 沿用最近一条子阶段
+        # 文案（sticky），避免 7s 心跳把刚显示的"已抽取 N 角色"又冲回通用文案。
+        stage_channel: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+        async def _on_stage(code: str, message: str) -> None:
+            await stage_channel.put((code, message))
+
+        last_stage_msg = "仍在抽取 IP 知识，已联网检索中…"
         try:
             work = build_ip_knowledge_pack(
                 rec=rec,
@@ -841,12 +851,18 @@ class WorldCreatorAgentV2:
                 llm_router=self.llm,
                 tavily=tavily,
                 grok_provider=grok_provider,
+                progress_cb=_on_stage,
             )
-            async for item in self._run_with_pulse("ip_research", work):
+            async for item in self._run_with_pulse(
+                "ip_research", work, side_channel=stage_channel
+            ):
                 if isinstance(item, tuple) and item[0] == "result":
                     pack = item[1]
                 elif isinstance(item, dict):
-                    item.setdefault("message", "仍在抽取 IP 知识，已联网检索中…")
+                    if item.get("code") == "pulse":
+                        item["message"] = last_stage_msg
+                    elif item.get("message"):
+                        last_stage_msg = item["message"]
                     yield item
         except IPPackUnderfilledError as exc:
             logger.warning(
@@ -2214,50 +2230,45 @@ class WorldCreatorAgentV2:
             subtask_index=0,
         )
 
-        # Run image generation under a pulse loop. Without this, gpt-image-2
-        # calls (30-90s each, 6 in parallel) leave the SSE stream silent for
-        # minutes; the browser / Docker network layer drops the chunked
-        # transfer and the client surfaces "网络错误" before the first image
-        # comes back. The pulse also gives the user a "still working" signal.
+        def _img_label(done: int, tot: int, completed_index: int) -> str:
+            key_str = all_tasks[completed_index][0]
+            return (
+                "Hero 主图" if key_str == "hero"
+                else "列表封面" if key_str == "cover"
+                else (key_str[4:] + " 头像") if key_str.startswith("npc:")
+                else key_str
+            )
+
+        # Run image generation with LIVE per-image completion. gpt-image-2 calls
+        # (30-90s each, 6 in parallel) finish staggered → the headline ticks
+        # "已生成 3/9（华妃 头像）" as each lands, instead of a frozen pulse then a
+        # burst of subtask events at the end. The pulse still covers the silent
+        # gap before the first image (keeps the SSE chunked transfer alive so the
+        # browser / Docker layer doesn't surface "网络错误").
         coros = [gen_image(k, p, ar, cat) for k, p, ar, cat in all_tasks]
 
-        async def _run_all_images() -> list:
-            return await asyncio.gather(*coros, return_exceptions=True)
-
         raw: list = []
-        async for item in self._run_with_pulse("images", _run_all_images()):
+        last_msg = f"正在生成 {total} 张插画（hero + 列表封面 + 角色头像），请稍候…"
+        async for item in self._run_concurrent_with_pulse(
+            "images", coros, label_fn=_img_label
+        ):
             if isinstance(item, tuple) and item[0] == "result":
                 raw = item[1]  # type: ignore[assignment]
             elif isinstance(item, dict):
-                item.setdefault(
-                    "message",
-                    f"正在生成 {total} 张插画（hero + 列表封面 + 角色头像），请稍候…",
-                )
+                if item.get("code") == "pulse":
+                    item["message"] = last_msg
+                elif item.get("message"):
+                    last_msg = item["message"]
                 yield item
 
         results: dict[str, tuple[str, object | None]] = {}  # key -> (url, ImageResult|None)
         for idx, item in enumerate(raw):
             if isinstance(item, BaseException):
                 logger.warning("image_task_exception", index=idx, error=str(item))
-                key = all_tasks[idx][0]
-                results[key] = (IMAGE_PLACEHOLDER_URL, None)
+                results[all_tasks[idx][0]] = (IMAGE_PLACEHOLDER_URL, None)
             else:
                 key, url, result = item
                 results[key] = (url, result)
-            key_str = all_tasks[idx][0]
-            label = (
-                "Hero 主图" if key_str == "hero"
-                else "列表封面" if key_str == "cover"
-                else (key_str[4:] + " 头像") if key_str.startswith("npc:")
-                else key_str
-            )
-            yield progress_event(
-                "images", "subtask_completed",
-                subtask_key=key_str,
-                subtask_index=idx + 1,
-                subtask_total=total,
-                payload_summary={"label": label},
-            )
 
         hero_url, hero_result = results.get("hero", (IMAGE_PLACEHOLDER_URL, None))
         cover_url, _cover_result = results.get("cover", (IMAGE_PLACEHOLDER_URL, None))
@@ -2407,11 +2418,15 @@ class WorldCreatorAgentV2:
         work: Coroutine[Any, Any, T],
         *,
         interval: float = 7.0,
+        side_channel: "asyncio.Queue[tuple[str, str]] | None" = None,
     ) -> AsyncIterator[dict | tuple[str, T]]:
         """Run `work` while emitting periodic `pulse` progress events.
 
         Yields:
             - dict progress events (code == "pulse") every `interval` seconds
+            - dict progress events from `side_channel` (real sub-stage milestones
+              pushed by `work` as (code, message)) — these advance the loading
+              headline/progress instead of the generic frozen pulse
             - a final tuple ("result", value) when work succeeds
 
         Raises whatever exception `work` raises (after cleaning up the tasks).
@@ -2431,14 +2446,24 @@ class WorldCreatorAgentV2:
                 await asyncio.sleep(interval)
                 await queue.put(("pulse", None))
 
+        async def drainer() -> None:
+            assert side_channel is not None
+            while True:
+                code, message = await side_channel.get()
+                await queue.put(("stage", (code, message)))
+
         work_task = asyncio.create_task(runner())
         pulse_task = asyncio.create_task(pulser())
+        drain_task = asyncio.create_task(drainer()) if side_channel is not None else None
 
         try:
             while True:
                 kind, payload = await queue.get()
                 if kind == "pulse":
                     yield progress_event(phase, "pulse")
+                elif kind == "stage":
+                    code, message = payload
+                    yield progress_event(phase, code, message=message)
                 elif kind == "result":
                     yield ("result", payload)
                     return
@@ -2446,14 +2471,72 @@ class WorldCreatorAgentV2:
                     raise payload  # type: ignore[misc]
         finally:
             pulse_task.cancel()
+            if drain_task is not None:
+                drain_task.cancel()
             if not work_task.done():
                 work_task.cancel()
             # Drain cancellation silently.
-            for task in (pulse_task, work_task):
+            for task in (pulse_task, drain_task, work_task):
+                if task is None:
+                    continue
                 try:
                     await task
                 except BaseException:  # noqa: BLE001
                     pass
+
+    async def _run_concurrent_with_pulse(
+        self,
+        phase: str,
+        coros: list[Coroutine[Any, Any, Any]],
+        *,
+        interval: float = 7.0,
+        label_fn: Callable[[int, int, int], str] | None = None,
+    ) -> AsyncIterator[dict | tuple[str, list]]:
+        """Run `coros` concurrently, emitting a `subtask_completed` progress event
+        AS each finishes (live N/M), plus a `pulse` during silent gaps.
+
+        Unlike gather-then-replay (which fires all subtask events in a burst at the
+        end → frozen feel), this surfaces real progress while the work runs.
+
+        ``label_fn(done_count, total, completed_index)`` → headline message for that
+        completion. Yields progress dicts and a final ("result", results) where
+        ``results`` is aligned to ``coros`` order (exceptions captured in place).
+        """
+        tasks = [asyncio.ensure_future(c) for c in coros]
+        index_of = {t: i for i, t in enumerate(tasks)}
+        total = len(tasks)
+        results: list[Any] = [None] * total
+        pending: set = set(tasks)
+        done_count = 0
+        try:
+            while pending:
+                finished, pending = await asyncio.wait(
+                    pending, timeout=interval, return_when=asyncio.FIRST_COMPLETED
+                )
+                if not finished:
+                    yield progress_event(phase, "pulse")
+                    continue
+                for t in finished:
+                    i = index_of[t]
+                    try:
+                        results[i] = t.result()
+                    except Exception as exc:  # noqa: BLE001
+                        results[i] = exc
+                    done_count += 1
+                    kwargs: dict[str, Any] = {
+                        "subtask_index": done_count,
+                        "subtask_total": total,
+                    }
+                    if label_fn is not None:
+                        # 传 label 让 generation_feedback 的模板套出
+                        # 「{label}」绘制完成 · {index}/{total}，而不是自己拼整句。
+                        kwargs["label"] = label_fn(done_count, total, i)
+                    yield progress_event(phase, "subtask_completed", **kwargs)
+            yield ("result", results)
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
 
     # =========================================================================
     # Script v2 — public entry point

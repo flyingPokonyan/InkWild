@@ -370,6 +370,42 @@ async def test_run_with_pulse_propagates_exception():
 
 
 @pytest.mark.asyncio
+async def test_run_concurrent_with_pulse_emits_live_completion_in_order():
+    """并发助手应在每个 coro 完成时 *实时* 发 subtask_completed（非批量补发），
+    且 ('result', results) 按 coros 原顺序对齐、异常就地捕获。"""
+    import asyncio as _asyncio
+
+    agent = WorldCreatorAgentV2(llm=None, image_gen=None, broker=None)
+
+    async def quick(v):
+        await _asyncio.sleep(0.02 * v)
+        return f"r{v}"
+
+    async def boom():
+        await _asyncio.sleep(0.01)
+        raise RuntimeError("x")
+
+    coros = [quick(3), boom(), quick(1)]
+    indices = []
+    result = None
+    async for item in agent._run_concurrent_with_pulse(
+        "images", coros, interval=5.0,
+        label_fn=lambda done, tot, i: f"img{i}",
+    ):
+        if isinstance(item, tuple) and item[0] == "result":
+            result = item[1]
+        elif isinstance(item, dict) and item.get("code") == "subtask_completed":
+            indices.append(item["meta"]["subtask_index"])
+
+    # 3 个都实时报了完成，index 单调递增（非批量补发）
+    assert indices == [1, 2, 3]
+    # 结果按原 coros 顺序对齐：idx0=quick(3), idx1=boom(异常), idx2=quick(1)
+    assert result[0] == "r3"
+    assert isinstance(result[1], RuntimeError)
+    assert result[2] == "r1"
+
+
+@pytest.mark.asyncio
 async def test_run_with_pulse_returns_immediately_for_fast_work():
     agent = WorldCreatorAgentV2(llm=None, image_gen=None, broker=None)
 
