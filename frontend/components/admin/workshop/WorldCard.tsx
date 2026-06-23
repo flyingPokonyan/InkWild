@@ -81,18 +81,24 @@ export function WorldCard(props: PublishedProps | DraftProps) {
           className={`workshop-cover is-draft is-${status}`}
           aria-label={t(statusLabelKey)}
         >
-          {status === "generating" && (
+          {status === "generating" ? (
             <div className="workshop-draft-skel lv-skel" aria-hidden />
+          ) : props.draft.cover_image ? (
+            // 草稿已有封面图 → 直接展示（之前只显示占位符，封面被埋没）
+            <img
+              className="workshop-cover-img"
+              src={props.draft.cover_image}
+              alt={props.draft.name || t("untitled")}
+              loading="lazy"
+            />
+          ) : (
+            <div className="workshop-draft-mark">
+              <span className="workshop-draft-mark-icon" aria-hidden>
+                {status === "failed" ? "!" : "+"}
+              </span>
+              <span className="lv-t-caps">{t(captionKey)}</span>
+            </div>
           )}
-          <div className="workshop-draft-mark">
-            <span
-              className={`workshop-draft-mark-icon${status === "generating" ? " is-spinner" : ""}`}
-              aria-hidden
-            >
-              {status === "static" ? "+" : status === "failed" ? "!" : ""}
-            </span>
-            <span className="lv-t-caps">{t(captionKey)}</span>
-          </div>
           <span className={`workshop-status is-${status}`}>
             {t(statusLabelKey)}
           </span>

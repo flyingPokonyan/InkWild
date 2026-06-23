@@ -356,6 +356,8 @@ export interface AdminWorldDraftListItem {
   name: string;
   description: string;
   world_id: string | null;
+  cover_image?: string | null;
+  hero_image?: string | null;
   updated_at: string;
   generation_status?: AdminGenerationTaskSummary["status"] | null;
   generation_task_id?: string | null;
