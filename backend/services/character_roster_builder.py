@@ -271,14 +271,32 @@ async def build_character_roster(
         # 是为批量 JSON 生成防截断，对这一步反而伤害约束遵守（甄嬛传漏掉皇帝/华妃/皇后
         # 的直接诱因之一）。批量角色详情阶段（下方 build_characters_in_batches）不传，
         # 保持关。
+        # max_tokens 给足：开思考时 reasoning_content 会先吃掉预算（实测大 IP 规划
+        # 推理可达 ~8k token），8192 会把后面真正的 roster JSON 挤没 → 吐空 → 0 角色。
+        # 抬到 16384，让推理 + 输出都装得下。
         text = await _collect_stream_text(
             llm_router,
             system=_ROSTER_SYSTEM,
             messages=[{"role": "user", "content": user_content}],
-            max_tokens=8192,
+            max_tokens=16384,
             reasoning=True,
         )
         data = _extract_json_from_text(text)
+        if data is None:
+            # 兜底：万一网关因别的原因（连接截断等）仍吐空，降级关思考重试一次
+            # （admin_generation 槽默认行为，不堆推理），保证坏网关下也能产出 roster。
+            logger.warning(
+                "roster_json_parse_failed_retrying_no_reasoning",
+                text_preview=text[:300],
+            )
+            text = await _collect_stream_text(
+                llm_router,
+                system=_ROSTER_SYSTEM,
+                messages=[{"role": "user", "content": user_content}],
+                max_tokens=16384,
+                reasoning=False,
+            )
+            data = _extract_json_from_text(text)
         if data is None:
             logger.warning("roster_json_parse_failed", text_preview=text[:300])
             return []

@@ -301,6 +301,23 @@ async def test_roster_planning_runs_with_reasoning_on():
     assert router._calls["last_reasoning"] is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.no_db
+async def test_roster_empty_output_retries_without_reasoning():
+    """开思考吐空（OpenCode 截断场景）→ 降级关思考重试一次仍能产出 roster。"""
+    # 第一次（reasoning=True）返回空字符串模拟截断；第二次（reasoning=False）正常返回。
+    router = _make_router([
+        "",
+        '{"roster":[{"name":"梅长苏","role_tag":"主角","is_image_target":true}]}',
+    ])
+    roster = await build_character_roster("权谋世界", "权谋", "古代", IPCanon(), [], [], router)
+    assert len(roster) == 1
+    assert roster[0].name == "梅长苏"
+    # 成功的那次是降级后的 reasoning=False
+    assert router._calls["last_reasoning"] is False
+    assert router._calls["n"] == 2
+
+
 # ---- critic 阶段确定性兜底：must_have 详情阶段丢失也补回 ----
 
 
