@@ -1526,15 +1526,25 @@ function WorldDraftCard({
         {/* Background gradient covers */}
         <div className={`world-cover-bg ${getGenreCoverClass((draft as { genre?: string | null }).genre, draft.name)}`} />
 
-        {/* Central visual indicator */}
-        <div className="draft-mark">
-          <div className={`draft-mark-icon ${isGenerating ? "spinner" : ""}`}>
-            {isFailed ? "!" : isGenerating ? "" : "+"}
+        {/* Cover image if the draft already has one (之前从不展示草稿封面，封面被埋没) */}
+        {!isGenerating && draft.cover_image && (
+          <div
+            className="world-cover-bg"
+            style={{ backgroundImage: `url(${ossThumb(draft.cover_image, 520)})` }}
+          />
+        )}
+
+        {/* Central visual indicator —— 仅在没有封面（或生成中）时显示占位 */}
+        {(isGenerating || !draft.cover_image) && (
+          <div className="draft-mark">
+            <div className={`draft-mark-icon ${isGenerating ? "spinner" : ""}`}>
+              {isFailed ? "!" : isGenerating ? "" : "+"}
+            </div>
+            <span className="lv-t-caps" style={{ fontSize: 10 }}>
+              {isFailed ? "生成失败 · 重试" : isGenerating ? "构筑场景中" : "待出封面"}
+            </span>
           </div>
-          <span className="lv-t-caps" style={{ fontSize: 10 }}>
-            {isFailed ? "生成失败 · 重试" : isGenerating ? "构筑场景中" : "待出封面"}
-          </span>
-        </div>
+        )}
 
         {/* Left top badges */}
         <span className={`cover-status ${statusClass}`}>
