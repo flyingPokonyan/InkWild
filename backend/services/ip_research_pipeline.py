@@ -35,7 +35,10 @@ logger = structlog.get_logger()
 
 MAX_PASSAGES = 40
 MAX_PASSAGE_CHARS = 2000
-MAX_REFETCH_ROUNDS = 2
+# 自检补抓轮数。每轮 = 1 次 grok + 重新 ground 整个 pack（~100s），是 IP 抽取最大的墙钟
+# 开销。2→1：must_have 已由下游 roster `_ensure_must_have` + critic `_backfill` 确定性兜底，
+# 研究层不必再补抓两轮，一轮足够捞回常见遗漏，省约 100s。
+MAX_REFETCH_ROUNDS = 1
 
 # ── 多角度 fan-out 轴（C1/C2）────────────────────────────────────────────────
 # 固定 4 类 coverage role 保证 merge 稳定；grok query 措辞 + pre-extract 聚焦提示按轴定。
@@ -667,15 +670,23 @@ async def build_ip_knowledge_pack(
     # 每轴目标取整体目标的一半——四轴并集覆盖整体目标，各轴聚焦自己那片挖深。
     per_axis_target = max(6, target // 2)
 
-    # === Stage 1: per-axis pre-extract (并发) → merge ===
-    pre_results = await asyncio.gather(
-        *[
-            _pre_extract_canon(
-                rec, llm_router, focus_hint=hint, target_chars=per_axis_target,
-            )
-            for _, _, hint in _RESEARCH_AXES
-        ],
-        return_exceptions=True,
+    # === Stage 1 + 2 并发：pre-extract(训练知识) ∥ grok fan-out(网络语料) ===
+    # 两者互相独立（pre-extract 不喂 passages、grok 用固定 axes 不依赖 pre-extract 结果），
+    # 只在 Stage 3 ground 时汇合 → 串行白白多等一段，并发可省约一个 stage 的墙钟时间。
+    async def _run_pre_extract() -> list:
+        return await asyncio.gather(
+            *[
+                _pre_extract_canon(
+                    rec, llm_router, focus_hint=hint, target_chars=per_axis_target,
+                )
+                for _, _, hint in _RESEARCH_AXES
+            ],
+            return_exceptions=True,
+        )
+
+    pre_results, (passages, _cand_names) = await asyncio.gather(
+        _run_pre_extract(),
+        _gather_via_grok_fanout(rec, grok_provider),
     )
     pre_packs = [p for p in pre_results if isinstance(p, IPKnowledgePack)]
     for r in pre_results:
@@ -693,9 +704,6 @@ async def build_ip_knowledge_pack(
         factions=len(candidates_pack.factions),
         summary_len=len(candidates_pack.summary),
     )
-
-    # === Stage 2: grok fan-out passages ===
-    passages, _cand_names = await _gather_via_grok_fanout(rec, grok_provider)
 
     # === Stage 3: ground & augment ===
     if not passages:
