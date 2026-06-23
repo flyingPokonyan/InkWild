@@ -450,12 +450,34 @@ _WORLD_BASE_SYSTEM = """你是一个互动叙事世界设计师。
 
 要求：
 - **name 字段是硬约束：必须独立精炼，4-12 个汉字，禁止超过 20 字，禁止把整段描述当作 name**
-- **locations 必须 3-8 个，不可空数组**
+- **locations 数量按世界规模浮动，不可空数组**：小世界（单一场景/短篇）4-6 个即可，
+  大世界（宏大 IP / 多势力 / 多主角）应铺到 12-18 个，让每个主要角色/势力都有自己的舞台，
+  再加上关键剧情场景。宁缺毋滥不硬凑，但**世界大就该充实，不要压缩成几个公共场景**。
+  下方 user 消息若给出了具体的目标地点数 / 原作地点清单，以那个为准
 - base_setting 和 free_setting 可共享世界观，但各有侧重
 - **不要**在 base_setting / free_setting 中给玩家起具体的名字（例如"你叫 XXX"）。
   玩家身份由后续 playable 阶段确定，世界设定只描述背景与环境。
 - 只输出 JSON，不含任何解释文字
 """
+
+
+def _location_target_range(
+    ip_pack: "IPKnowledgePack | None", ip_type: str
+) -> tuple[int, int]:
+    """地点数量按世界规模浮动（与角色 roster 同理，不再写死 3-8）。
+
+    IP 世界：研究层抓到的地点数 + 角色数就是规模信号（research 已按 ip_type 缩放过），
+    用它推导一个目标区间——角色越多越需要更多舞台。原创世界缺强信号，按题材给适中默认。
+    """
+    if ip_pack and ip_pack.places:
+        n_places = len(ip_pack.places)
+        n_chars = len(ip_pack.characters)
+        # 角色多 → 需要更多居所/舞台；研究地点数也是规模上界参考
+        high = min(18, max(n_places, n_chars // 2 + 3, 6))
+        low = max(5, high - 4)
+        return low, high
+    base = {"tv": 12, "novel": 12, "anime": 10, "game": 10}.get(ip_type or "", 8)
+    return max(4, base - 4), base
 
 
 class WorldCreatorAgentV2:
@@ -1066,10 +1088,15 @@ class WorldCreatorAgentV2:
         ip_pack = self._last_ip_pack
         fidelity = self._fidelity_mode
 
+        ip_type = ip_pack.ip_type if ip_pack else ""
+        loc_low, loc_high = _location_target_range(ip_pack, ip_type)
+
         user_message = (
             f"世界描述：{description}\n"
             f"题材：{genre or '未指定'}\n"
             f"时代：{era or '未指定'}\n"
+            f"\n【地点规模】本世界目标地点数约 {loc_low}-{loc_high} 个"
+            f"（按世界体量定，宁缺毋滥但不要压缩）。\n"
         )
 
         # ONLY render IP context when pack exists AND fidelity is non-none
@@ -1080,11 +1107,12 @@ class WorldCreatorAgentV2:
             if must_have_places:
                 if fidelity == "strict":
                     user_message += (
-                        f"\n【强约束】locations 必须从以下原作地点中选用，可微调描述但**禁止新增同类地点**：\n"
+                        f"\n【强约束】locations 必须从以下原作地点中选用，**尽量用全**"
+                        f"（共 {len(must_have_places) + len(optional_places)} 个），可微调描述但禁止新增同类地点：\n"
                         f"必含：{', '.join(must_have_places)}\n"
                     )
                     if optional_places:
-                        user_message += f"可选扩展：{', '.join(optional_places)}\n"
+                        user_message += f"同时尽量纳入：{', '.join(optional_places)}\n"
                 else:  # loose
                     user_message += (
                         f"\n【参考】原作核心地点：{', '.join(must_have_places)}\n"
@@ -1099,7 +1127,8 @@ class WorldCreatorAgentV2:
                     self.llm,
                     system=_WORLD_BASE_SYSTEM,
                     messages=[{"role": "user", "content": user_message}],
-                    max_tokens=2048,
+                    # 地点规模放开后输出更长（多地点 + base/free_setting），抬预算防截断
+                    max_tokens=3072,
                 ),
                 max_attempts=3,
                 on_retry=self._make_retry_logger("world_base"),
