@@ -9,6 +9,9 @@ class GameStartRequest(BaseModel):
     mode: str = "script"
     script_id: str | None = None
     authors_note: str | None = None
+    # 自由模式「起点」选择：world.free_start_stages.stages[].id。仅自由模式有意义；
+    # 为空 / 非自由模式 / 世界无起点预设 → 走老的固定 initial_location 开局。
+    start_stage_id: str | None = None
     # 开新局前先放弃指定的旧局。前端在 start 页检测到同 (world, script/character)
     # 还有 active session 时，用户点「放弃旧的开新」会把那个 session id 传上来。
     force_abandon_session_id: str | None = None

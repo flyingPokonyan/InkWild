@@ -191,6 +191,28 @@ export interface ScriptDTO {
   playable_character_ids: string[];
 }
 
+export interface StartStageRelation {
+  npc: string;
+  standing: string;
+}
+
+export interface StartStage {
+  id: string;
+  milestone: string; // 进度里程碑（炼气期 / 熹贵妃）—— 行标题主体
+  subtitle: string; // 情境定位（七玄门少年）
+  tagline: string; // 节奏取向（爽感流，开局就有分量）
+  order: number;
+  start_location: string;
+  opening_framing: string;
+  known_relations: StartStageRelation[];
+}
+
+export interface FreeStartStages {
+  // 这套阶段属于哪个可玩角色（主角）。前端据此判断「选中的是不是主角」。
+  protagonist_character_id: string;
+  stages: StartStage[];
+}
+
 export interface WorldDetail {
   id: string;
   name: string;
@@ -205,6 +227,7 @@ export interface WorldDetail {
   has_script_mode: boolean;
   characters: CharacterDTO[];
   scripts: ScriptDTO[];
+  free_start_stages?: FreeStartStages | null;
 }
 
 export interface LocationDraft {

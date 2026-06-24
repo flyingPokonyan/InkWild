@@ -95,6 +95,12 @@ async def get_world(
             hero_image=images["hero_image"],
             free_setting=world.free_setting,
             has_script_mode=bool(world.script_setting) or len(scripts) > 0,
+            free_start_stages=(
+                world.free_start_stages
+                if isinstance(world.free_start_stages, dict)
+                and world.free_start_stages.get("stages")
+                else None
+            ),
             characters=[
                 CharacterDTO(
                     id=str(character.id),

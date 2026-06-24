@@ -57,6 +57,7 @@ interface GameStore {
     scriptName?: string,
     authorsNote?: string,
     forceAbandonSessionId?: string,
+    startStageId?: string,
   ) => Promise<string | null>;
   sendAction: (actionText: string) => Promise<void>;
   /** 玩家主动退场：生成"落幕白"软收场（ending_type=withdrawn），经 ending 事件落到结局页。 */
@@ -166,6 +167,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     scriptName,
     authorsNote,
     forceAbandonSessionId,
+    startStageId,
   ) => {
     let openingNarrative = "";
     const startGate = createStartGameGate();
@@ -197,6 +199,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         script_id: scriptId || undefined,
         authors_note: authorsNote || undefined,
         force_abandon_session_id: forceAbandonSessionId || undefined,
+        start_stage_id: startStageId || undefined,
       },
       {
         onSessionCreated: (data) => {

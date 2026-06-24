@@ -336,6 +336,7 @@ async def start_game(
         req.authors_note,
         req.force_abandon_session_id,
         is_admin=current_user.is_admin,
+        start_stage_id=req.start_stage_id,
     )
     return EventSourceResponse(
         _stream_with_credits(current_user.id, action="game", session_id=None, raw_agen=raw),

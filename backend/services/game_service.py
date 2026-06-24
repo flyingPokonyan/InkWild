@@ -222,6 +222,7 @@ class GameService:
         authors_note: str | None = None,
         force_abandon_session_id: str | None = None,
         is_admin: bool = False,
+        start_stage_id: str | None = None,
     ) -> AsyncIterator[dict]:
         # 用户在 start 页选择「放弃旧的开新」时，先原子地把旧 session 标为 abandoned，
         # 再走正常的 start 流程；两步在同一事务串行，避免半态。
@@ -265,6 +266,32 @@ class GameService:
             elif not world.script_setting:
                 raise AppError(40008, "当前世界没有可用剧本")
 
+        # 自由模式「人生进度」起点：仅自由模式 + 世界配了 free_start_stages + 选的是主角
+        # + stage_id 命中，四者俱全才生效；否则 None，走老的固定 initial_location 开局。
+        # （spec docs/plans/2026-06-24-free-start-stages.md）
+        start_stage: dict | None = None
+        if mode == "free" and start_stage_id and isinstance(world.free_start_stages, dict):
+            fss = world.free_start_stages
+            if str(fss.get("protagonist_character_id") or "") == str(character.id):
+                start_stage = next(
+                    (
+                        s
+                        for s in (fss.get("stages") or [])
+                        if isinstance(s, dict) and str(s.get("id") or "") == str(start_stage_id)
+                    ),
+                    None,
+                )
+            if start_stage is None:
+                logger.info(
+                    "start_stage_unresolved",
+                    world_id=str(world.id),
+                    character_id=str(character.id),
+                    start_stage_id=start_stage_id,
+                )
+        start_location = (
+            str(start_stage.get("start_location") or "").strip() if start_stage else ""
+        ) or character.initial_location
+
         npcs = await self._load_session_npcs(
             db,
             world_id=world.id,
@@ -297,20 +324,34 @@ class GameService:
                 ],
             )
 
+        # 起点预设里「认识的人」直接覆盖 stance 推断：命中的 NPC 用预设的中高 trust +
+        # standing 备注，未命中的照旧走推断（或默认 trust=3）。无论 stance 开关都生效。
+        if start_stage:
+            for rel in start_stage.get("known_relations") or []:
+                if not isinstance(rel, dict):
+                    continue
+                npc_name = str(rel.get("npc") or "").strip()
+                if npc_name:
+                    stances[npc_name] = {
+                        "trust": 6,
+                        "mood": "正常",
+                        "note": str(rel.get("standing") or "").strip(),
+                    }
+
         def _seed_player_relation(npc_name: str) -> dict:
             s = stances.get(npc_name)
             if not s:
                 return {"trust": 3, "mood": "正常", "last_interaction": ""}
-            return {"trust": s["trust"], "mood": s["mood"], "note": s["note"], "last_interaction": ""}
+            return {"trust": s["trust"], "mood": s["mood"], "note": s.get("note", ""), "last_interaction": ""}
 
         initial_state = GameState(
             current_time="第1天·上午",
-            current_location=character.initial_location,
+            current_location=start_location,
             player_inventory=character.starting_inventory or [],
             discovered_clues=[],
             npc_relations={npc.name: _seed_player_relation(npc.name) for npc in npcs},
             triggered_events=[],
-            visited_locations=[character.initial_location],
+            visited_locations=[start_location],
             time_index=0,
         )
         if mode == "free":
@@ -369,12 +410,26 @@ class GameService:
         yield {"type": "state_update", "game_state": initial_state.to_dict()}
 
         world_data = await self._load_world_data(db, world, npcs, script_id=resolved_script_id, player_character=character)
-        opening_prompt = (
-            f"游戏开始。玩家扮演{character.name}（{character.description}），"
-            f"刚刚抵达{character.initial_location}。"
-            "请描写开场场景，营造氛围，介绍周围环境和可见的NPC；"
-            "把此刻在场的人都纳入本回合的在场名单，并给玩家三个具体、可立即上手的开场行动方向。"
+        opening_framing = (
+            str(start_stage.get("opening_framing") or "").strip() if start_stage else ""
         )
+        if opening_framing:
+            # 起点预设替换默认的「刚刚抵达 X」——后者假设全新到场，与「你已是元婴」类
+            # 进阶起点自相矛盾。开场定调直接喂处境，让旁白据此起笔。
+            opening_prompt = (
+                f"游戏开始。玩家扮演{character.name}（{character.description}）。"
+                f"此刻的处境：{opening_framing}"
+                f"故事从{start_location}展开。"
+                "请据此描写开场场景，营造氛围，介绍周围环境和可见的NPC；"
+                "把此刻在场的人都纳入本回合的在场名单，并给玩家三个具体、可立即上手的开场行动方向。"
+            )
+        else:
+            opening_prompt = (
+                f"游戏开始。玩家扮演{character.name}（{character.description}），"
+                f"刚刚抵达{start_location}。"
+                "请描写开场场景，营造氛围，介绍周围环境和可见的NPC；"
+                "把此刻在场的人都纳入本回合的在场名单，并给玩家三个具体、可立即上手的开场行动方向。"
+            )
 
         with usage_context(
             purpose="game", session_id=str(session.id), user_id=user_id

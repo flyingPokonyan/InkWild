@@ -33,12 +33,17 @@ import {
 import { useAuthStore } from "@/stores/auth";
 import { useGameStore } from "@/stores/game";
 
-type StepId = "mode" | "script" | "character" | "confirm";
+type StepId = "mode" | "script" | "character" | "stage" | "confirm";
 
-function getSteps(hasScriptMode: boolean, selectedMode: WorldMode | null): StepId[] {
+function getSteps(
+  hasScriptMode: boolean,
+  selectedMode: WorldMode | null,
+  hasStageStep: boolean,
+): StepId[] {
   if (!selectedMode) return ["mode"];
   if (selectedMode === "script" && hasScriptMode) return ["mode", "script", "character", "confirm"];
-  return ["mode", "character", "confirm"];
+  // 自由模式：选完角色后，若该角色是主角且世界配了起点预设，插入「起点」步。
+  return hasStageStep ? ["mode", "character", "stage", "confirm"] : ["mode", "character", "confirm"];
 }
 
 type SelectionState = {
@@ -46,6 +51,7 @@ type SelectionState = {
   mode: WorldMode | null;
   script: string | null;
   character: string | null;
+  stage: string | null;
 };
 
 type SelectionAction =
@@ -54,6 +60,7 @@ type SelectionAction =
   | { type: "selectMode"; mode: WorldMode }
   | { type: "selectScript"; script: string }
   | { type: "selectCharacter"; character: string }
+  | { type: "selectStage"; stage: string }
   | { type: "advance" }
   | { type: "back" };
 
@@ -65,6 +72,7 @@ function selectionReducer(state: SelectionState, action: SelectionAction): Selec
         mode: action.mode,
         script: action.script,
         character: action.character,
+        stage: null,
       };
     case "presetScript":
       // 从剧本详情页深链进来：剧本已定，直接落到「选角色」步（mode→script→character = index 2）
@@ -73,13 +81,17 @@ function selectionReducer(state: SelectionState, action: SelectionAction): Selec
         mode: "script",
         script: action.script,
         character: action.character,
+        stage: null,
       };
     case "selectMode":
       return { ...state, mode: action.mode, stepIndex: 1 };
     case "selectScript":
       return { ...state, script: action.script, stepIndex: state.stepIndex + 1 };
     case "selectCharacter":
-      return { ...state, character: action.character, stepIndex: state.stepIndex + 1 };
+      // 换角色作废之前选的起点（不同角色是否有起点步会变）。
+      return { ...state, character: action.character, stage: null, stepIndex: state.stepIndex + 1 };
+    case "selectStage":
+      return { ...state, stage: action.stage, stepIndex: state.stepIndex + 1 };
     case "advance":
       return { ...state, stepIndex: state.stepIndex + 1 };
     case "back":
@@ -132,12 +144,14 @@ export default function PlaySetupPage() {
     mode: null,
     script: null,
     character: null,
+    stage: null,
   });
   const [authorsNote, setAuthorsNote] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [focusedScriptId, setFocusedScriptId] = useState<string | null>(null);
   const [focusedCharacterId, setFocusedCharacterId] = useState<string | null>(null);
+  const [focusedStageId, setFocusedStageId] = useState<string | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
@@ -165,9 +179,21 @@ export default function PlaySetupPage() {
     }
   }, [world, selection.mode, selection.character, presetMode, presetScriptId]);
 
+  // 自由模式起点：世界配了 free_start_stages，且当前选的角色就是那套阶段的主角。
+  const stageList = useMemo(() => {
+    const stages = world?.free_start_stages?.stages ?? [];
+    return [...stages].sort((a, b) => a.order - b.order);
+  }, [world]);
+  const hasStageStep = Boolean(
+    selection.mode === "free" &&
+      stageList.length > 0 &&
+      selection.character &&
+      world?.free_start_stages?.protagonist_character_id === selection.character,
+  );
+
   const steps = useMemo(
-    () => (world ? getSteps(world.has_script_mode, selection.mode) : (["mode"] as StepId[])),
-    [world, selection.mode],
+    () => (world ? getSteps(world.has_script_mode, selection.mode, hasStageStep) : (["mode"] as StepId[])),
+    [world, selection.mode, hasStageStep],
   );
   const totalSteps = steps.length;
   const safeStepIndex = Math.min(selection.stepIndex, totalSteps - 1);
@@ -181,6 +207,7 @@ export default function PlaySetupPage() {
     setPrevStepId(currentStepId);
     setFocusedScriptId(null);
     setFocusedCharacterId(null);
+    setFocusedStageId(null);
   }
 
   const canSelectScriptMode = Boolean(
@@ -339,6 +366,7 @@ export default function PlaySetupPage() {
       scriptName,
       authorsNote || undefined,
       forceAbandonSessionId || undefined,
+      hasStageStep ? selection.stage || undefined : undefined,
     );
 
     if (sessionId) {
@@ -348,7 +376,7 @@ export default function PlaySetupPage() {
 
     setStartError(useGameStore.getState().error || ts("startError", { message: "" }));
     setStarting(false);
-  }, [world, selection, authorsNote, starting, startGame, router, id, ts, forceAbandonSessionId, returnTo]);
+  }, [world, selection, authorsNote, starting, startGame, router, id, ts, forceAbandonSessionId, returnTo, hasStageStep]);
 
   if (isLoading || !world) {
     return (
@@ -386,6 +414,7 @@ export default function PlaySetupPage() {
     mode: { eyebrow: t("scriptMode") === "剧本模式" ? "模式" : "Mode", title: "" },
     script: { eyebrow: "剧本", title: "" },
     character: { eyebrow: "角色", title: "" },
+    stage: { eyebrow: "起点", title: "" },
     confirm: { eyebrow: "", title: "" },
   };
 
@@ -522,6 +551,130 @@ export default function PlaySetupPage() {
               description={focusedCharacter?.description}
               descriptionMaxChars={180}
             />
+          </div>
+        );
+      }
+
+      case "stage": {
+        // 静息/移动端无 hover 时，处境默认展示第一档（最早起点）。
+        const shownStage =
+          (focusedStageId ? stageList.find((s) => s.id === focusedStageId) : null) ??
+          stageList[0] ??
+          null;
+        const protagonistName =
+          world.characters.find((c) => c.id === selection.character)?.name ?? "";
+        const knownNames = shownStage?.known_relations.map((r) => r.npc).join(" · ") ?? "";
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--lv-s-4)" }}>
+            <p
+              className="lv-t-meta"
+              style={{ textAlign: "center", color: "var(--lv-ink-3)", margin: 0 }}
+            >
+              {protagonistName ? `想从${protagonistName}人生的哪一段开始？` : "想从哪一段人生开始？"}
+            </p>
+
+            {/* 桌面：左列表 / 右处境两栏；移动端：上下堆 */}
+            <div className="lv-stage-grid">
+              <div className="lv-stage-list">
+                {stageList.map((stage, i) => (
+                  <ListChoiceOption
+                    key={stage.id}
+                    index={i + 1}
+                    title={stage.subtitle ? `${stage.milestone} · ${stage.subtitle}` : stage.milestone}
+                    description={stage.tagline}
+                    selected={selection.stage === stage.id}
+                    onSelect={() => dispatch({ type: "selectStage", stage: stage.id })}
+                    onHoverChange={(hovered) => {
+                      if (hovered) setFocusedStageId(stage.id);
+                    }}
+                  />
+                ))}
+              </div>
+
+              <aside className="lv-stage-detail">
+                {shownStage && (
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={shownStage.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.2, ease: LV_EASE }}
+                      style={{ display: "flex", flexDirection: "column", gap: "var(--lv-s-3)" }}
+                    >
+                      <div className="lv-stage-detail-head">
+                        {shownStage.milestone}
+                        {shownStage.subtitle ? ` · ${shownStage.subtitle}` : ""}
+                      </div>
+                      <div className="lv-stage-detail-meta">
+                        {shownStage.start_location && (
+                          <span>
+                            <span className="lv-t-caps" style={{ color: "var(--lv-ink-4)" }}>落点 </span>
+                            <span className="lv-t-meta" style={{ color: "var(--lv-ink-2)" }}>{shownStage.start_location}</span>
+                          </span>
+                        )}
+                        {knownNames && (
+                          <span>
+                            <span className="lv-t-caps" style={{ color: "var(--lv-ink-4)" }}>认识的人 </span>
+                            <span className="lv-t-meta" style={{ color: "var(--lv-ink-2)" }}>{knownNames}</span>
+                          </span>
+                        )}
+                      </div>
+                      <p className="lv-t-narrative" style={{ margin: 0, color: "var(--lv-ink-2)" }}>
+                        {shownStage.opening_framing}
+                      </p>
+                    </motion.div>
+                  </AnimatePresence>
+                )}
+              </aside>
+            </div>
+
+            <style jsx global>{`
+              .lv-theme .lv-stage-grid {
+                display: flex;
+                flex-direction: column;
+                gap: var(--lv-s-6);
+                width: 100%;
+                max-width: 480px;
+                margin: 0 auto;
+              }
+              .lv-theme .lv-stage-list {
+                display: flex;
+                flex-direction: column;
+                gap: var(--lv-s-2);
+              }
+              .lv-theme .lv-stage-detail-head {
+                font-family: var(--lv-font-serif);
+                font-size: 18px;
+                color: var(--lv-ink);
+                letter-spacing: -0.01em;
+              }
+              .lv-theme .lv-stage-detail-meta {
+                display: flex;
+                flex-wrap: wrap;
+                gap: var(--lv-s-2) var(--lv-s-6);
+              }
+              /* 移动端不显示处境块——选择信息靠行内的里程碑+tagline已足够，
+                 这块在移动端本是只显第一档的摆设。两栏是桌面才发挥。 */
+              .lv-theme .lv-stage-detail {
+                display: none;
+              }
+              @media (min-width: 768px) {
+                .lv-theme .lv-stage-grid {
+                  display: grid;
+                  grid-template-columns: 440px 1fr;
+                  gap: var(--lv-s-8);
+                  max-width: 880px;
+                  align-items: start;
+                }
+                .lv-theme .lv-stage-detail {
+                  display: block;
+                  padding-left: var(--lv-s-6);
+                  border-left: 1px solid var(--lv-line);
+                  padding-top: var(--lv-s-2);
+                }
+              }
+            `}</style>
           </div>
         );
       }

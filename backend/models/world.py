@@ -33,6 +33,11 @@ class World(Base):
     lore_pack: Mapped[dict | None] = mapped_column(_JSONB, nullable=True, default=None)
     shared_events: Mapped[list | None] = mapped_column(_JSONB, nullable=True, default=None)
     events_data: Mapped[list | None] = mapped_column(_JSONB, nullable=True, default=None)
+    # 自由模式「人生进度」起点预设（spec docs/plans/2026-06-24-free-start-stages.md）。
+    # 形如 {"protagonist_character_id": str, "stages": [{id, milestone, subtitle,
+    # tagline, order, era, start_location, opening_framing, known_relations:[{npc,standing}]}]}。
+    # None / 缺省 = 该世界不提供起点选择，自由模式走老的「固定 initial_location」开局。
+    free_start_stages: Mapped[dict | None] = mapped_column(_JSONB, nullable=True, default=None)
     created_by_user_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey("users.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
