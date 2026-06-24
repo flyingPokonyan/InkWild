@@ -46,6 +46,7 @@ from schemas.research_pack import IPCanon, ResearchPack
 from schemas.shared_events import RelationsPack, SharedEvent
 from services.character_roster_builder import (
     build_character_roster,
+    take_roster_prune_count,
     build_characters_in_batches,
 )
 from services.cover_brief import (
@@ -84,11 +85,8 @@ from services.research_pack_builder import (
     build_research_pack,
 )
 from services.shared_events_builder import build_shared_events
-from services.world_creator_retry import with_transient_retry
+from services.world_creator_retry import TransientError, with_transient_retry
 from services.world_critic_service import (
-    heavy_critic_characters,
-    heavy_critic_playable,
-    light_critic_lore,
     heavy_critic_endings,
     light_critic_shared_events,
     validate_world_shape,
@@ -507,6 +505,7 @@ class WorldCreatorAgentV2:
         self.task_service = task_service
         self.task_id = task_id
         self.session_factory = session_factory
+        self._last_prune_count = 0
 
     # =========================================================================
     # Public entry point
@@ -1154,19 +1153,30 @@ class WorldCreatorAgentV2:
 
         user_message += "\n\n请输出世界核心框架（JSON 格式）。"
 
+        async def _attempt_world_base() -> dict | None:
+            text = await _collect_stream_text(
+                self.llm,
+                system=_WORLD_BASE_SYSTEM,
+                messages=[{"role": "user", "content": user_message}],
+                # 地点规模放开后输出更长（多地点 + base/free_setting），抬预算防截断
+                max_tokens=3072,
+            )
+            parsed = _extract_json_from_text(text)
+            if parsed is None:
+                # 彻底解析失败（截断 / reasoning 污染导致抽不出 JSON）也要重试：JSON
+                # 抽取在 retry 圈之外时，一次偶发坏 JSON 就直接掉兜底，把整个世界打空
+                # （locations=[] + base_setting 退回原始输入）。包成 TransientError 交给
+                # with_transient_retry 再试。空/残缺 dict 不算 transient——重试无济于事，
+                # 交给下方兜底。
+                raise TransientError("world_base JSON 解析失败")
+            return parsed
+
         try:
-            text = await with_transient_retry(
-                lambda: _collect_stream_text(
-                    self.llm,
-                    system=_WORLD_BASE_SYSTEM,
-                    messages=[{"role": "user", "content": user_message}],
-                    # 地点规模放开后输出更长（多地点 + base/free_setting），抬预算防截断
-                    max_tokens=3072,
-                ),
+            data = await with_transient_retry(
+                _attempt_world_base,
                 max_attempts=3,
                 on_retry=self._make_retry_logger("world_base"),
             )
-            data = _extract_json_from_text(text)
             if data and isinstance(data, dict):
                 # Normalize locations to list[dict]
                 raw_locs = data.get("locations") or []
@@ -1194,15 +1204,23 @@ class WorldCreatorAgentV2:
             logger.warning("world_base_llm_failed", error=str(exc))
             self._stage_errors["world_base"] = exc
 
-        # Fallback defaults — world_base LLM failed entirely. Still try the
-        # resolver (it'll either use IP name or the dedicated retry) before
-        # giving up to placeholder.
+        # Fallback defaults — world_base LLM failed entirely (after retries).
+        # Still try the resolver (it'll either use IP name or the dedicated
+        # retry) before giving up to placeholder.
         fallback_name = await self._resolve_world_name(
             description=description,
             llm_candidate="",
             ip_pack=ip_pack,
             fidelity=fidelity,
         )
+        # IP 世界即便 world_base 整步失败，也别让地点空着——研究层已抓到原作地点，
+        # 直接兜底填进去，避免发布出 0 地点的残次世界。
+        fallback_locations: list[dict] = []
+        if ip_pack and fidelity in ("strict", "loose") and ip_pack.places:
+            fallback_locations = [
+                {"name": p.name, "description": p.description or ""}
+                for p in ip_pack.places if p.name
+            ]
         return {
             "name": fallback_name,
             "description": description,
@@ -1212,7 +1230,7 @@ class WorldCreatorAgentV2:
             "estimated_time": "2-4小时",
             "base_setting": description,
             "free_setting": description,
-            "locations": [],
+            "locations": fallback_locations,
         }
 
     # =========================================================================
@@ -1349,6 +1367,8 @@ class WorldCreatorAgentV2:
             roster = []
 
         self._last_roster = roster
+        # strict 模式 prune 删掉的非原作角色数（安全网信号，供 done 后异步打分）。
+        self._last_prune_count = take_roster_prune_count()
         yield progress_event(
             "character_roster", "completed",
             stage_index=_STAGE_INDEX["character_roster"],
@@ -1837,80 +1857,11 @@ class WorldCreatorAgentV2:
                 "形状校验失败（纯 Python），quality_warnings 里没有结构问题清单",
             )
 
-        # H2: light critic (concurrent LLM)
-        lore_dict = lore_pack.model_dump() if hasattr(lore_pack, "model_dump") else {}
-        se_dicts = [
-            e.model_dump() if hasattr(e, "model_dump") else e
-            for e in shared_events
-        ]
-
-        lore_warns: list[str] = []
-        se_warns: list[str] = []
-        try:
-            results = await asyncio.gather(
-                with_transient_retry(
-                    lambda: light_critic_lore(lore_dict, ip_canon, self.llm),
-                    max_attempts=2,
-                    on_retry=self._make_retry_logger("critic_lore"),
-                ),
-                with_transient_retry(
-                    lambda: light_critic_shared_events(se_dicts, ip_canon, self.llm),
-                    max_attempts=2,
-                    on_retry=self._make_retry_logger("critic_shared_events"),
-                ),
-                return_exceptions=True,
-            )
-            if isinstance(results[0], list):
-                lore_warns = results[0]
-            if isinstance(results[1], list):
-                se_warns = results[1]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("light_critic_failed", error=str(exc))
-            yield _stage_failure_warning(
-                "critic", "light_critic_failed", exc,
-                "轻量质检 LLM 失败，lore + shared_events 的 IP 一致性检查未跑",
-            )
-
-        all_warnings.extend(lore_warns)
-        all_warnings.extend(se_warns)
-
-        # H2.5: heavy critic (characters + playable)
+        # H2/H2.5（LLM 软评分：lore/事件/角色/可玩一致性）已移到 done 后的异步质量
+        # 打分器（services/world_quality_scorer.py，plan 2026-06-24）。它们只产 warning、
+        # 不返工，放同步主流程纯拖慢 TTFT/生成。这里只保留确定性安全网：must_have backfill。
         if characters is not None:
-            canon_dict = ip_canon.model_dump() if hasattr(ip_canon, "model_dump") else {}
-            char_dicts = [
-                c.model_dump() if hasattr(c, "model_dump") else c
-                for c in characters
-            ]
-
-            # Anchor metadata for cross-era / IP-fidelity detection
-            era_hint = str(payload.get("era") or "")
-            genre_hint = str(payload.get("genre") or "")
             ip_pack_ref = getattr(self, "_last_ip_pack", None)
-            ip_must_have_names = (
-                ip_pack_ref.must_have_character_names() if ip_pack_ref else []
-            )
-
-            try:
-                updated_chars, char_warns = await with_transient_retry(
-                    lambda: heavy_critic_characters(
-                        char_dicts, description, canon_dict, self.llm,
-                        era=era_hint,
-                        genre=genre_hint,
-                        ip_must_have=ip_must_have_names,
-                    ),
-                    max_attempts=2,
-                    on_retry=self._make_retry_logger("heavy_critic_characters"),
-                )
-                all_warnings.extend(char_warns)
-                # Replace world_characters in payload with critic-updated version
-                payload["world_characters"] = updated_chars
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("heavy_critic_characters_failed", error=str(exc))
-                yield _stage_failure_warning(
-                    "critic", "heavy_critic_characters_failed", exc,
-                    "深度角色质检失败，角色 personality/secret 一致性未审查，未自动修复",
-                )
-
             # 确定性兜底闸：must_have 角色若在详情阶段被丢掉，用 ip_pack 数据补回（薄但不缺）。
             # 与 roster 的 _ensure_must_have 构成 must_have 闭环——主角绝不凭空消失。
             backfilled, injected_mh = _backfill_missing_must_have(
@@ -1931,23 +1882,16 @@ class WorldCreatorAgentV2:
                     ),
                 ))
 
-            try:
-                current_chars = payload.get("world_characters") or []
-                updated_playable, pl_warns = await with_transient_retry(
-                    lambda: heavy_critic_playable(
-                        payload.get("playable") or [], current_chars, self.llm
-                    ),
-                    max_attempts=2,
-                    on_retry=self._make_retry_logger("heavy_critic_playable"),
-                )
-                all_warnings.extend(pl_warns)
-                payload["playable"] = updated_playable
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("heavy_critic_playable_failed", error=str(exc))
-                yield _stage_failure_warning(
-                    "critic", "heavy_critic_playable_failed", exc,
-                    "深度可玩角色质检失败，playable 列表未自动修正",
-                )
+        # 安全网信号：strict 模式 roster prune 删掉的非原作角色数（done 后异步打分读它判断
+        # "这次是不是 AI 编了一堆原作没有的人、靠删救回来的"）。与 backfill 对称。
+        if getattr(self, "_last_prune_count", 0) > 0:
+            all_warnings.append(warning_event(
+                "critic", code="roster_pruned_non_canon",
+                message=(
+                    f"strict 复刻删掉了 {self._last_prune_count} 个非原作角色"
+                    f"（AI 编造、已裁剪）；删多说明该次规划跑偏，建议核查"
+                ),
+            ))
 
         # H3: moderation pass
         async def moderation_callable(text: str) -> dict:

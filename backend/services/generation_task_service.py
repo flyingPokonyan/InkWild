@@ -407,6 +407,13 @@ class GenerationTaskService:
 
         task.add_done_callback(_cleanup)
 
+    async def _score_world_quality(self, task_id: str, llm_router: Any) -> None:
+        """异步质量打分 — fire-and-forget 调用，整体 try/except 在 scorer 内部，绝不影响生成。"""
+        from services.world_quality_scorer import WorldQualityScorer
+
+        scorer = WorldQualityScorer(self.session_factory, llm_router)
+        await scorer.score_task(task_id, run_soft=llm_router is not None)
+
     async def _run_world_generation(self, task_id: str) -> None:
         """AOP wrapper: attribute every nested LLM/image call to this task.
 
@@ -516,15 +523,18 @@ class GenerationTaskService:
                     await self._record_event(task_id, {"type": "done"})
 
                 try:
-                    from services.ip_recognizer import recognize_ip
+                    from services.ip_recognizer import build_recognizer_llm, recognize_ip
 
                     description = request.get("description", "")
                     llm_router = getattr(base_agent, "llm", None)
                     tavily = getattr(base_agent, "tavily", None)
+                    # 识别步走 Grok 快速模型（联网，认得较新作品）；Grok 未配置时回退
+                    # 到生成主模型。
+                    recognizer_llm = build_recognizer_llm(fallback=llm_router)
 
                     # No LLM router means we can't call the recognizer — degrade
                     # gracefully instead of crashing with AttributeError.
-                    if llm_router is None:
+                    if recognizer_llm is None:
                         logger.warning("phase_a_no_llm_router", task_id=str(task_id))
                         await _emit_ip_recognition_fallback("未配置 LLM，按原创处理")
                         return
@@ -538,7 +548,7 @@ class GenerationTaskService:
                             "message": "正在识别是否指向某个已知 IP…",
                         },
                     )
-                    rec = await recognize_ip(description, llm_router=llm_router, tavily=tavily)
+                    rec = await recognize_ip(description, llm_router=recognizer_llm, tavily=tavily)
                     rec_dict = rec.model_dump()
                     await self.record_intermediate(task_id, phase="ip_recognition", snapshot=rec_dict)
                     await self._record_event(
@@ -616,6 +626,11 @@ class GenerationTaskService:
                 **extra_kwargs,
             ):
                 await self._record_event(task_id, event)
+
+            # 异步质量打分（plan 2026-06-24）：done 已记录、draft 已落库后 fire-and-forget。
+            # 不阻塞生成、失败不影响 draft。PHASE_A 只做 IP 识别、无 payload，跳过。
+            if phase != PHASE_A:
+                self._launch(self._score_world_quality(task_id, getattr(agent, "llm", None)))
         except asyncio.TimeoutError:
             logger.exception("world_generation_task_timed_out", task_id=task_id)
             await self._record_event(

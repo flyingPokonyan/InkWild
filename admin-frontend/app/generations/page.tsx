@@ -51,6 +51,13 @@ function statusLabel(s: GenerationTaskStatus): string {
   return m[s] ?? s;
 }
 
+// 质量分配色：≥85 绿 / ≥70 黄 / <70 红。仅硬指标加权（软分不进总分）。
+function scoreColor(score: number): string {
+  if (score >= 85) return "var(--success, #16A34A)";
+  if (score >= 70) return "var(--warning, #D97706)";
+  return "var(--danger, #DC2626)";
+}
+
 function durationLabel(startedAt: string | null, finishedAt: string | null): string {
   if (!startedAt) return "—";
   const start = new Date(_normalizeIso(startedAt)).getTime();
@@ -171,6 +178,7 @@ export default function GenerationsPage() {
               <th style={{ width: 90 }}>状态</th>
               <th style={{ width: 170 }}>创建时间</th>
               <th style={{ width: 80 }}>耗时</th>
+              <th style={{ width: 76 }}>质量</th>
               <th style={{ width: 160 }}>IP</th>
               <th>提示词 / 当前阶段</th>
               <th style={{ width: 60 }}></th>
@@ -180,7 +188,7 @@ export default function GenerationsPage() {
             {query.isPending ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="dim"
                   style={{ padding: 24, textAlign: "center" }}
                 >
@@ -190,7 +198,7 @@ export default function GenerationsPage() {
             ) : query.isError ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   style={{
                     padding: 24,
                     textAlign: "center",
@@ -203,7 +211,7 @@ export default function GenerationsPage() {
             ) : !data || data.items.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="dim"
                   style={{ padding: 24, textAlign: "center" }}
                 >
@@ -248,6 +256,36 @@ export default function GenerationsPage() {
                   </td>
                   <td className="mono dim" style={{ fontSize: 11.5 }}>
                     {durationLabel(t.started_at, t.finished_at)}
+                  </td>
+                  <td>
+                    {t.quality_score != null ? (
+                      <span
+                        title={
+                          t.quality_must_have
+                            ? `must_have ${t.quality_must_have}${t.quality_backfill ? ` · backfill 补了 ${t.quality_backfill}` : ""}`
+                            : t.quality_backfill
+                              ? `backfill 补了 ${t.quality_backfill}`
+                              : undefined
+                        }
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 3,
+                          padding: "2px 7px",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          fontVariantNumeric: "tabular-nums",
+                          background: `color-mix(in oklab, ${scoreColor(t.quality_score)} 14%, transparent)`,
+                          color: scoreColor(t.quality_score),
+                        }}
+                      >
+                        {Math.round(t.quality_score)}
+                        {t.quality_backfill ? <span title="靠 backfill 补救">⚠</span> : null}
+                      </span>
+                    ) : (
+                      <span className="dim-2">—</span>
+                    )}
                   </td>
                   <td>
                     {t.ip_name ? (

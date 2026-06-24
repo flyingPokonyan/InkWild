@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/Card";
 import { apiFetch } from "@/lib/api";
 import { fmtDateTime, phaseLabel } from "@/lib/format";
 import type {
+  GenerationQuality,
   GenerationTaskDetail,
   GenerationTaskEvent,
   GenerationTaskStatus,
@@ -44,6 +45,89 @@ function eventTone(name: string): "success" | "danger" | "warning" | "info" | "d
   if (name === "warning") return "warning";
   if (name === "progress") return "info";
   return "default";
+}
+
+function scoreColor(score: number): string {
+  if (score >= 85) return "var(--success, #16A34A)";
+  if (score >= 70) return "var(--warning, #D97706)";
+  return "var(--danger, #DC2626)";
+}
+
+function MetricRow({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "3px 0", fontSize: 12.5 }}>
+      <span className="dim">{label}</span>
+      <span style={{ fontVariantNumeric: "tabular-nums", color: ok === false ? "var(--danger)" : "var(--fg)" }}>
+        {value}{ok === true ? " ✓" : ok === false ? " ✗" : ""}
+      </span>
+    </div>
+  );
+}
+
+function QualityCard({ q }: { q: GenerationQuality }) {
+  const { hard, soft, safety_net: sn } = q;
+  const softScore = (v: number | null) => (v == null ? "—" : `${v}/10`);
+  const col: React.CSSProperties = { flex: 1, minWidth: 180 };
+  return (
+    <Card flush>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+        <span style={{ fontWeight: 600, fontSize: 14 }}>质量报告</span>
+        <span
+          style={{
+            display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 5,
+            fontWeight: 700, fontSize: 13, fontVariantNumeric: "tabular-nums",
+            background: `color-mix(in oklab, ${scoreColor(q.overall_score)} 16%, transparent)`,
+            color: scoreColor(q.overall_score),
+          }}
+        >
+          总评 {Math.round(q.overall_score)}
+        </span>
+        <span className="dim-2" style={{ fontSize: 11, marginLeft: "auto" }}>
+          异步打分 · 总评仅由硬指标加权（软分不计入）
+        </span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 24, padding: 16 }}>
+        <div style={col}>
+          <div className="dim-2" style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, textTransform: "uppercase" }}>硬指标（客观）</div>
+          <MetricRow label="角色数" value={String(hard.character_count)} ok={hard.character_count >= 8} />
+          <MetricRow label="可玩角色" value={String(hard.playable_count)} ok={hard.playable_count >= 1} />
+          <MetricRow
+            label="must_have 覆盖"
+            value={hard.must_have_total ? `${hard.must_have_covered}/${hard.must_have_total}` : "无（原创）"}
+            ok={hard.must_have_total ? hard.must_have_covered >= hard.must_have_total : undefined}
+          />
+          <MetricRow label="事件 / 共享事件" value={`${hard.events_count} / ${hard.shared_events_count}`} />
+          <MetricRow label="结构完整度" value={`${Math.round(hard.structure_score * 100)}%`} ok={hard.structure_score >= 0.6} />
+        </div>
+        <div style={col}>
+          <div className="dim-2" style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, textTransform: "uppercase" }}>
+            软分（LLM · 仅参考）
+          </div>
+          <MetricRow label="IP / 设定一致性" value={softScore(soft.ip_consistency)} />
+          <MetricRow label="角色不撞车" value={softScore(soft.collision)} />
+          <MetricRow label="戏剧张力" value={softScore(soft.tension)} />
+          {soft.summary && (
+            <div className="dim" style={{ fontSize: 12, lineHeight: 1.6, marginTop: 8, whiteSpace: "pre-wrap" }}>
+              {soft.summary}
+            </div>
+          )}
+        </div>
+        <div style={col}>
+          <div className="dim-2" style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, textTransform: "uppercase" }}>
+            安全网触发
+          </div>
+          <MetricRow label="backfill 补主角" value={String(sn.backfill_count)} ok={sn.backfill_count === 0} />
+          <MetricRow label="prune 删角色" value={String(sn.prune_count)} />
+          <MetricRow label="warning 数" value={String(sn.soft_warning_count)} />
+          {sn.backfill_count > 0 && (
+            <div style={{ fontSize: 11.5, color: "var(--warning)", marginTop: 8, lineHeight: 1.5 }}>
+              ⚠ 主角靠 backfill 补救——高分可能是兜底撑的，建议人工复核
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 }
 
 export default function GenerationTaskDetailPage() {
@@ -216,6 +300,9 @@ export default function GenerationTaskDetailPage() {
               </div>
             )}
           </Card>
+
+          {/* 质量报告（异步打分产物；打分比 done 晚几秒，未出则不渲染） */}
+          {t.quality && <QualityCard q={t.quality} />}
 
           {/* Request payload */}
           <Card title="原始请求">

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     grok_api_key: str = ""
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-4.20-0309-reasoning"
+    # IP 识别专用模型：走 Grok 快速模型（网关后端联网），识别离线生成模型认不出的较新作品。
+    ip_recognition_model: str = "grok-4.3-fast"
     grok_image_model: str = "grok-imagine-image"
     gptimage_api_key: str = ""
     gptimage_base_url: str = "https://api.openai.com/v1"

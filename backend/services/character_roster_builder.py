@@ -9,6 +9,7 @@
   批后做严格 1:1 dedup 校验：extra/missing/duplicate 全部 warn，不补占位。
 """
 import asyncio
+import contextvars
 import json
 import re
 from typing import Any
@@ -20,6 +21,21 @@ from schemas.ip_knowledge_pack import FidelityMode, IPKnowledgePack
 from schemas.research_pack import IPCanon, Passage
 
 logger = structlog.get_logger()
+
+# roster strict 模式 _prune_to_canon 删掉的"非原作角色"数，通过 contextvar 传给
+# 上层 agent（done 后异步质量打分的安全网信号）。build_character_roster 是被直接
+# await 的，与 agent 同一 task 上下文 → set/get 在同链可见；不改函数签名（被大量
+# 测试断言返回 list）。take_roster_prune_count() 读后清零。
+_roster_prune_count: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "roster_prune_count", default=0
+)
+
+
+def take_roster_prune_count() -> int:
+    """读取并清零本次 roster 的 prune 计数。agent 在 build_character_roster 返回后调用。"""
+    v = _roster_prune_count.get()
+    _roster_prune_count.set(0)
+    return v
 
 # ---------------------------------------------------------------------------
 # Module-level constants for IP constraint bracket markers (Fix 4)
@@ -140,6 +156,7 @@ def _prune_to_canon(
     kept = [e for e in entries if _norm_name(e.name) in canon]
     dropped_names = [e.name for e in entries if _norm_name(e.name) not in canon]
     if dropped_names:
+        _roster_prune_count.set(_roster_prune_count.get() + len(dropped_names))
         logger.info(
             "roster_strict_pruned_non_canon",
             ip_name=ip_pack.ip_name,

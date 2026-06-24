@@ -518,3 +518,65 @@ async def heavy_critic_playable(
     except Exception as exc:  # noqa: BLE001
         logger.warning("heavy_critic_playable_failed", error=str(exc))
         return playable, []
+
+
+# ---- 软分(LLM 整体打分,供异步质量打分器调用)----
+
+_SOFT_SCORE_SYSTEM = """你是互动叙事世界的质量评审。对给定世界打三个维度的分(各 1-10 整数)：
+- ip_consistency：是否忠于所复刻 IP / 设定自洽（原创世界看设定内部一致性与质感）
+- collision：角色是否各有区分、不功能撞车、不雷同（分越高越好）
+- tension：可玩视角是否有信息差与行动空间、戏剧张力够不够
+再给一句 summary 概括整体质量与最大短板。
+输出严格 JSON：{"ip_consistency":int,"collision":int,"tension":int,"summary":str}"""
+
+
+async def score_world_soft(payload: dict, ip_canon: dict | None, llm_router) -> dict | None:
+    """对最终 world payload 跑一次 LLM 软评分。失败返回 None(打分器据此跳过软分,不阻断)。
+
+    仅单次质量参考,不进纵向趋势(软分换模型/prompt 不可比,见 plan 决策①)。
+    """
+    try:
+        chars = payload.get("world_characters") or []
+        brief_chars = [
+            {
+                "name": c.get("name"),
+                "playable": bool(c.get("playable")),
+                "description": str(c.get("description", ""))[:200],
+                "personality": str(c.get("personality", ""))[:120],
+            }
+            for c in chars if isinstance(c, dict)
+        ]
+        score_input = json.dumps(
+            {
+                "name": payload.get("name"),
+                "base_setting": str(payload.get("base_setting", ""))[:1500],
+                "characters": brief_chars,
+                "ip_canon": ip_canon or {},
+            },
+            ensure_ascii=False,
+        )
+        text = await _collect_stream_text(
+            llm_router,
+            system=_SOFT_SCORE_SYSTEM,
+            messages=[{"role": "user", "content": score_input}],
+            max_tokens=1024,
+        )
+        data = _extract_json_from_text(text)
+        if not data or not isinstance(data, dict):
+            return None
+
+        def _clamp(v: object) -> int | None:
+            try:
+                return max(1, min(10, int(v)))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return None
+
+        return {
+            "ip_consistency": _clamp(data.get("ip_consistency")),
+            "collision": _clamp(data.get("collision")),
+            "tension": _clamp(data.get("tension")),
+            "summary": str(data.get("summary", ""))[:500],
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("score_world_soft_failed", error=str(exc))
+        return None

@@ -62,3 +62,6 @@ prod_model_cfg_*.sql
 # Internal-only working docs (AI-agent process logs, raw research dumps, eval run reports).
 # Kept locally for the author; not part of the open-source distribution.
 _internal/
+
+# Stray root screenshots
+/img_*.png

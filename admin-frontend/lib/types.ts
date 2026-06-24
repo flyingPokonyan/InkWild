@@ -341,9 +341,37 @@ export interface GenerationTaskListItem {
   fidelity_mode: string | null;
   ip_name: string | null;
   generated_name: string | null;
+  quality_score: number | null;
+  quality_backfill: number | null;
+  quality_must_have: string | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface GenerationQuality {
+  overall_score: number;
+  hard: {
+    character_count: number;
+    playable_count: number;
+    must_have_covered: number;
+    must_have_total: number;
+    events_count: number;
+    shared_events_count: number;
+    structure_score: number;
+  };
+  soft: {
+    ip_consistency: number | null;
+    collision: number | null;
+    tension: number | null;
+    summary: string | null;
+  };
+  safety_net: {
+    backfill_count: number;
+    prune_count: number;
+    soft_warning_count: number;
+  };
+  scored_at: string | null;
 }
 
 export interface GenerationTaskListResponse {
@@ -367,6 +395,7 @@ export interface GenerationTaskDetail extends GenerationTaskListItem {
   companion_task?: (Omit<GenerationTaskDetail, "companion_task"> & {
     phase_kind?: "phase_a" | "phase_b" | string | null;
   }) | null;
+  quality?: GenerationQuality | null;
 }
 
 // ────────────── Content governance ──────────────

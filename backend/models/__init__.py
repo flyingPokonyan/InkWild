@@ -17,6 +17,7 @@ from models.script import Script
 from models.system_config import SystemConfig
 from models.user import AuthIdentity, User, WebSession
 from models.world import Character, Ending, Event, NPC, World, WorldCharacter
+from models.world_quality_score import WorldQualityScore
 
 __all__ = [
     "Base",
@@ -27,6 +28,7 @@ __all__ = [
     "CreditConfig",
     "CreditHold",
     "World",
+    "WorldQualityScore",
     "WorldCharacter",
     "NPC",
     "Event",

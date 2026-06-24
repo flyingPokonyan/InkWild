@@ -105,10 +105,6 @@ async def test_pipeline_emits_all_stages_in_order():
             AsyncMock(return_value=[]),
         ),
         patch(
-            "services.world_creator_agent_v2.light_critic_lore",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=[]),
         ),
@@ -213,10 +209,6 @@ async def test_pipeline_emits_result_with_all_v2_fields():
             AsyncMock(return_value=[]),
         ),
         patch(
-            "services.world_creator_agent_v2.light_critic_lore",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=[]),
         ),
@@ -292,10 +284,6 @@ async def test_pipeline_handles_research_pack_failure_gracefully():
         ),
         patch(
             "services.world_creator_agent_v2.build_events_data",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
-            "services.world_creator_agent_v2.light_critic_lore",
             AsyncMock(return_value=[]),
         ),
         patch(
@@ -392,10 +380,6 @@ async def test_pipeline_record_intermediate_called_per_stage(monkeypatch):
             AsyncMock(return_value=[]),
         ),
         patch(
-            "services.world_creator_agent_v2.light_critic_lore",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=[]),
         ),
@@ -489,10 +473,6 @@ async def test_pipeline_concurrent_c1_c2_stages():
             AsyncMock(return_value=[]),
         ),
         patch(
-            "services.world_creator_agent_v2.light_critic_lore",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=[]),
         ),
@@ -568,10 +548,6 @@ async def test_pipeline_quality_warnings_aggregated():
             AsyncMock(return_value=[]),
         ),
         patch(
-            "services.world_creator_agent_v2.light_critic_lore",
-            AsyncMock(return_value=["lore_warning_1"]),
-        ),
-        patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=["se_warning_1"]),
         ),
@@ -587,8 +563,9 @@ async def test_pipeline_quality_warnings_aggregated():
     result = next((e for e in events if e.get("type") == "result"), None)
     assert result is not None
     warnings = result.get("quality_warnings", [])
-    assert "lore_warning_1" in warnings
-    assert "se_warning_1" in warnings
+    # H2/H2.5（lore/事件/角色一致性软评分）已移到 done 后的异步质量打分器，世界主流程
+    # 只保留确定性安全网 + moderation。这里验证 moderation warning 仍汇总到
+    # quality_warnings（其余 LLM 软评分不再走同步路径）。
     assert "moderation_flag:explicit" in warnings
 
 
@@ -661,10 +638,6 @@ async def test_pipeline_playable_filtered_from_image_targets():
             AsyncMock(return_value=[]),
         ),
         patch(
-            "services.world_creator_agent_v2.light_critic_lore",
-            AsyncMock(return_value=[]),
-        ),
-        patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=[]),
         ),
@@ -729,7 +702,6 @@ def _make_builder_patches(chars):
             MagicMock(return_value=RelationsPack()),
         ),
         patch("services.world_creator_agent_v2.build_events_data", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.light_critic_lore", AsyncMock(return_value=[])),
         patch(
             "services.world_creator_agent_v2.light_critic_shared_events",
             AsyncMock(return_value=[]),
@@ -1033,9 +1005,6 @@ async def test_lore_pack_emits_subtask_completed_per_dimension():
             MagicMock(return_value=RelationsPack(relations_by_npc={})),
         ),
         patch("services.world_creator_agent_v2.build_events_data", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.heavy_critic_characters", AsyncMock(return_value=([{"name": "A"}], []))),
-        patch("services.world_creator_agent_v2.heavy_critic_playable", AsyncMock(return_value=([{"name": "A"}], []))),
-        patch("services.world_creator_agent_v2.light_critic_lore", AsyncMock(return_value=[])),
         patch("services.world_creator_agent_v2.light_critic_shared_events", AsyncMock(return_value=[])),
         patch("services.world_creator_agent_v2.moderate_world_payload", AsyncMock(return_value=[])),
     ):
@@ -1099,9 +1068,6 @@ async def test_characters_emits_subtask_completed_per_character():
         patch("services.world_creator_agent_v2.build_shared_events", AsyncMock(return_value=[])),
         patch("services.world_creator_agent_v2.build_relations_pack", MagicMock(return_value=RelationsPack())),
         patch("services.world_creator_agent_v2.build_events_data", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.heavy_critic_characters", AsyncMock(return_value=([{"name": c.name} for c in char_list], []))),
-        patch("services.world_creator_agent_v2.heavy_critic_playable", AsyncMock(return_value=([], []))),
-        patch("services.world_creator_agent_v2.light_critic_lore", AsyncMock(return_value=[])),
         patch("services.world_creator_agent_v2.light_critic_shared_events", AsyncMock(return_value=[])),
         patch("services.world_creator_agent_v2.moderate_world_payload", AsyncMock(return_value=[])),
     ):
@@ -1121,54 +1087,3 @@ async def test_characters_emits_subtask_completed_per_character():
     assert "char:Alice" in keys
     assert "char:Bob" in keys
     assert "char:Carol" in keys
-
-
-@pytest.mark.asyncio
-async def test_heavy_critic_warnings_aggregated_to_quality_warnings():
-    """heavy_critic_characters/playable warnings 应汇总到 result.quality_warnings。"""
-    from schemas.character_v2 import Character, CharacterRosterEntry
-    from schemas.lore_pack import LorePack
-    from schemas.research_pack import IPCanon, ResearchPack
-    from schemas.shared_events import RelationsPack
-
-    agent = _build_v2_agent_with_mocks()
-
-    with (
-        patch(
-            "services.world_creator_agent_v2.build_research_pack",
-            AsyncMock(return_value=ResearchPack(summary="", passages=[], ip_canon=IPCanon())),
-        ),
-        patch("services.world_creator_agent_v2.build_lore_dimensions", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.build_lore_pack", AsyncMock(return_value=LorePack())),
-        patch(
-            "services.world_creator_agent_v2.build_character_roster",
-            AsyncMock(return_value=[CharacterRosterEntry(name="A", role_tag="r", is_image_target=False)]),
-        ),
-        patch(
-            "services.world_creator_agent_v2.build_characters_in_batches",
-            AsyncMock(return_value=[Character(name="A", personality="p")]),
-        ),
-        patch("services.world_creator_agent_v2.build_shared_events", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.build_relations_pack", MagicMock(return_value=RelationsPack())),
-        patch("services.world_creator_agent_v2.build_events_data", AsyncMock(return_value=[])),
-        patch(
-            "services.world_creator_agent_v2.heavy_critic_characters",
-            AsyncMock(return_value=([{"name": "A"}], ["heavy_critic: target=A kind=x detail=y"])),
-        ),
-        patch(
-            "services.world_creator_agent_v2.heavy_critic_playable",
-            AsyncMock(return_value=([], ["playable_warning: Ghost not in chars"])),
-        ),
-        patch("services.world_creator_agent_v2.light_critic_lore", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.light_critic_shared_events", AsyncMock(return_value=[])),
-        patch("services.world_creator_agent_v2.moderate_world_payload", AsyncMock(return_value=[])),
-    ):
-        events = []
-        async for event in agent.create_world("desc", "", ""):
-            events.append(event)
-
-    result = next((e for e in events if e.get("type") == "result"), None)
-    assert result is not None
-    warnings = result.get("quality_warnings", [])
-    assert any("heavy_critic" in w for w in warnings), f"heavy_critic warning missing: {warnings}"
-    assert any("playable_warning" in w for w in warnings), f"playable warning missing: {warnings}"

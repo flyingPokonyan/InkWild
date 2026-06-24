@@ -17,6 +17,7 @@ from llm.deepseek import DeepSeekProvider
 from llm.router import LLMRouter
 from models.draft import ScriptDraft, WorldDraft
 from models.generation_task import GenerationTask, GenerationTaskEvent
+from models.world_quality_score import WorldQualityScore
 from models.script import Script
 from models.user import User
 from models.world import World, WorldCharacter
@@ -430,8 +431,11 @@ async def list_generation_tasks(
         # request_payload is declared JSON (not JSONB); cast inline to access
         # the ->>'phase' operator. Postgres-only — fine for our deployment.
         from sqlalchemy.dialects.postgresql import JSONB as _PgJSONB
+        # IS DISTINCT FROM（非 !=）：phase 字段缺失时 ->>'phase' 是 NULL，
+        # `NULL != 'phase_a'` 求值为 NULL→当 FALSE 被误过滤，会把没标 phase 的
+        # 正常世界生成一起藏掉。IS DISTINCT FROM 把 NULL 当作"不等于"正确放行。
         phase_a_filter = (
-            GenerationTask.request_payload.cast(_PgJSONB)["phase"].astext != "phase_a"
+            GenerationTask.request_payload.cast(_PgJSONB)["phase"].astext.is_distinct_from("phase_a")
         )
         base = base.where(phase_a_filter)
         count_q = count_q.where(phase_a_filter)
@@ -445,9 +449,22 @@ async def list_generation_tasks(
         )
     ).scalars().all()
 
+    # 批量取这一页 task 的质量分（异步打分产物），列表展示 overall + must_have/backfill 快览。
+    task_ids = [str(t.id) for t in rows]
+    score_map: dict[str, WorldQualityScore] = {}
+    if task_ids:
+        score_rows = (
+            await db.execute(
+                select(WorldQualityScore).where(WorldQualityScore.task_id.in_(task_ids))
+            )
+        ).scalars().all()
+        for sr in score_rows:
+            score_map[str(sr.task_id)] = sr
+
     items: list[dict] = []
     for t in rows:
         req = t.request_payload or {}
+        sr = score_map.get(str(t.id))
         items.append({
             "id": str(t.id),
             "kind": t.kind,
@@ -462,6 +479,9 @@ async def list_generation_tasks(
             "fidelity_mode": req.get("fidelity_mode"),
             "ip_name": (req.get("ip_recognition") or req.get("pre_recognition") or {}).get("ip_name"),
             "generated_name": _extract_generated_name(t),
+            "quality_score": sr.overall_score if sr else None,
+            "quality_backfill": sr.backfill_count if sr else None,
+            "quality_must_have": (f"{sr.must_have_covered}/{sr.must_have_total}" if sr and sr.must_have_total else None),
             "created_at": serialize_utc_datetime(t.created_at),
             "started_at": serialize_utc_datetime(t.started_at),
             "finished_at": serialize_utc_datetime(t.finished_at),
@@ -525,4 +545,43 @@ async def get_generation_task(
                     companion["phase_kind"] = comp_req.get("phase")  # phase_a / phase_b
         payload["companion_task"] = companion
         payload["phase_kind"] = req.get("phase")
+
+        # 质量报告（异步打分产物）。可能尚未落表（打分比 done 晚几秒）→ None。
+        qs = (
+            await db.execute(
+                select(WorldQualityScore)
+                .where(WorldQualityScore.task_id == task.id)
+                .order_by(WorldQualityScore.scored_at.desc())
+                .limit(1)
+            )
+        ).scalars().first()
+        payload["quality"] = _serialize_quality(qs) if qs else None
     return {"code": 0, "data": payload}
+
+
+def _serialize_quality(qs: WorldQualityScore) -> dict:
+    """质量报告序列化：硬指标(客观) / 软分(LLM,仅参考) / 安全网触发量 分区。"""
+    return {
+        "overall_score": qs.overall_score,
+        "hard": {
+            "character_count": qs.character_count,
+            "playable_count": qs.playable_count,
+            "must_have_covered": qs.must_have_covered,
+            "must_have_total": qs.must_have_total,
+            "events_count": qs.events_count,
+            "shared_events_count": qs.shared_events_count,
+            "structure_score": qs.structure_score,
+        },
+        "soft": {
+            "ip_consistency": qs.soft_ip_consistency,
+            "collision": qs.soft_collision,
+            "tension": qs.soft_tension,
+            "summary": qs.soft_summary,
+        },
+        "safety_net": {
+            "backfill_count": qs.backfill_count,
+            "prune_count": qs.prune_count,
+            "soft_warning_count": qs.soft_warning_count,
+        },
+        "scored_at": serialize_utc_datetime(qs.scored_at),
+    }

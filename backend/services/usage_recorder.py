@@ -118,7 +118,15 @@ async def record_text_usage(event: dict, ctx: UsageContext) -> None:
                     purpose=ctx.purpose,
                     phase=ctx.phase,
                     provider=event.get("provider") or settings.llm_provider,
-                    model=event.get("model") or settings.llm_default_model,
+                    # Attribute by the *requested* model_key (router-stamped
+                    # ``model_id``), not the response-echoed ``model``. Gateways
+                    # like OpenCode echo the canonical model name in the response
+                    # (e.g. ``deepseek-v4-pro``) even when a different model_key
+                    # was actually served (e.g. ``deepseek-v4-flash``), which
+                    # mislabels rows and breaks any analytics that group by
+                    # ``model``. ``model_id`` is the truth; fall back to the
+                    # echoed ``model`` only when the router didn't stamp one.
+                    model=model_id or event.get("model") or settings.llm_default_model,
                     provider_name=provider_name,
                     model_id=model_id,
                     input_tokens=input_tokens,
