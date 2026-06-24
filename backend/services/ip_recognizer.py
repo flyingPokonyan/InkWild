@@ -54,19 +54,26 @@ class IPRecognition(BaseModel):
 
 _RECOGNIZER_SYSTEM = """你判断用户输入的世界描述是否指向某个已知 IP（影视剧 / 小说 / 动漫 / 游戏）。
 
+判定步骤（务必照做）：
+第一步：先问自己——"我能不能说出这个输入对应的具体作品？它的主角 / 作者 / 标志设定是什么？"
+第二步：只要第一步能答上来（哪怕输入没有书名号、只是裸名字，如"哈利波特""甄嬛传"），kind 就必须是 "known_ip"，ip_name 必填，confidence ≥ 0.85。
+第三步：输入含书名号作品名（《XX》/「XX」）但你不确定是否真实存在（如训练截止后的新作）时，仍输出 kind="known_ip" 且 confidence=0.7，由后续验证调整。
+第四步：只有当输入是纯描述性、对应不到任何已有作品时，才输出 kind="original"。
+
+铁律：如果你的 one_liner 里写出了具体作品名 / 主角 / 作者 / 标志地点，kind 绝不能是 original。
+
+参考示例：
+输入"哈利波特" → {"kind":"known_ip","confidence":0.95,"ip_name":"哈利·波特","ip_type":"novel","one_liner":"少年巫师在霍格沃茨对抗伏地魔","source_hints":["哈利·波特 J.K.罗琳"]}
+输入"甄嬛传" → {"kind":"known_ip","confidence":0.95,"ip_name":"甄嬛传","ip_type":"tv","one_liner":"清宫嫔妃甄嬛的后宫沉浮","source_hints":["甄嬛传 流潋紫"]}
+输入"未来火星上的官僚制蜗牛社会" → {"kind":"original","confidence":0.9,"ip_name":null,"ip_type":"other","one_liner":"火星蜗牛官僚的荒诞设定","source_hints":[]}
+
 输出 JSON，字段：
-- kind: "known_ip"（明确指向某 IP）/ "hybrid"（混合多个 IP 或借鉴）/ "original"（原创世界）
+- kind: known_ip / hybrid（混合多个 IP 或借鉴）/ original
 - confidence: 0~1
 - ip_name: known_ip / hybrid 时必填
 - ip_type: tv / movie / novel / anime / game / other
 - one_liner: 一句话简介（30 字内）
-- source_hints: 推荐查询关键词（如百度百科 / 维基条目名）
-
-判定规则（务必遵守，按优先级）：
-1. 只要输入指向一个你能识别的具体作品——你能说出它的主角 / 作者 / 标志性设定——就必须输出 kind="known_ip" 且填 ip_name，confidence ≥ 0.8。**不要因为输入没有书名号就降级为 original**（如"哈利波特""甄嬛传"这种裸作品名也是 known_ip）。
-2. 一致性铁律：如果你的 one_liner 里点到了具体作品名 / 主角 / 作者 / 标志地点，kind 绝不能是 original——必须是 known_ip 或 hybrid，ip_name 必填。
-3. 输入含书名号作品名（《XX》/「XX」）但你不确定是否真实存在（如训练截止后的新作）时，仍输出 kind=known_ip 且 confidence=0.7，由后续验证调整。
-4. kind="original" 仅用于：纯描述性、不对应任何已有作品的原创设定（如"未来火星上的官僚社会"）。
+- source_hints: 推荐查询关键词数组（如百度百科 / 维基条目名）
 
 严格 JSON 输出，无解释文字。"""
 

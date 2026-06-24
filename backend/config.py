@@ -48,8 +48,9 @@ class Settings(BaseSettings):
     # best-of-N 投票消除（任一次判 known_ip 即采用）。推理档(medium/low)分类更稳但网关
     # 429 限流不可用。
     ip_recognition_model: str = "grok-4.3-fast"
-    # IP 识别投票次数：fast 模型 kind 抖动，多打几次取 known_ip 胜。
-    ip_recognition_votes: int = 3
+    # IP 识别投票次数：强 few-shot prompt 已把著名 IP 单次锚死（第1次即命中、提前结束），
+    # 投票只为冷门 IP（kind 仍会抖）兜底，2 次足够，避免原创世界等满 3 次。
+    ip_recognition_votes: int = 2
     grok_image_model: str = "grok-imagine-image"
     gptimage_api_key: str = ""
     gptimage_base_url: str = "https://api.openai.com/v1"
