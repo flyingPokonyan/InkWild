@@ -156,12 +156,14 @@ async def recognize_ip(description: str, llm_router: Any, tavily: Any | None = N
         if not data:
             logger.warning("ip_recognition_parse_failed", text_preview=text[:200])
             raise TransientError("ip_recognition JSON 解析失败")
+        # 空串归一为 None：模型偶尔回 ip_type=""，会撞 Literal 校验报错把整票丢掉
+        # （best-of-N 下等于白丢一票，极端情况漏掉唯一判 known_ip 的那票）。
         return IPRecognition(
-            kind=data.get("kind", "original"),
+            kind=data.get("kind") or "original",
             confidence=float(data.get("confidence", 0.0)),
-            ip_name=data.get("ip_name"),
-            ip_type=data.get("ip_type"),
-            one_liner=data.get("one_liner"),
+            ip_name=data.get("ip_name") or None,
+            ip_type=data.get("ip_type") or None,
+            one_liner=data.get("one_liner") or None,
             source_hints=data.get("source_hints") or [],
         )
 
