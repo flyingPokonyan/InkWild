@@ -43,8 +43,10 @@ class Settings(BaseSettings):
     grok_api_key: str = ""
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-4.20-0309-reasoning"
-    # IP 识别专用模型：走 Grok 快速模型（网关后端联网），识别离线生成模型认不出的较新作品。
-    ip_recognition_model: str = "grok-4.3-fast"
+    # IP 识别专用模型：走 Grok（网关后端联网），识别离线生成模型认不出的较新作品。
+    # 用 medium 而非 fast：fast 廉价模型 kind 字段乱跳（哈利波特都会忽判 original），
+    # medium 推理档分类稳定（实测两个 IP 6/6 全对），偶发 APIError 由 recognize_ip 重试兜底。
+    ip_recognition_model: str = "grok-4.3-medium"
     grok_image_model: str = "grok-imagine-image"
     gptimage_api_key: str = ""
     gptimage_base_url: str = "https://api.openai.com/v1"
