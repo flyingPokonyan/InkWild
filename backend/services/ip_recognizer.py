@@ -154,9 +154,6 @@ async def recognize_ip(description: str, llm_router: Any, tavily: Any | None = N
         text = await _collect_text(llm_router, _RECOGNIZER_SYSTEM, description)
         data = _extract_json(text)
         if not data:
-            # 解析失败也重试：grok 推理档偶发返回夹推理/截断 → 抽不出 JSON。包成
-            # TransientError 交给 with_transient_retry 再试，而不是一次就回退 original
-            # （= 漏识别 IP）。
             logger.warning("ip_recognition_parse_failed", text_preview=text[:200])
             raise TransientError("ip_recognition JSON 解析失败")
         return IPRecognition(
@@ -168,11 +165,24 @@ async def recognize_ip(description: str, llm_router: Any, tavily: Any | None = N
             source_hints=data.get("source_hints") or [],
         )
 
-    try:
-        # 重试覆盖网关瞬态 APIError（grok 推理档偶发）+ 解析失败，避免单次抖动就漏识别。
-        rec = await with_transient_retry(_attempt, max_attempts=3)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("ip_recognition_failed", error=str(exc))
+    # Best-of-N 投票：fast 模型的 kind 字段会抖动（同一著名 IP 偶尔判 original），但每次
+    # 都"认得"内容。多打几次，任一次判 known_ip/hybrid 且填了 ip_name 就采用——直接消除
+    # 抖动。每次内部仍带瞬态重试（覆盖网关偶发错误 / 解析失败）。
+    votes = max(1, settings.ip_recognition_votes)
+    rec: IPRecognition | None = None
+    for i in range(votes):
+        try:
+            cand = await with_transient_retry(_attempt, max_attempts=2)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ip_recognition_failed", attempt=i + 1, error=str(exc))
+            continue
+        if cand.kind in ("known_ip", "hybrid") and (cand.ip_name or "").strip():
+            rec = cand  # 命中即采用，提前结束
+            break
+        # 记下首个非异常结果作为兜底（多为 original）
+        if rec is None:
+            rec = cand
+    if rec is None:
         return IPRecognition(kind="original", confidence=0.0)
 
     # Tavily 二次验证：known_ip 且 0.6~0.85 区间时才需要
