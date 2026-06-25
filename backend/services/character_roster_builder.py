@@ -293,6 +293,17 @@ async def build_character_roster(
             # Don't inject anything — there's no must-have constraint to enforce
 
         user_content += archetype_hint
+    else:
+        # 原创世界（无 IP pack）：禁止借用现实 IP 的角色名 / 组织名。LLM 造废土 / 奇幻
+        # 时极易直接搬现成角色（实测原创废土主角团整片来自《疯狂麦克斯》《辐射》：
+        # Max Rockatansky / Immortan Joe / NCR / 钢铁兄弟会）。定位 / 职能可通用，
+        # 但名字与身份标签必须完全原创。
+        user_content += (
+            "\n\n⚠️ 原创性要求：本世界为原创，禁止使用任何现实存在的影视 / 游戏 / 小说 / "
+            "动漫中的角色名、组织名或专有名词（如 Max Rockatansky、Immortan Joe、NCR、"
+            "钢铁兄弟会 等）。所有角色、势力、地点的名字必须完全原创；角色的定位 / 职能 / "
+            "原型可以通用，但名字与身份标签不得照搬已有作品。\n"
+        )
 
     try:
         # roster 是约束满足/规划任务（读 must_have、规划人数、保证主角在场、分配
