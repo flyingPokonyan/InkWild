@@ -16,14 +16,17 @@ from llm.base import ImageGenerator, ImageResult, LLMProvider
 # mid-stream stall is surfaced at either layer rather than hanging forever.
 _DEFAULT_HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
 
-# Image generation is non-streaming and legitimately slow (gpt-image high quality
-# 30–60s; the upstream gateway polls up to ~120s). But WITHOUT an explicit timeout
-# the OpenAI SDK defaults to 600s/attempt — a single stalled image then blocks for
-# up to 10 min, and with the caller's retry layers one unlucky portrait can hang the
-# whole images stage for ~18 min (observed 2026-06-23). Cap each attempt at 140s
-# (just above the gateway's 120s poll) so a stall fails fast and the caller retries
-# / falls back instead of hanging.
-_DEFAULT_IMAGE_TIMEOUT = httpx.Timeout(connect=10.0, read=140.0, write=10.0, pool=10.0)
+# Image generation is non-streaming and legitimately slow, but the OpenAI SDK
+# default is 600s/attempt. Use a bounded per-attempt read timeout; the workshop
+# image ladder retries timeout/unknown failures above this layer.
+def _image_timeout_seconds() -> float:
+    from config import settings
+
+    return max(float(getattr(settings, "image_generation_timeout_seconds", 100.0)), 0.001)
+
+
+def _image_httpx_timeout() -> httpx.Timeout:
+    return httpx.Timeout(connect=10.0, read=_image_timeout_seconds(), write=10.0, pool=10.0)
 
 
 def _convert_tool_to_openai(tool: dict) -> dict:
@@ -208,13 +211,13 @@ class OpenAICompatibleImageProvider(ImageGenerator):
         base_url: str,
         model: str,
     ):
-        # Bounded per-attempt timeout (see _DEFAULT_IMAGE_TIMEOUT). max_retries=0:
+        # Bounded per-attempt timeout (see _image_httpx_timeout). max_retries=0:
         # we run our own retry/fallback ladder upstream, so the SDK's built-in
         # retries would only compound the worst-case latency.
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=_DEFAULT_IMAGE_TIMEOUT,
+            timeout=_image_httpx_timeout(),
             max_retries=0,
         )
         self.model = model

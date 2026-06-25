@@ -186,6 +186,10 @@ class Settings(BaseSettings):
     # Image generation quality — gpt-image-2 / openai-compatible providers
     # 接受 "low" | "medium" | "high" | "auto"。生产推荐 "high"，预览/测试可改 "medium"。
     image_generation_quality: str = "high"
+    # Hard timeout for a single image generation attempt. The workshop image
+    # ladder retries timeout/unknown failures above this layer, so keep one
+    # attempt bounded enough that a stuck image cannot hold the whole batch.
+    image_generation_timeout_seconds: float = 100.0
     # Workshop daily creation quotas — set to 0 to disable limit check (unlimited for admins via can_create bypass).
     workshop_world_generations_per_day: int = 2
     workshop_script_generations_per_day: int = 3

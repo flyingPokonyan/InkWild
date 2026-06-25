@@ -74,15 +74,18 @@ export default function DiscoverPage() {
 
   return (
     <main
-      className="lv-theme"
+      className="lv-theme lv-discover-page"
       style={{
         background: "var(--lv-bg)",
         color: "var(--lv-ink)",
         minHeight: "100dvh",
         overflowX: "hidden",
         position: "relative",
+        isolation: "isolate",
       }}
     >
+      <div className="lv-discover-atmosphere" aria-hidden />
+
       <ProductNav
         active="discover"
         variant={showingSpotlight ? "transparent" : "solid"}
@@ -333,6 +336,35 @@ export default function DiscoverPage() {
       <style jsx global>{`
         .carousel-track::-webkit-scrollbar {
           display: none;
+        }
+        .lv-discover-atmosphere {
+          position: fixed;
+          inset: 0;
+          z-index: 0;
+          overflow: hidden;
+          pointer-events: none;
+        }
+        .lv-discover-atmosphere::before {
+          content: "";
+          position: absolute;
+          inset: -8vh -8vw;
+          background: url("/discover-atmosphere-bg.jpg") center bottom / cover no-repeat;
+          opacity: 0.28;
+          filter: blur(36px) saturate(0.7) brightness(0.78);
+          transform: scale(1.06);
+        }
+        .lv-discover-atmosphere::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(110% 70% at 50% 10%, rgba(12, 18, 24, 0.16) 0%, transparent 58%),
+            linear-gradient(180deg, rgba(8, 8, 10, 0.44) 0%, rgba(8, 8, 10, 0.74) 46%, var(--lv-bg) 100%);
+        }
+        .lv-discover-desktop,
+        .lv-discover-mobile {
+          position: relative;
+          z-index: 1;
         }
         @media (max-width: 768px) {
           .lv-discover-desktop { display: none !important; }

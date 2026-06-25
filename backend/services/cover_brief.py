@@ -148,11 +148,24 @@ def derive_character_reference_anchor(
 # Prompt builders
 # ---------------------------------------------------------------------------
 
-# Shared trailing negative. Kept short — the validation experiments showed that
-# long negative lists do not improve compliance and sometimes confuse the model.
-# 演员表 added 2026-06-23: gpt-image-2 likes to render a cast-credit strip at the
-# bottom of poster-style key art; naming it explicitly removes it (user feedback).
-_LOGO_NEGATIVE = "不要出现 logo、品牌、演员表、奖项、发行日期、电视台署名。"
+# Shared trailing negative. Kept compact but explicit about readable text: recent
+# batch covers showed random Chinese signs / countdown digits / poster titles,
+# which look dirty in the UI because InkWild renders all metadata itself.
+_LOGO_NEGATIVE = (
+    "不要出现任何可读文字、标题、字幕、数字、乱码、logo、品牌、演员表、奖项、发行日期、"
+    "电视台署名或界面元素；牌匾、纸张、卷轴、符咒只能作为模糊纹理，不要生成可辨认字符。"
+)
+
+# Global display discipline. The site should feel like one curated story shelf,
+# but IP/source fidelity must stay above any house style.
+_INKWILD_HOUSE_STYLE = (
+    "InkWild 统一的是陈列纪律，不是把所有题材画成同一种风格："
+    "干净、克制、低噪点、低 AI 感、单一焦点、真实材质，适合深色香槟金 UI 陈列。"
+    "允许每个世界保留自己的色温、美术方向、时代质感和情绪；"
+    "画面可以通透清爽，但不要为了明亮清新而改写阴郁、恐怖、诡秘、宫廷或末日题材的原本气质。"
+    "避免二游立绘、网文封面、游戏宣传图、廉价 stock photo、塑料皮肤、"
+    "过度锐化、过饱和蓝紫能量光、漂浮碎片和泛 AI fantasy glow。"
+)
 
 # Cinematic KEY ART framing + anti-collage.
 #
@@ -165,9 +178,10 @@ _LOGO_NEGATIVE = "不要出现 logo、品牌、演员表、奖项、发行日期
 # 现版本：拥抱影视级海报 / 电影 key art 的质感（构图、光影、景深、高级感），但保留反 montage
 # （单一统一焦点、不堆砌拼贴）。商业垃圾交给 _LOGO_NEGATIVE 兜。
 _CINEMATIC_COHESION = (
-    "整体呈现影视级海报 / 电影 key art 的质感：构图讲究、有明确视觉主体、"
+    "整体呈现影视级 key art / 高级剧照式主视觉的质感：构图讲究、有明确视觉主体、"
     "戏剧性的光影与景深，精致考究、有高级感。"
-    "保持单一、浑然一体的画面与统一焦点，不要把多个标志性元素拼贴、分屏或堆叠成大杂烩。"
+    "保持单一、浑然一体的画面与统一焦点，主体控制在 1-2 个核心意象，留出呼吸感；"
+    "不要把多个标志性元素拼贴、分屏、堆叠成大杂烩，也不要做商业海报式文字排版。"
 )
 
 # The site UI is near-black (--lv-bg #08080a). Without a nudge the model tends
@@ -175,7 +189,11 @@ _CINEMATIC_COHESION = (
 # is defensive (avoid murky/oppressive), NOT a hard "make it bright" — so a
 # deliberately moody world (e.g. 民国 watercolor grey) keeps its tone while
 # staying legible. Feedback: 图配暗色网站要通透、别压抑死黑.
-_DARK_UI_HINT = "画面会在深色网站上陈列，整体保持通透、避免晦暗压抑。"
+_DARK_UI_HINT = (
+    "画面会在近黑色、香槟金点缀的网站卡片和大图区域陈列，"
+    "需要在深色页面上清楚、有呼吸感；高光保留细节，暗部不要死黑，"
+    "避免晦暗压抑、脏乱颗粒感或过曝发白。"
+)
 
 
 def _world_subject_and_essence(brief: CoverBrief, ip_fallback: bool = False) -> tuple[str, str]:
@@ -205,6 +223,22 @@ def _world_subject_and_essence(brief: CoverBrief, ip_fallback: bool = False) -> 
     ess = (brief.essence or "").strip()
     essence_clause = f"以下是这个世界的内核，请理解后创作：{ess}\n" if ess else ""
     return f"为虚构作品《{brief.world_name}》", essence_clause
+
+
+def _fidelity_clause(brief: CoverBrief) -> str:
+    """Keep source/IP recognition above the house display layer."""
+    ip = (brief.ip_name or "").strip()
+    if ip:
+        return (
+            f"原作/已知 IP 识别优先：必须保留《{ip}》的时代质感、题材气质、"
+            "人物关系、核心意象、服饰建筑和材质语言；"
+            "InkWild 风格只约束构图清洁、无文字和网页适配，"
+            "不要改成通用清新/明亮风格。"
+        )
+    return (
+        "原创世界优先忠实世界描述和剧情内核；"
+        "InkWild 风格只约束构图清洁、无文字和网页适配，不要套通用模板。"
+    )
 
 
 def _mood_clause(mood: str) -> str:
@@ -239,6 +273,8 @@ def build_world_hero_prompt(brief: CoverBrief, ip_fallback: bool = False) -> str
         f"{essence}"
         f"{subject}创作一幅 21:9 的代表性画面，用于网站首页全屏陈列。"
         "请理解这个作品的整体氛围与精神内核后自由创作，由你决定最能传达它气质的意象与构图。"
+        f"{_fidelity_clause(brief)}"
+        f"{_INKWILD_HOUSE_STYLE}"
         f"{_CINEMATIC_COHESION}"
         f"{_mood_clause('' if (brief.ip_name or '').strip() else brief.mood)}"
         f"{_DARK_UI_HINT}"
@@ -259,7 +295,9 @@ def build_world_cover_prompt(brief: CoverBrief, ip_fallback: bool = False) -> st
         f"{essence}"
         f"{subject}创作一幅 3:2 的封面图，用于网站世界列表里的小尺寸卡片陈列，"
         "缩略到 280px 宽时仍要一眼传达这个作品的整体气质。"
-        "请理解它的内核后自由创作，聚焦一个核心意象。"
+        "请理解它的内核后自由创作，聚焦一个核心意象，避免信息过载。"
+        f"{_fidelity_clause(brief)}"
+        f"{_INKWILD_HOUSE_STYLE}"
         f"{_CINEMATIC_COHESION}"
         f"{_mood_clause('' if (brief.ip_name or '').strip() else brief.mood)}"
         f"{_DARK_UI_HINT}"
@@ -293,7 +331,10 @@ def build_script_cover_prompt(
     ess_clause = f"以下是这条剧情线的内核，请理解后创作：{ess}\n" if ess else ""
     return (
         f"{ess_clause}{head}"
-        "请理解这段故事的张力后自由创作，由你决定最能传达它的意象与构图，不必罗列写实场景。"
+        "请理解这段故事的张力后自由创作，由你决定最能传达它的单一意象与构图，不必罗列写实场景。"
+        f"{_fidelity_clause(world_brief)}"
+        f"{_INKWILD_HOUSE_STYLE}"
+        f"{_CINEMATIC_COHESION}"
         f"{_mood_clause('' if ip else world_brief.mood)}"
         f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
@@ -336,9 +377,12 @@ def build_character_portrait_prompt(
     )
     return (
         f"为《{world_brief.world_name}》中的角色「{char.name}」（{descriptor}）"
-        f"创作一幅{style_cue}2:3 人物海报。"
+        f"创作一幅{style_cue}2:3 人物主视觉 / character key art。"
+        f"{_fidelity_clause(world_brief)}"
+        f"{_INKWILD_HOUSE_STYLE}"
         "眼线落在画面上三分位附近（前端将自动裁出圆形头像）。"
-        "画面中不要出现任何文字、姓名标签或字幕。"
+        "人物自然可信、材质真实，不要塑料皮肤或过度磨皮。画面中不要出现任何文字、姓名标签或字幕。"
+        f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
         "2:3 竖版。"
     )
@@ -355,9 +399,12 @@ def build_ending_card_prompt(
     return (
         f"为《{world_brief.world_name}》创作一张「{ending.title}」结局画面卡。"
         f"故事到这里的状态：{ending.description}"
+        f"{_fidelity_clause(world_brief)}"
+        f"{_INKWILD_HOUSE_STYLE}"
+        f"{_CINEMATIC_COHESION}"
         f"{_mood_clause(world_brief.mood)}"
-        f"若画面包含标题文字，使用「{ending.title}」。"
         "无血腥暴力直白展示，可象征性表达。"
+        f"{_DARK_UI_HINT}"
         f"{_LOGO_NEGATIVE}"
         "3:2 横版。"
     )

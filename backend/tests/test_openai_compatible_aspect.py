@@ -1,5 +1,6 @@
 """Aspect ratio → size mapping tests for Seedream-compatible providers."""
-from llm.openai_compatible import _size_for_aspect_ratio
+from config import settings
+from llm.openai_compatible import _image_httpx_timeout, _size_for_aspect_ratio
 
 
 def test_legacy_ratios_unchanged():
@@ -31,3 +32,17 @@ def test_new_ratios_supported():
 
 def test_unknown_falls_back_to_square():
     assert _size_for_aspect_ratio("nonsense") == "1024x1024"
+
+
+def test_image_timeout_defaults_to_100_seconds():
+    timeout = _image_httpx_timeout()
+
+    assert timeout.read == 100.0
+
+
+def test_image_timeout_uses_settings(monkeypatch):
+    monkeypatch.setattr(settings, "image_generation_timeout_seconds", 42.0)
+
+    timeout = _image_httpx_timeout()
+
+    assert timeout.read == 42.0
