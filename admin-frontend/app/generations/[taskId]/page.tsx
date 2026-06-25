@@ -82,8 +82,32 @@ function QualityCard({ q }: { q: GenerationQuality }) {
         >
           总评 {Math.round(q.overall_score)}
         </span>
+        {q.blocking_flags && q.blocking_flags.length > 0 ? (
+          <span
+            title={q.blocking_flags.join(" · ")}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 9px",
+              borderRadius: 5, fontWeight: 700, fontSize: 12.5,
+              background: "color-mix(in oklab, var(--danger) 16%, transparent)",
+              color: "var(--danger)",
+            }}
+          >
+            ⛔ 设定硬伤 · 不建议直接发布
+          </span>
+        ) : (
+          <span
+            style={{
+              display: "inline-flex", alignItems: "center", padding: "2px 9px",
+              borderRadius: 5, fontWeight: 600, fontSize: 12.5,
+              background: "color-mix(in oklab, var(--success, #22c55e) 14%, transparent)",
+              color: "var(--success, #22c55e)",
+            }}
+          >
+            ✓ 可发布
+          </span>
+        )}
         <span className="dim-2" style={{ fontSize: 11, marginLeft: "auto" }}>
-          异步打分 · 总评仅由硬指标加权（软分不计入）
+          异步打分 · 总评=诚实硬指标（进趋势）；红旗=软裁判门控（仅建议）
         </span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 24, padding: 16 }}>

@@ -15,7 +15,7 @@ from models.draft import WorldDraft
 from models.generation_task import GenerationTask
 from models.ip_knowledge_pack import IPKnowledgePack
 from models.world_quality_score import WorldQualityScore
-from services.generation_rubric import compute_hard_metrics
+from services.generation_rubric import compute_blocking_flags, compute_hard_metrics
 from services.world_critic_service import score_world_soft
 
 logger = structlog.get_logger(__name__)
@@ -48,14 +48,28 @@ class WorldQualityScorer:
                 must_have = [
                     str(c.get("name"))
                     for c in (pack_json.get("characters") or [])
+                    # 只数续作内 must_have——被导演降级(in_continuity=False)的不算必含。
                     if isinstance(c, dict) and c.get("must_have") and c.get("name")
+                    and c.get("in_continuity", True)
                 ]
 
             # ---- 硬指标(Python,0 成本)----
             hard = compute_hard_metrics(payload, must_have)
 
-            # ---- 软分(LLM,默认跑;失败返回 None,不阻断)----
+            # ---- 软分(LLM,best-of-N 投票;失败返回 None,不阻断)----
             soft = await score_world_soft(payload, pack_json, self.llm) if run_soft else None
+
+            # ---- 两数门控（替代旧 cap-to-55）：overall 保持诚实硬分进趋势，
+            #      设定硬伤单出 blocking_flags + shippable，admin 旁路显示红旗，不压扁成一个数 ----
+            overall = hard["overall_score"]
+            blocking_flags, shippable = compute_blocking_flags(soft)
+            # 评分盲点闸：IP 世界（有 pack）却 0 must_have —— 多半是 IP 研究失败/被清空，
+            # 此时 compute_hard_metrics 因 must_have_total==0 会白送 40 分（mh_ratio=1.0），
+            # overall 虚高到 100。原创世界无 pack、合法 0 must_have，不触发。落红旗示警。
+            if pack is not None and not must_have:
+                blocking_flags = list(blocking_flags) + ["ip_pack_no_must_have"]
+                shippable = False
+                logger.warning("quality_ip_pack_no_must_have", task_id=task_id)
 
             async with self.session_factory() as session:
                 row = WorldQualityScore(
@@ -76,10 +90,14 @@ class WorldQualityScorer:
                     backfill_count=hard["backfill_count"],
                     prune_count=hard["prune_count"],
                     soft_warning_count=hard["soft_warning_count"],
-                    overall_score=hard["overall_score"],
+                    overall_score=overall,
+                    blocking_flags=blocking_flags or None,
+                    shippable=shippable,
                     detail={
                         "hard": hard,
                         "soft": soft,
+                        "blocking_flags": blocking_flags,
+                        "shippable": shippable,
                         "must_have_names": must_have,
                     },
                 )
@@ -89,9 +107,12 @@ class WorldQualityScorer:
             logger.info(
                 "quality_score_done",
                 task_id=task_id,
-                overall=hard["overall_score"],
-                must_have=f"{hard['must_have_covered']}/{hard['must_have_total']}",
-                backfill=hard["backfill_count"],
+                overall=overall,
+                blocking_flags=blocking_flags,
+                shippable=shippable,
+                must_have=f"{hard['must_have_genuine_covered']}/{hard['must_have_total']}"
+                + (f" (+{hard['backfill_count']} backfilled)" if hard["backfill_count"] else ""),
+                prune=hard["prune_count"],
                 soft_ran=bool(soft),
             )
         except Exception:  # noqa: BLE001

@@ -72,7 +72,7 @@ def _build_ip_pack_block(
         return ""
 
     summary_excerpt = (ip_pack.summary or "").strip()[:500]
-    char_names = [c.name for c in ip_pack.characters[:8] if getattr(c, "name", "")]
+    char_names = [c.name for c in ip_pack.canon_characters()[:8] if getattr(c, "name", "")]
     place_names = [p.name for p in ip_pack.places[:8] if getattr(p, "name", "")]
     faction_names = [f.name for f in ip_pack.factions[:8] if getattr(f, "name", "")]
     object_names = [o.name for o in ip_pack.iconic_objects[:8] if getattr(o, "name", "")]

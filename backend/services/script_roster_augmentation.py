@@ -65,7 +65,8 @@ def is_world_scoped_addition(name: str, ip_pack: IPKnowledgePack | None) -> bool
     """
     if ip_pack is None:
         return False
-    return name in {c.name for c in ip_pack.characters}
+    # 只认续作内角色 —— 被导演降级的跨时代/跨版本角色不再反哺进剧本名册。
+    return name in {c.name for c in ip_pack.canon_characters()}
 
 
 async def augment_script_roster(
@@ -93,7 +94,7 @@ async def augment_script_roster(
     # Candidate pool = canonical characters the world roster lacks. must_have
     # first so the most load-bearing names survive the pool cap.
     pool = [
-        c for c in ip_pack.characters
+        c for c in ip_pack.canon_characters()
         if c.name and c.name not in existing_names
     ]
     pool.sort(key=lambda c: (not c.must_have, c.name))

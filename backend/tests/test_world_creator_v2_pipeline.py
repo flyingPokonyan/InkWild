@@ -962,6 +962,123 @@ async def test_images_fallback_to_placeholder_on_failure():
     )
 
 
+@pytest.mark.asyncio
+async def test_generate_image_with_fallback_retries_unknown_failure(monkeypatch):
+    """Unknown failures are retried once before falling back."""
+    from llm.base import ImageResult
+    from services import world_creator_agent_v2 as v2
+
+    monkeypatch.setattr(v2, "_IMAGE_RETRY_BACKOFFS", (0.0, 0.0))
+
+    class FlakyImageGen:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_image(self, prompt, *, aspect_ratio="1:1", resolution="1k"):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary upstream wobble")
+            return ImageResult(url="/remote/ok.png")
+
+    image_gen = FlakyImageGen()
+
+    with patch(
+        "services.world_creator_agent_v2.save_generated_image_result",
+        AsyncMock(side_effect=lambda storage, result, key: result.url),
+    ):
+        url, result = await v2._generate_image_with_fallback(
+            image_gen,
+            ["prompt"],
+            aspect_ratio="3:2",
+            storage=MagicMock(),
+            storage_key="worlds/test.png",
+            log_key="test",
+            max_attempts=2,
+        )
+
+    assert image_gen.calls == 2
+    assert url == "/remote/ok.png"
+    assert result is not None
+
+
+@pytest.mark.asyncio
+async def test_generate_image_with_fallback_retries_timeout(monkeypatch):
+    """A hung attempt is cut off by the image timeout and retried."""
+    from llm.base import ImageResult
+    from config import settings
+    from services import world_creator_agent_v2 as v2
+
+    monkeypatch.setattr(settings, "image_generation_timeout_seconds", 0.01)
+    monkeypatch.setattr(v2, "_IMAGE_RETRY_BACKOFFS", (0.0, 0.0))
+
+    class SlowThenOkImageGen:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_image(self, prompt, *, aspect_ratio="1:1", resolution="1k"):
+            self.calls += 1
+            if self.calls == 1:
+                await asyncio.Future()
+            return ImageResult(url="/remote/after-timeout.png")
+
+    image_gen = SlowThenOkImageGen()
+
+    with patch(
+        "services.world_creator_agent_v2.save_generated_image_result",
+        AsyncMock(side_effect=lambda storage, result, key: result.url),
+    ):
+        url, _result = await v2._generate_image_with_fallback(
+            image_gen,
+            ["prompt"],
+            aspect_ratio="3:2",
+            storage=MagicMock(),
+            storage_key="worlds/test.png",
+            log_key="test",
+            max_attempts=2,
+        )
+
+    assert image_gen.calls == 2
+    assert url == "/remote/after-timeout.png"
+
+
+@pytest.mark.asyncio
+async def test_generate_image_with_fallback_does_not_repeat_provider_placeholder(monkeypatch):
+    """Provider-level placeholder means the provider already exhausted itself."""
+    from llm.base import ImageResult
+    from services import world_creator_agent_v2 as v2
+    from services.image_storage import IMAGE_PLACEHOLDER_URL
+
+    monkeypatch.setattr(v2, "_IMAGE_RETRY_BACKOFFS", (0.0, 0.0))
+
+    class PlaceholderImageGen:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_image(self, prompt, *, aspect_ratio="1:1", resolution="1k"):
+            self.calls += 1
+            return ImageResult(url=IMAGE_PLACEHOLDER_URL)
+
+    image_gen = PlaceholderImageGen()
+
+    with patch(
+        "services.world_creator_agent_v2.save_generated_image_result",
+        AsyncMock(return_value=IMAGE_PLACEHOLDER_URL),
+    ):
+        url, result = await v2._generate_image_with_fallback(
+            image_gen,
+            ["prompt"],
+            aspect_ratio="3:2",
+            storage=MagicMock(),
+            storage_key="worlds/test.png",
+            log_key="test",
+            max_attempts=3,
+        )
+
+    assert image_gen.calls == 1
+    assert url == IMAGE_PLACEHOLDER_URL
+    assert result is None
+
+
 # =============================================================================
 # Subtask events tests (lore_pack / characters / events_data)
 # =============================================================================

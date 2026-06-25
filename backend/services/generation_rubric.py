@@ -69,8 +69,39 @@ def _safety_net(payload: dict) -> dict:
     }
 
 
+# 软评门控阈值（P0「两个数」之一）：ip_consistency / collision 任一 ≤ 此值 = 设定硬伤
+# （矛盾/撞车/跨时代）。软裁判是唯一能看穿这类问题的信号（硬指标只数数量）。这里**不再**
+# 把它压进 overall（旧 cap-to-55 是补丁，丢信息），而是单出 blocking_flags + shippable，
+# overall 保持诚实硬分进趋势，红旗在 admin 旁路显示。tension 偏主观（"平淡"≠"错"），不门控。
+BLOCKING_SOFT_THRESHOLD = 4
+
+
+def compute_blocking_flags(soft: dict | None) -> tuple[list[str], bool]:
+    """从软裁判分算「阻断红旗」+ shippable 布尔（P0 两数门控，替代旧 cap-to-55）。
+
+    返回 (blocking_flags, shippable)。flags 非空 = 有设定硬伤、不建议直接发布（但**只建议、
+    不硬卡**，admin 仍可发）。soft 缺失/未跑 → 无法判定，按"暂不阻断"(shippable=True) 处理。
+    """
+    if not soft:
+        return [], True
+    flags: list[str] = []
+    for key in ("ip_consistency", "collision"):
+        v = soft.get(key)
+        if isinstance(v, int) and v <= BLOCKING_SOFT_THRESHOLD:
+            flags.append(f"{key}={v}")
+    return flags, not flags
+
+
 def compute_hard_metrics(payload: dict, ip_must_have: list[str] | None = None) -> dict:
-    """硬指标 + 安全网 + overall_score(0-100,仅硬指标加权,软分不参与)。"""
+    """诚实硬指标 + 安全网 + overall_score(0-100,仅硬指标,软分不参与)。
+
+    P0 三处改动让分变诚实（不再"靠兜底撑满"）：
+    - must_have 覆盖按 **真实覆盖**算（扣掉 backfill 补回的）：靠安全网救回来的不算数，
+      否则 must_have 40 分被 backfill 撑成恒满，分永远看不出问题（十日终焉式 99 分根因）。
+    - structure 分母从 char×3 收紧到 char×1.5：P2 地点对账消灭了海量 schedule 悬空 warning 后，
+      剩下的 warning 更该被如实计入。
+    - prune 扣分：strict 删掉的非原作角色越多 = 规划越跑偏，按量扣（封顶 20）。
+    """
     names = _character_names(payload)
     norm_names = {_norm_name(n) for n in names if n}
     character_count = len(names)
@@ -89,30 +120,36 @@ def compute_hard_metrics(payload: dict, ip_must_have: list[str] | None = None) -
         shape_warnings = validate_world_shape(payload) or []
     except Exception:  # noqa: BLE001
         shape_warnings = []
-    # 随角色规模缩放：shape_warnings 多为轻微项(如 schedule 引用未知 location)，
-    # 不能线性归零——实测好世界(紫禁深宫 24w / 灰雾迷城 9w)warning 数本就随角色数涨。
-    # 分母用 character_count*3，让"好世界少量 warning"仍得高分、只有海量 warning 才压低。
-    structure_score = max(0.0, 1.0 - len(shape_warnings) / max(1.0, character_count * 3.0))
+    # 随角色规模缩放，但分母收紧到 char×1.5（旧 char×3 太宽容、海量 warning 也压不低分）。
+    structure_score = max(0.0, 1.0 - len(shape_warnings) / max(1.0, character_count * 1.5))
 
     safety = _safety_net(payload)
+    backfill_count = safety["backfill_count"]
+    prune_count = safety["prune_count"]
 
-    # overall: must_have 覆盖 40 / 角色数 20 / 可玩数 20 / 结构 20
-    mh_ratio = (must_have_covered / must_have_total) if must_have_total else 1.0
+    # must_have 真实覆盖 = 最终覆盖 − backfill 补回的（靠兜底救回来的不计入诚实分）。
+    genuine_covered = max(0, must_have_covered - backfill_count)
+    mh_ratio = (genuine_covered / must_have_total) if must_have_total else 1.0
     char_ratio = min(1.0, character_count / 12.0)
     play_ratio = min(1.0, playable_count / 8.0)
-    overall = round(40 * mh_ratio + 20 * char_ratio + 20 * play_ratio + 20 * structure_score, 1)
+    base = 40 * mh_ratio + 20 * char_ratio + 20 * play_ratio + 20 * structure_score
+    # prune 扣分：每个被裁掉的 AI 杜撰角色 −4，封顶 −20。
+    prune_penalty = min(20.0, prune_count * 4.0)
+    overall = round(max(0.0, base - prune_penalty), 1)
 
     return {
         "character_count": character_count,
         "playable_count": playable_count,
         "must_have_total": must_have_total,
         "must_have_covered": must_have_covered,
+        "must_have_genuine_covered": genuine_covered,
         "events_count": events_count,
         "shared_events_count": shared_events_count,
         "structure_score": round(structure_score, 3),
         "shape_warnings": shape_warnings,
-        "backfill_count": safety["backfill_count"],
-        "prune_count": safety["prune_count"],
+        "backfill_count": backfill_count,
+        "prune_count": prune_count,
+        "prune_penalty": round(prune_penalty, 1),
         "soft_warning_count": safety["soft_warning_count"],
         "safety_net": safety,
         "overall_score": overall,

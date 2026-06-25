@@ -22,6 +22,10 @@ class IPCharacter(BaseModel):
     source_passage_ids: list[str] = Field(default_factory=list)
     voice_style: str | None = None  # typical speech style/quote, e.g. "温润书生口吻"
     story_arc: str | None = None    # growth arc in source IP, 30-80 chars
+    # 导演裁决（P1）：跨时代 / 跨版本糅合进来的角色被降级为 in_continuity=False —— 不删除
+    # （留在 pack 里可见可恢复），但所有生成阶段都跳过它，避免"关公战秦琼"。默认 True。
+    in_continuity: bool = True
+    arbitration_note: str | None = None  # 降级原因（可见），如"西汉人物，与汉末主线跨时代"
 
 
 class IPPlace(BaseModel):
@@ -75,9 +79,24 @@ class IPKnowledgePack(BaseModel):
     tone_lingo: list[str]
     passages: list[Passage]
     timeline: list[IPTimelineEntry] = Field(default_factory=list)
+    # 导演裁决（P1）：选定的版本/主线锚定说明 + 可玩视角生态位建议（注入 roster 规划）。
+    canon_note: str | None = None
+    playable_archetypes: list[str] = Field(default_factory=list)
+
+    def canon_characters(self) -> list[IPCharacter]:
+        """续作内（in_continuity）角色 —— 所有生成阶段应只消费这批；跨时代/跨版本降级的不进。
+
+        被降级的角色仍留在 self.characters（可见可恢复），但不参与 roster / 详情 / 事件 /
+        剧本生成。导演裁决（_arbitrate_canon）失败时无人被降级 → 等价于全量。
+        """
+        return [c for c in self.characters if c.in_continuity]
+
+    def canon_character_names(self) -> list[str]:
+        return [c.name for c in self.canon_characters()]
 
     def must_have_character_names(self) -> list[str]:
-        return [c.name for c in self.characters if c.must_have]
+        # must_have 且在续作内才算必含 —— 跨时代角色即便原标 must_have 也不再强制注入。
+        return [c.name for c in self.characters if c.must_have and c.in_continuity]
 
     def must_have_place_names(self) -> list[str]:
         return [p.name for p in self.places if p.must_have]

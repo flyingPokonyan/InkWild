@@ -482,6 +482,8 @@ async def list_generation_tasks(
             "quality_score": sr.overall_score if sr else None,
             "quality_backfill": sr.backfill_count if sr else None,
             "quality_must_have": (f"{sr.must_have_covered}/{sr.must_have_total}" if sr and sr.must_have_total else None),
+            "quality_blocking_flags": (sr.blocking_flags or []) if sr else None,
+            "quality_shippable": sr.shippable if sr else None,
             "created_at": serialize_utc_datetime(t.created_at),
             "started_at": serialize_utc_datetime(t.started_at),
             "finished_at": serialize_utc_datetime(t.finished_at),
@@ -563,6 +565,8 @@ def _serialize_quality(qs: WorldQualityScore) -> dict:
     """质量报告序列化：硬指标(客观) / 软分(LLM,仅参考) / 安全网触发量 分区。"""
     return {
         "overall_score": qs.overall_score,
+        "blocking_flags": qs.blocking_flags or [],
+        "shippable": qs.shippable,
         "hard": {
             "character_count": qs.character_count,
             "playable_count": qs.playable_count,

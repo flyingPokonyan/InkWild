@@ -96,6 +96,43 @@ from services.world_moderation_service import moderate_world_payload
 logger = structlog.get_logger()
 
 
+_IMAGE_GENERATION_MAX_ATTEMPTS = 3
+_IMAGE_RETRY_BACKOFFS: tuple[float, ...] = (1.0, 3.0)
+
+
+def _image_attempt_timeout_s() -> float:
+    return max(float(getattr(settings, "image_generation_timeout_seconds", 100.0)), 0.001)
+
+
+def _image_retry_deadline_s(max_attempts: int = _IMAGE_GENERATION_MAX_ATTEMPTS) -> float:
+    attempts = max(max_attempts, 1)
+    backoff_total = sum(_IMAGE_RETRY_BACKOFFS[: max(attempts - 1, 0)])
+    # 30s is the storage URL download cap; add a small cushion for scheduling.
+    return (_image_attempt_timeout_s() * attempts) + backoff_total + 35.0
+
+
+def _image_status_code(exc: BaseException) -> int | None:
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if status is None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def _is_retryable_image_error(exc: BaseException) -> bool:
+    status = _image_status_code(exc)
+    if status is not None and 400 <= status < 500 and status not in {408, 409, 425, 429}:
+        return False
+    return True
+
+
+async def _sleep_before_image_retry(attempt: int) -> None:
+    if not _IMAGE_RETRY_BACKOFFS:
+        return
+    sleep_idx = min(max(attempt - 1, 0), len(_IMAGE_RETRY_BACKOFFS) - 1)
+    await asyncio.sleep(_IMAGE_RETRY_BACKOFFS[sleep_idx])
+
+
 async def _generate_image_with_fallback(
     image_gen,
     prompt_tiers: list[str],
@@ -104,7 +141,7 @@ async def _generate_image_with_fallback(
     storage,
     storage_key: str,
     log_key: str = "",
-    max_attempts: int = 3,
+    max_attempts: int = _IMAGE_GENERATION_MAX_ATTEMPTS,
 ):
     """Generate an image with up to ``max_attempts`` tries before giving up.
 
@@ -120,28 +157,61 @@ async def _generate_image_with_fallback(
     if not prompt_tiers:
         return IMAGE_PLACEHOLDER_URL, None
     tier = 0
-    for attempt in range(max_attempts):
+    max_attempts = max(max_attempts, 1)
+    attempt_timeout_s = _image_attempt_timeout_s()
+    for attempt in range(1, max_attempts + 1):
         prompt = prompt_tiers[min(tier, len(prompt_tiers) - 1)]
         try:
-            result = await image_gen.generate_image(prompt, aspect_ratio=aspect_ratio)
+            result = await asyncio.wait_for(
+                image_gen.generate_image(prompt, aspect_ratio=aspect_ratio),
+                timeout=attempt_timeout_s,
+            )
             url = await save_generated_image_result(storage, result, storage_key)
             if url and url != IMAGE_PLACEHOLDER_URL:
                 return url, result
-            logger.warning("image_gen_blocked", key=log_key, tier=tier, attempt=attempt + 1)
-            tier += 1
+            logger.warning(
+                "image_gen_empty_or_placeholder",
+                key=log_key,
+                tier=tier,
+                attempt=attempt,
+                result="placeholder" if url == IMAGE_PLACEHOLDER_URL else "empty",
+            )
+            if tier + 1 < len(prompt_tiers):
+                tier += 1
+            elif url == IMAGE_PLACEHOLDER_URL:
+                break
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            logger.warning(
+                "image_gen_attempt_timeout",
+                key=log_key,
+                attempt=attempt,
+                timeout_s=attempt_timeout_s,
+                error_type=type(exc).__name__,
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("image_gen_error", key=log_key, attempt=attempt + 1, error=str(exc))
-            await asyncio.sleep(2 * (attempt + 1))
+            retryable = _is_retryable_image_error(exc)
+            logger.warning(
+                "image_gen_error",
+                key=log_key,
+                attempt=attempt,
+                retryable=retryable,
+                status_code=_image_status_code(exc),
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            if not retryable:
+                break
+        if attempt < max_attempts:
+            await _sleep_before_image_retry(attempt)
     return IMAGE_PLACEHOLDER_URL, None
 
 PLACEHOLDER_COVER_URL = "/static/placeholder-cover.png"
 
-# Hard wall-clock cap for a SINGLE image (all retry/fallback tiers combined). The
-# images stage waits for every image, so one stuck portrait holds the whole stage
-# hostage — observed 2026-06-23 when 13/14 finished in ~2 min but one looped retries
-# for ~18 min. Past this deadline we give up and ship a placeholder (admin can
-# regenerate from the draft) so the stage finishes promptly instead of stalling.
-_PER_IMAGE_DEADLINE_S = 240.0
+# Hard wall-clock cap for a SINGLE image (all retry/fallback tiers combined).
+# Derived from IMAGE_GENERATION_TIMEOUT_SECONDS so the final guard stays aligned
+# with the per-attempt timeout.
+def _per_image_deadline_s() -> float:
+    return _image_retry_deadline_s(_IMAGE_GENERATION_MAX_ATTEMPTS)
 
 # Stage index map (used in progress events)
 _STAGE_INDEX = {
@@ -214,7 +284,7 @@ def _backfill_missing_must_have(
         return world_characters, []
     must_have_chars = [
         c for c in getattr(ip_pack_ref, "characters", [])
-        if getattr(c, "must_have", False)
+        if getattr(c, "must_have", False) and getattr(c, "in_continuity", True)
     ]
     if not must_have_chars:
         return world_characters, []
@@ -252,6 +322,43 @@ def _backfill_missing_must_have(
         existing.add(_norm(c.name))
         injected.append(c.name)
     return world_characters, injected
+
+
+def _union_back_locations(
+    locations: list[dict], characters: list[Character]
+) -> tuple[list[dict], list[str]]:
+    """P2 地点对账：把角色 schedule / initial_location 引用到、但 locations 里没有的地点
+    **并回** locations 规范列表（不是把角色挪到已有地点）。
+
+    源头消灭 `schedule_unknown_location` / `initial_location_unknown` 这类形状 warning，
+    零 richness 损失——角色待在原作自然居所，只是把这些居所登记进世界地点表。
+    确定性纯函数，不调 LLM。返回 (新 locations, 新增的地点名)。
+    """
+    def _norm(n: str) -> str:
+        return re.sub(r"[\s·•・]", "", str(n or "")).strip()
+
+    known = {_norm(loc.get("name", "")) for loc in locations if isinstance(loc, dict)}
+    added: list[str] = []
+    seen_added: set[str] = set()
+    for c in characters:
+        refs: list[str] = []
+        for v in (c.schedule or {}).values():
+            if v:
+                refs.append(str(v))
+        if c.initial_location:
+            refs.append(str(c.initial_location))
+        for ref in refs:
+            k = _norm(ref)
+            if not k or k in known or k in seen_added:
+                continue
+            seen_added.add(k)
+            added.append(ref)
+    if added:
+        locations = list(locations) + [
+            {"name": name, "description": ""} for name in added
+        ]
+        logger.info("locations_union_back", added=added, total=len(locations))
+    return locations, added
 
 
 # Fail-fast thresholds. Below these counts the pipeline aborts before
@@ -584,6 +691,14 @@ class WorldCreatorAgentV2:
             yield ev
         lore_pack = self._last_lore_pack  # type: ignore[assignment]
         characters = self._last_characters  # type: ignore[assignment]
+
+        # ---- L1 地理冻结对账（P2 地点 union-back）----
+        # 角色详情阶段偶尔引用 locations 里没有的地点（schedule/initial_location）。把这些
+        # 被引用的地点并回权威地点集（不挪角色），消灭 schedule_unknown_location 形状 warning、
+        # 零 richness 损失。更新 world_base["locations"]（working_payload 读它）+ locations
+        # 局部变量（events_data 读它），两处都看到对账后的地点集。
+        locations, _loc_added = _union_back_locations(locations, characters or [])
+        world_base["locations"] = locations
 
         # Fail-fast: roster below publishable minimum → skip shared_events,
         # events_data, playable, critic, images. Was the 嘉靖宫变前夜
@@ -1139,12 +1254,19 @@ class WorldCreatorAgentV2:
             if must_have_places:
                 if fidelity == "strict":
                     user_message += (
-                        f"\n【强约束】locations 必须从以下原作地点中选用，**尽量用全**"
-                        f"（共 {len(must_have_places) + len(optional_places)} 个），可微调描述但禁止新增同类地点：\n"
+                        f"\n【强约束】以下原作地点**必须尽量用全**"
+                        f"（共 {len(must_have_places) + len(optional_places)} 个），可微调描述：\n"
                         f"必含：{', '.join(must_have_places)}\n"
                     )
                     if optional_places:
                         user_message += f"同时尽量纳入：{', '.join(optional_places)}\n"
+                    # 研究层抓到的原作地点常偏少（如代号鸢仅 7 个），若硬卡"禁止新增"会导致
+                    # 几十个角色挤在七八个地点里、世界发空。允许在不违背原作设定的前提下，
+                    # 补充主要角色居所 / 派系据点 / 关键事件场景等支撑地点，凑到上面给的规模区间。
+                    user_message += (
+                        "在不与原作设定矛盾的前提下，可补充主要角色居所、派系据点、关键事件"
+                        "场景等**合理支撑地点**，凑到上面给的地点规模区间（不要生造与原作冲突的地名）。\n"
+                    )
                 else:  # loose
                     user_message += (
                         f"\n【参考】原作核心地点：{', '.join(must_have_places)}\n"
@@ -2164,17 +2286,18 @@ class WorldCreatorAgentV2:
                 storage_name = world_name if not key.startswith("npc:") else key[4:]
                 storage_key = make_image_key(category, storage_name)
                 try:
+                    deadline_s = _per_image_deadline_s()
                     url, result = await asyncio.wait_for(
                         _generate_image_with_fallback(
                             self.image_gen, prompt_tiers,
                             aspect_ratio=aspect_ratio, storage=image_storage,
                             storage_key=storage_key, log_key=key,
                         ),
-                        timeout=_PER_IMAGE_DEADLINE_S,
+                        timeout=deadline_s,
                     )
                 except (asyncio.TimeoutError, TimeoutError):
                     logger.warning("image_gen_deadline_exceeded", key=key,
-                                   deadline_s=_PER_IMAGE_DEADLINE_S)
+                                   deadline_s=deadline_s)
                     return key, IMAGE_PLACEHOLDER_URL, None
                 # ImageResult returned so the caller can reuse bytes for cropping.
                 return key, url, result
@@ -2917,6 +3040,7 @@ class WorldCreatorAgentV2:
             reason = "no_image_gen" if not self.image_gen else "no_world_brief"
             logger.info("script_image_skipped", reason=reason)
         else:
+            storage = get_image_storage()
             # Script cover
             try:
                 script_kwargs = dict(
@@ -2929,7 +3053,6 @@ class WorldCreatorAgentV2:
                     script_tiers.append(
                         build_script_cover_prompt(world_brief, ip_fallback=True, **script_kwargs)
                     )
-                storage = get_image_storage()
                 storage_key = make_image_key("scripts/cover", script_base.get("name", "script"))
                 script_cover_url, _ = await _generate_image_with_fallback(
                     self.image_gen, script_tiers,
@@ -2944,12 +3067,14 @@ class WorldCreatorAgentV2:
             for ending_title, ending_brief in ending_briefs.items():
                 try:
                     prompt = build_ending_card_prompt(world_brief, ending_brief)
-                    result = await self.image_gen.generate_image(prompt, aspect_ratio="3:2")
-                    storage = get_image_storage()
                     storage_key = make_image_key(
                         "endings", f"{script_base.get('name', 'script')}_{ending_title}"
                     )
-                    saved = await save_generated_image_result(storage, result, storage_key)
+                    saved, _ = await _generate_image_with_fallback(
+                        self.image_gen, [prompt],
+                        aspect_ratio="3:2", storage=storage,
+                        storage_key=storage_key, log_key=f"ending_card:{ending_title}",
+                    )
                     if saved and saved != IMAGE_PLACEHOLDER_URL:
                         ending_image_results[ending_title] = saved
                 except Exception as exc:  # noqa: BLE001

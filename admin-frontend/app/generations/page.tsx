@@ -282,6 +282,14 @@ export default function GenerationsPage() {
                       >
                         {Math.round(t.quality_score)}
                         {t.quality_backfill ? <span title="靠 backfill 补救">⚠</span> : null}
+                        {t.quality_blocking_flags && t.quality_blocking_flags.length > 0 ? (
+                          <span
+                            title={`设定硬伤（不建议直接发布）：${t.quality_blocking_flags.join(" · ")}`}
+                            style={{ color: "var(--danger)" }}
+                          >
+                            ⛔
+                          </span>
+                        ) : null}
                       </span>
                     ) : (
                       <span className="dim-2">—</span>

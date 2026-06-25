@@ -150,7 +150,9 @@ def _prune_to_canon(
     roster。仅按 _norm_name 精确匹配；prompt 已强制 LLM 用原作名，对不齐的原作角色
     会被记进 dropped 日志供 review 时核（而非静默）。
     """
-    canon = {_norm_name(c.name) for c in ip_pack.characters if c.name}
+    # 白名单只认续作内角色 —— 被导演降级的跨时代/跨版本角色（in_continuity=False）即便
+    # LLM 误吐出来，strict 模式也会被裁掉（如鸢里的卫青/霍去病）。
+    canon = {_norm_name(c.name) for c in ip_pack.canon_characters() if c.name}
     if not canon:
         return entries
     kept = [e for e in entries if _norm_name(e.name) in canon]
@@ -254,8 +256,16 @@ async def build_character_roster(
 
     # T8: IP Pack hard/soft constraint injection
     if ip_pack is not None and fidelity_mode in ("strict", "loose"):
+        # 只规划续作内角色：must_have_character_names() / canon_characters() 都已滤掉
+        # 被导演降级的跨时代/跨版本角色，不会再把它们塞进 roster 提示。
         must_have = ip_pack.must_have_character_names()
-        optional = [c.name for c in ip_pack.characters if not c.must_have]
+        optional = [c.name for c in ip_pack.canon_characters() if not c.must_have]
+        archetype_hint = ""
+        if ip_pack.playable_archetypes:
+            archetype_hint = (
+                f"\n可玩视角生态位（is_image_target 的角色应尽量覆盖这些原型，别全挤主角团）："
+                f"{', '.join(ip_pack.playable_archetypes)}\n"
+            )
         if must_have:
             if fidelity_mode == "strict":
                 user_content += (
@@ -281,6 +291,8 @@ async def build_character_roster(
                 secondary_count=len(optional),
             )
             # Don't inject anything — there's no must-have constraint to enforce
+
+        user_content += archetype_hint
 
     try:
         # roster 是约束满足/规划任务（读 must_have、规划人数、保证主角在场、分配
@@ -368,7 +380,7 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
     "starting_inventory":["随身常用物品1","随身常用物品2"],
     "secret":"人物秘密，可空",
     "knowledge":["掌握的信息1","掌握的信息2"],
-    "schedule":{"morning":"地点","afternoon":"地点","evening":"地点","night":"地点"},
+    "schedule":{"morning":"地点名","afternoon":"地点名","evening":"地点名","night":"地点名"},
     "initial_location":"初始位置（必须是地点列表中已有的地点名）",
     "initial_peer_relations":[
       {"target":"另一NPC名","trust":-10到10整数,"kind":"关系类别如盟友/宿敌"}
@@ -383,7 +395,9 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
   abilities/inventory 各 1-4 条，平凡 NPC 也要给些日常擅长与随身物（如"算账"/"看人脸色"，"算盘"/"半斤碎银"）
 - voice_style 对**所有角色**都要写，要能明显区分各人嗓音、避免千人一腔；
   若世界背景表明基于已知作品（IP 复刻），原作角色的 personality 开头点明身份锚（如「《作品名》中的<角色>」）、voice_style 贴合原作口吻
-- initial_location 必须是给定地点列表中的名字；地点列表为空时可用空字符串
+- schedule 与 initial_location 的值**必须是给定地点列表中已有的地点名**（地点列表为空时可留空字符串）。
+  写"地点"不要写"活动"：❌"校场练兵"/"独酌弄墨"/"巡营"（这是在干什么）→ ✅"校场"/"书房"/"军营"（这是在哪）。
+  人物在某地做什么，靠 personality/knowledge 体现，schedule 只填地点名。
 - initial_peer_relations 的 target 只能是本批或整个 roster 中已有的 NPC 名（不含玩家角色）
 - trust 范围 -10（极度敌对）到 10（生死相托）
 - 只输出 JSON，不含任何解释文字
@@ -431,7 +445,7 @@ def _build_batch_prompt(
 
     # T8: per-character IP grounding (strict/loose only)
     if ip_pack is not None and fidelity_mode in ("strict", "loose"):
-        ip_lookup = {c.name.strip(): c for c in ip_pack.characters}
+        ip_lookup = {c.name.strip(): c for c in ip_pack.canon_characters()}
         grounding_blocks: list[str] = []
         for entry in batch:
             ip_match = ip_lookup.get(entry.name.strip())
@@ -657,7 +671,40 @@ async def build_characters_in_batches(
         seen.add(c.name)
         deduped.append(c)
 
-    # 缺失警告
+    # 1:1 定向回炉（有界 +1 轮）：详情阶段丢掉的 roster 角色，**只重跑这几个名字**，
+    # 干掉 critic 阶段的薄 backfill（backfill 合成的占位 persona 信息量低）。源头补全 >
+    # 兜底补占位。仍丢的留给 critic backfill 兜底（不至于主角凭空消失）。
+    missing_entries = [r for r in roster if r.name not in seen]
+    if missing_entries:
+        logger.info(
+            "character_missing_refetching",
+            count=len(missing_entries),
+            names=[e.name for e in missing_entries],
+        )
+        retry_batches = [
+            missing_entries[i : i + batch_size]
+            for i in range(0, len(missing_entries), batch_size)
+        ]
+        retry_results = await asyncio.gather(
+            *[
+                _process_batch(
+                    b, description, ip_canon, location_names, passages, llm_router, sem,
+                    ip_pack=ip_pack, fidelity_mode=fidelity_mode,
+                )
+                for b in retry_batches
+            ],
+            return_exceptions=True,
+        )
+        for res in retry_results:
+            if isinstance(res, Exception):
+                logger.warning("character_refetch_batch_failed", error=str(res))
+                continue
+            for c in res:  # type: ignore[assignment]
+                if c.name in roster_set and c.name not in seen:
+                    seen.add(c.name)
+                    deduped.append(c)
+
+    # 缺失警告（回炉后仍缺的）
     for n in roster_names:
         if n not in seen:
             logger.warning("character_missing", name=n)

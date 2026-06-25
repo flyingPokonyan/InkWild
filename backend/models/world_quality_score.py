@@ -54,6 +54,12 @@ class WorldQualityScore(Base):
     # ---- 综合（硬指标加权，0-100；软分不参与，避免被宽松软分拉高）----
     overall_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
 
+    # ---- 软评门控（P0 两数门控，替代旧 cap-to-55）----
+    # blocking_flags: 软裁判触底的维度（如 ["ip_consistency=4","collision=3"]），空=无硬伤。
+    # shippable: 无 blocking_flags 即 True。**仅建议、不硬卡发布**，admin 旁路显示红旗。
+    blocking_flags: Mapped[list | None] = mapped_column(_JSONB, nullable=True, default=None)
+    shippable: Mapped[bool] = mapped_column(default=True, index=True)
+
     detail: Mapped[dict | None] = mapped_column(_JSONB, nullable=True, default=None)
 
     scored_at: Mapped[datetime] = mapped_column(default=utcnow)

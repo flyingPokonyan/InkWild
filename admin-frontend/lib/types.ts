@@ -344,6 +344,8 @@ export interface GenerationTaskListItem {
   quality_score: number | null;
   quality_backfill: number | null;
   quality_must_have: string | null;
+  quality_blocking_flags: string[] | null;
+  quality_shippable: boolean | null;
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
@@ -351,6 +353,8 @@ export interface GenerationTaskListItem {
 
 export interface GenerationQuality {
   overall_score: number;
+  blocking_flags: string[];
+  shippable: boolean;
   hard: {
     character_count: number;
     playable_count: number;

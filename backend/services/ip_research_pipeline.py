@@ -438,12 +438,25 @@ async def _ground_and_augment(
         return pack
 
     ip_name = rec.ip_name or ""
+    grounded_chars = _safe_build_list(
+        IPCharacter, _prep_char_dicts(data.get("characters")), ip_name=ip_name, field="characters"
+    )
+    # 安全网：ground 这步是"核查/增删"，绝不该把整份候选名册清空。但 OpenCode 的
+    # deepseek-v4-pro 等"reasoning 关不掉"的模型偶发把思考吃满 token、正文 characters 截成
+    # 空数组（仍是合法 JSON，逃过上面的 except 兜底）→ 36 个角色瞬间归零 → 下游 underfill
+    # → 整个 IP 复刻降级成空 pack。这里兜底：grounded 角色为空但候选非空时，保留候选名册。
+    if not grounded_chars and candidates.characters:
+        logger.warning(
+            "ip_ground_emptied_characters_kept_candidates",
+            ip_name=ip_name, candidate_count=len(candidates.characters),
+        )
+        grounded_chars = candidates.characters
     return IPKnowledgePack(
         ip_name=ip_name,
         ip_type=rec.ip_type or "other",
         fidelity_mode=fidelity_mode,
         summary=data.get("summary", "") or candidates.summary,
-        characters=_safe_build_list(IPCharacter, _prep_char_dicts(data.get("characters")), ip_name=ip_name, field="characters"),
+        characters=grounded_chars,
         places=_safe_build_list(IPPlace, data.get("places"), ip_name=ip_name, field="places"),
         factions=_safe_build_list(IPFaction, data.get("factions"), ip_name=ip_name, field="factions"),
         iconic_objects=_safe_build_list(IPObject, data.get("iconic_objects"), ip_name=ip_name, field="iconic_objects"),
@@ -607,6 +620,121 @@ async def _consolidate_characters(
     return merged
 
 
+_ARBITRATE_SYSTEM = """你是 IP 设定的「总导演」。给你一个作品的角色清单 + 概述，你要做三件事，
+保证下游据此生成的世界**自洽、不跨时代、不把多个版本糅成一锅**。
+
+输出严格 JSON：
+{
+  "canon_note": "一句话说明本作的设定基线 / 锚定的版本或主线（若原作有多版本或多层设定被糅在一起，点明你锚定哪一个、其余视为旁支）",
+  "playable_archetypes": ["建议玩家可扮演视角应覆盖的 3-6 类原型（如：主角 / 主要反派 / 灰色中立者 / 局外旁观者 / 受害者一方），让可玩视角不全挤在主角团"],
+  "out_of_continuity": [
+    {"name": "不该属于本作主线的角色原名（必须与清单里的名字一致）", "reason": "降级原因（≤20字）"}
+  ]
+}
+
+判定 out_of_continuity 的铁律（**宁可少判，不可错杀**）：
+1. **跨时代**：角色明显属于与本作主线**不同历史时期 / 不同朝代**的真实或虚构人物
+   （例：汉末三国背景的作品里混进西汉的卫青 / 霍去病；明朝戏里混进清朝八旗姓氏角色）。
+2. **跨版本糅合**：同一 IP 有互不相容的多个版本 / 多层世界观被拼接，角色明显只属于被你判为旁支的那一版。
+3. **张冠李戴**：角色明显来自**另一部作品**，被错误塞了进来。
+
+**绝不要**因为下列理由判 out_of_continuity（这些是合法设定，留着）：
+- 玄幻 / 科幻 / 现代 / 都市 IP 里的穿越者 / 重生者 / 时间旅行者 —— 这是世界观本身，不是跨时代；
+- 配角、龙套、戏份少、不出名 —— 厚度靠配角，不许以"不重要"为由降级；
+- 反派、立场对立 —— 立场不是降级理由。
+判不准时一律**保留**（不放进 out_of_continuity）。若全员都属于本作，out_of_continuity 返回 []。
+
+只输出 JSON，无解释文字。"""
+
+
+async def _arbitrate_canon(
+    pack: IPKnowledgePack, rec: IPRecognition, llm_router: Any,
+) -> IPKnowledgePack:
+    """导演裁决（P1）：研究层尾部一次 LLM 收敛 —— 锚定版本/主线、滤跨时代角色、规划可玩生态位。
+
+    **降级不删除**：被判 out_of_continuity 的角色就地标 in_continuity=False + must_have=False
+    + arbitration_note（仍留在 pack.characters，可见可恢复），下游 canon_characters() 自动跳过。
+    canon_note / playable_archetypes 落到 pack 上供 roster 规划消费。
+
+    fail-open：LLM 失败 / 坏 JSON / 没产出 → 原样返回脏 pack（退回裁决前行为），绝不空世界。
+    """
+    if len(pack.characters) < 2:
+        return pack
+    roster_lines = "\n".join(
+        f"- {c.name}（{c.role_in_story or '?'}；{c.relation_to_protagonist or '?'}）"
+        for c in pack.characters
+    )
+    user = (
+        f"作品：{rec.ip_name}（{rec.ip_type or 'other'}）\n"
+        f"一句话：{rec.one_liner or ''}\n"
+        f"概述：{(pack.summary or '')[:1200]}\n\n"
+        f"角色清单：\n{roster_lines}"
+    )
+    try:
+        # 判断类任务、开 reasoning 帮它推"是否跨时代/跨版本"。但 reasoning 会先吃 token 预算，
+        # max_tokens 必须给足（实测 2048 被 ~2600 字思考吃光 → JSON 截断空 → 静默失败），
+        # 给 8192；再解析失败就降级关思考重试一次（admin_generation 默认行为），照 roster 打法。
+        text = await _collect_text(
+            llm_router, _ARBITRATE_SYSTEM, user, max_tokens=8192, reasoning=True,
+        )
+        data = _extract_json(text)
+        if not data:
+            logger.warning(
+                "ip_arbitrate_parse_failed_retrying_no_reasoning",
+                ip_name=rec.ip_name, preview=text[:200],
+            )
+            text = await _collect_text(
+                llm_router, _ARBITRATE_SYSTEM, user, max_tokens=8192, reasoning=False,
+            )
+            data = _extract_json(text)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ip_arbitrate_failed", ip_name=rec.ip_name, error=str(exc))
+        return pack
+    if not data:
+        logger.warning("ip_arbitrate_empty", ip_name=rec.ip_name)
+        return pack
+
+    ooc_raw = data.get("out_of_continuity") or []
+    ooc: dict[str, str] = {}
+    for item in ooc_raw:
+        if isinstance(item, dict) and item.get("name"):
+            ooc[_norm_name(item["name"])] = str(item.get("reason") or "跨时代/跨版本，已降级")
+
+    demoted: list[str] = []
+    new_chars: list[IPCharacter] = []
+    for c in pack.characters:
+        reason = ooc.get(_norm_name(c.name))
+        if reason:
+            new_chars.append(c.model_copy(update={
+                "in_continuity": False,
+                "must_have": False,
+                "arbitration_note": reason,
+            }))
+            demoted.append(c.name)
+        else:
+            new_chars.append(c)
+    pack.characters = new_chars
+
+    canon_note = str(data.get("canon_note") or "").strip() or None
+    archetypes = [
+        str(a).strip() for a in (data.get("playable_archetypes") or [])
+        if isinstance(a, (str, int)) and str(a).strip()
+    ][:8]
+    pack.canon_note = canon_note
+    pack.playable_archetypes = archetypes
+
+    logger.info(
+        "ip_arbitrated",
+        ip_name=rec.ip_name,
+        demoted=demoted,
+        demoted_count=len(demoted),
+        in_continuity=len(pack.canon_characters()),
+        archetypes=len(archetypes),
+        canon_note=(canon_note or "")[:80],
+    )
+    return pack
+
+
 async def _gather_via_grok_fanout(
     rec: IPRecognition, grok_provider: Any | None,
 ) -> tuple[list[Passage], list[str]]:
@@ -764,11 +892,17 @@ async def build_ip_knowledge_pack(
     await _emit("consolidating", "正在整理角色档案、归并别名…")
     pack.characters = await _consolidate_characters(pack.characters, rec, llm_router)
 
-    # === Stage 5: quality gate ===
-    if len(pack.characters) < _min_pack_characters(ip_type):
+    # === Stage 4.6: 导演裁决（P1）—— 锚定版本/主线、滤跨时代角色、规划可玩生态位 ===
+    # 放在持久化之前 → 落库的 pack 本身就干净（同时治 DB 污染），下游 canon_characters()
+    # 自动跳过被降级的角色，编排零改动。fail-open：失败原样放行。
+    await _emit("arbitrating", "正在校准设定基线、剔除跨时代/跨版本人物…")
+    pack = await _arbitrate_canon(pack, rec, llm_router)
+
+    # === Stage 5: quality gate（只数续作内角色，被降级的不算厚度）===
+    if len(pack.canon_characters()) < _min_pack_characters(ip_type):
         raise IPPackUnderfilledError(
             ip_name=rec.ip_name,
-            character_count=len(pack.characters),
+            character_count=len(pack.canon_characters()),
             summary_len=len(pack.summary),
         )
 
@@ -776,6 +910,7 @@ async def build_ip_knowledge_pack(
         "ip_research_done",
         ip_name=rec.ip_name,
         characters=len(pack.characters),
+        in_continuity=len(pack.canon_characters()),
         must_have=len(pack.must_have_character_names()),
         places=len(pack.places),
         factions=len(pack.factions),
