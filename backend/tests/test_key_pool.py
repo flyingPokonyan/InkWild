@@ -182,3 +182,49 @@ async def test_key_switching_provider_single_key_reraises() -> None:
             pass
 
     assert calls == ["k1"]
+
+
+class _WebSearchProvider:
+    model = "fake"
+
+    def __init__(self, key: str):
+        self._key = key
+
+    async def web_search(self, *a, **k):
+        return {"key": self._key, "args": a}
+
+
+class _NoWebSearchProvider:
+    model = "fake"
+
+    def __init__(self, key: str):
+        self._key = key
+
+
+async def test_key_switching_provider_proxies_web_search() -> None:
+    """识别联网兜底依赖 wrapper 透传 web_search 到 grok inner（slot 化后的回归防线）。"""
+    wrapped = KeySwitchingProvider(
+        provider_id="pws",
+        keys=["k1"],
+        affinity="same",
+        build=lambda key: _WebSearchProvider(key),
+        model="fake",
+    )
+
+    out = await wrapped.web_search("十日终焉")
+
+    assert out == {"key": "k1", "args": ("十日终焉",)}
+
+
+async def test_key_switching_provider_web_search_raises_when_inner_lacks_it() -> None:
+    """inner 非 grok（无 web_search）→ AttributeError，让 getattr 守卫的调用方干净退化。"""
+    wrapped = KeySwitchingProvider(
+        provider_id="pnows",
+        keys=["k1"],
+        affinity="same",
+        build=lambda key: _NoWebSearchProvider(key),
+        model="fake",
+    )
+
+    with pytest.raises(AttributeError):
+        await wrapped.web_search("x")

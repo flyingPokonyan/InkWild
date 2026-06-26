@@ -261,6 +261,48 @@ class KeySwitchingProvider(LLMProvider):
         if last_exc is not None:
             raise last_exc
 
+    async def web_search(self, *args, **kwargs):
+        """Proxy Grok Live Search to the inner provider, switching keys on
+        key-ish failures (mirrors ``stream_with_tools`` rotation, single awaited
+        result). Raises ``AttributeError`` when the bound model's provider has no
+        ``web_search`` (non-grok), so ``getattr``-guarded callers (IP 识别联网兜底)
+        degrade to parametric-only cleanly instead of silently losing the wrapper's
+        web_search capability."""
+        attempted: set[str] = set()
+        key_count = _unique_key_count(self._keys)
+        last_exc: BaseException | None = None
+
+        while len(attempted) < key_count:
+            key, fp = select_key(self._provider_id, self._keys, self._affinity)
+            if fp in attempted:
+                break
+            attempted.add(fp)
+            inner = self._build(key)
+            inner_ws = getattr(inner, "web_search", None)
+            if inner_ws is None:
+                raise AttributeError("inner provider has no web_search")
+            try:
+                return await inner_ws(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - key switch decision below
+                if key_count <= 1 or not _is_key_switchable(exc):
+                    raise
+                last_exc = exc
+                report_rate_limited(self._provider_id, fp)
+                logger.warning(
+                    "llm.key_switch",
+                    provider_id=self._provider_id,
+                    fp=fp,
+                    error_type=exc.__class__.__name__,
+                    status_code=_status_code(exc),
+                    attempted=len(attempted),
+                    key_count=key_count,
+                )
+                continue
+
+        if last_exc is not None:
+            raise last_exc
+        raise AttributeError("inner provider has no web_search")
+
 
 class KeyCooldownProvider(LLMProvider):
     """Transparent passthrough that puts its key in cooldown on a 429.
@@ -292,6 +334,16 @@ class KeyCooldownProvider(LLMProvider):
         try:
             async for ev in self._inner.stream_json(*args, **kwargs):
                 yield ev
+        except BaseException as exc:  # noqa: BLE001 - re-raised below
+            if _is_rate_limit(exc):
+                report_rate_limited(self._provider_id, self._fp)
+            raise
+
+    async def web_search(self, *args, **kwargs):
+        """Passthrough Grok Live Search with cooldown-on-429 (mirrors the stream
+        methods). AttributeError if inner has no web_search (non-grok)."""
+        try:
+            return await self._inner.web_search(*args, **kwargs)
         except BaseException as exc:  # noqa: BLE001 - re-raised below
             if _is_rate_limit(exc):
                 report_rate_limited(self._provider_id, self._fp)
