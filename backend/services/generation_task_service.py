@@ -528,9 +528,10 @@ class GenerationTaskService:
                     description = request.get("description", "")
                     llm_router = getattr(base_agent, "llm", None)
                     tavily = getattr(base_agent, "tavily", None)
-                    # 识别步走 Grok 快速模型（联网，认得较新作品）；Grok 未配置时回退
-                    # 到生成主模型。
-                    recognizer_llm = build_recognizer_llm(fallback=llm_router)
+                    # 识别步走 ip_recognition 槽（admin 可管，默认 grok-4.3-fast 联网）；
+                    # 未绑/grok 未配置时回退到生成主模型。
+                    async with self.session_factory() as _rec_db:
+                        recognizer_llm = await build_recognizer_llm(_rec_db, fallback=llm_router)
 
                     # No LLM router means we can't call the recognizer — degrade
                     # gracefully instead of crashing with AttributeError.

@@ -14,6 +14,7 @@ MODEL_SLOTS = [
     "intermission",
     "research_planning",
     "research_summary",
+    "ip_recognition",
     "image_generation",
 ]
 

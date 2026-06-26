@@ -102,6 +102,13 @@ SLOT_DEFINITIONS = (
         "required_capabilities": ("chat_basic", "streaming"),
     },
     {
+        "slot_name": "ip_recognition",
+        "label": "IP 识别",
+        "description": "Stage 0 判断世界描述是否指向已知 IP。需联网（Live Search）能力，建议绑 Grok；未绑定回退 grok-4.3-fast。",
+        "model_kind": TEXT_MODEL_KIND,
+        "required_capabilities": ("chat_basic", "streaming"),
+    },
+    {
         "slot_name": "image_generation",
         "label": "图片生成",
         "description": "世界主视觉和角色头像生成模型。",
@@ -1402,6 +1409,15 @@ def _legacy_text_router(slot_name: str) -> LLMRouter | None:
             providers={"legacy": provider},
             fallback_chain=["legacy"],
             identity={"provider_name": "grok-legacy", "model_id": settings.grok_model},
+        )
+    if slot_name == "ip_recognition" and settings.grok_api_key:
+        # 槽未绑定时的兜底：用 ip_recognition_model（grok-4.3-fast）建 grok provider，
+        # 保留判断 + web_search 联网取证能力（与绑定态行为一致）。
+        provider = GrokProvider(model=settings.ip_recognition_model)
+        return LLMRouter(
+            providers={"legacy": provider},
+            fallback_chain=["legacy"],
+            identity={"provider_name": "grok-legacy", "model_id": settings.ip_recognition_model},
         )
     return None
 

@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from services.ip_recognizer import recognize_ip
+from services.ip_recognizer import build_recognizer_llm, recognize_ip
 
 
 class FakeLLM:
@@ -63,6 +63,31 @@ async def test_tavily_verify_demotes_confidence_when_no_match():
     tavily.search.return_value = [{"title": "无关结果", "url": "..."}]
     rec = await recognize_ip("逐玉", llm_router=llm, tavily=tavily)
     assert rec.confidence < 0.7
+
+
+@pytest.mark.asyncio
+async def test_build_recognizer_llm_uses_slot_provider(monkeypatch):
+    """识别 LLM 统一走 ip_recognition 槽：解析到 provider 即用它（不再硬编码直构 grok）。"""
+    sentinel = object()
+
+    async def fake_resolve(db, slot):
+        assert slot == "ip_recognition"
+        return sentinel
+
+    monkeypatch.setattr("services.model_management.resolve_slot_provider", fake_resolve)
+    out = await build_recognizer_llm(db=None, fallback="FB")
+    assert out is sentinel
+
+
+@pytest.mark.asyncio
+async def test_build_recognizer_llm_falls_back_when_slot_unresolved(monkeypatch):
+    """槽未绑/grok 未配置 → resolve 返回 None → 回退 fallback（生成主模型）。"""
+    async def fake_resolve(db, slot):
+        return None
+
+    monkeypatch.setattr("services.model_management.resolve_slot_provider", fake_resolve)
+    out = await build_recognizer_llm(db=None, fallback="FB")
+    assert out == "FB"
 
 
 @pytest.mark.asyncio
