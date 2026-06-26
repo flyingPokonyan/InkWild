@@ -154,22 +154,18 @@ async def _tavily_verify(ip_name: str, tavily: Any | None) -> bool:
         return False
 
 
-async def _web_search_evidence(description: str) -> str:
-    """识别兜底取证：用 Grok Live Search 查"这个描述是不是某部具体作品"。
+async def _web_search_evidence(llm_router: Any, description: str) -> str:
+    """识别兜底取证：用识别器自己的 grok 模型（ip_recognition_model，当前 grok-4.3-fast）
+    做 Live Search，查"这个描述是不是某部具体作品"。
 
     离线主模型 / grok 参数知识认不出较新作品（典型：网文标题像普通词组，如「十日终焉」），
     把真 IP 误判成 original → 整条 IP 研究 / 裁决链路被跳过。这里在参数判断说 original 时
-    补一次联网检索，把证据喂回判断。用默认 grok_model（已验证支持 Live Search 的
-    grok-4.20-fast，而非识别用的 fast 模型）；未配 grok / 失败时返回空串，退回纯参数行为。
+    补一次联网检索，把证据喂回判断。**与判断步同一个 grok 模型、不另起 provider**（实测
+    grok-4.3-fast Live Search 对「十日终焉」返回作者/主角/类型 + 15 条引用）；llm_router
+    不支持 web_search（如回退到离线主模型）时返回空串，退回纯参数行为。
     """
-    if not settings.grok_api_key:
-        return ""
-    try:
-        from llm.grok import GrokProvider
-
-        provider = GrokProvider()  # model 默认 settings.grok_model
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("recognizer_search_provider_build_failed", error=str(exc))
+    web_search = getattr(llm_router, "web_search", None)
+    if not callable(web_search):
         return ""
     query = (
         f"「{description}」是否对应某一部已知的具体作品（小说 / 网络小说 / 电视剧 / 电影 / "
@@ -178,7 +174,7 @@ async def _web_search_evidence(description: str) -> str:
         f"注意：有些作品名看起来像很普通的词组，但其实是具体作品（尤其网络小说）。"
     )
     try:
-        res = await provider.web_search(query)
+        res = await web_search(query)
         return (getattr(res, "text", "") or "").strip()[:1500]
     except Exception as exc:  # noqa: BLE001
         logger.warning("ip_recognition_web_search_failed", error=str(exc))
@@ -240,7 +236,7 @@ async def recognize_ip(description: str, llm_router: Any, tavily: Any | None = N
 
     # Pass 2 —— 参数判 original / 没填 ip_name 时，联网取证复判一次（兜住裸标题网文等漏判）。
     if not _is_hit(rec):
-        evidence = await _web_search_evidence(description)
+        evidence = await _web_search_evidence(llm_router, description)
         if evidence:
             try:
                 cand = await with_transient_retry(lambda: _attempt(evidence), max_attempts=2)

@@ -80,7 +80,7 @@ async def test_web_search_rescues_misjudged_original(monkeypatch):
             for ch in text:
                 yield {"type": "text_delta", "text": ch}
 
-    async def fake_evidence(_description):
+    async def fake_evidence(_llm, _description):
         return "十日终焉：番茄小说无限流网文，作者杀虫队队员，主角齐夏。"
 
     monkeypatch.setattr("services.ip_recognizer._web_search_evidence", fake_evidence)
@@ -93,7 +93,7 @@ async def test_web_search_rescues_misjudged_original(monkeypatch):
 @pytest.mark.asyncio
 async def test_no_rescue_when_search_yields_nothing(monkeypatch):
     """检索无证据（未配 grok / 真原创）时维持 original，不误判。"""
-    async def empty_evidence(_description):
+    async def empty_evidence(_llm, _description):
         return ""
 
     monkeypatch.setattr("services.ip_recognizer._web_search_evidence", empty_evidence)
