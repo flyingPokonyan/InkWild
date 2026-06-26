@@ -115,3 +115,46 @@
 - 单测：`generation_rubric`（诚实分 + 两数门控）、`score_world_soft` 投票聚合、`_union_back_locations`、`_arbitrate_canon`（fake LLM）。
 - 真跑（相验收，需 docker 栈 + 模型 + grok）：相1 回填 7 世界看分变诚实；相2 重生如鸢/十日终焉看 canon 干净；相3/4 各自真跑。
 - 存量两脏草稿（十日终焉/如鸢）：相2 上线后**弃用重生成**，别留着当验证基线。
+
+---
+
+## 9. 落地现状（2026-06-26 收口 — 真相以此节为准）
+
+### 各相终态
+| 相 | 状态 | 说明 |
+|---|---|---|
+| 相1 可信裁判 | ✅ 落+部署+真跑 | 诚实硬分 / best-of-N 软裁判 / 两数门控。commit `fe58826` |
+| 相2 冻结骨架 | ✅ 落+部署+真跑 | `_arbitrate_canon`（版本锚定 + era 过滤 + playable_archetypes）/ 地点 union-back / roster 1:1 回炉。`fe58826` |
+| 相3 **地点冻结** | ✅ 落+真跑 | schedule 硬绑定地点集 + strict 放开 world_base 补地点。`fe58826` |
+| 相3 **契约绑定（通用 validate→定向回炉）** | ❌ **未做** | 残余违约（事件引用未知 NPC 等）仍**只报警**。只有地点（union-back）和 roster（1:1）两处有确定性对账，**通用回炉机制不存在**，按"数据证明需要再建"缓着 |
+| 相4 原创圣经 | ❌ **砍掉** | 真跑证伪"原创最散沙"——原创不散（撞车9>IP、阵营清晰，因 premise 已给阵营）。真原创病=**抄 IP**（灰烬纪元搬疯狂麦克斯/辐射），`b4143d2` 一行负向 prompt 解决，非新阶段 |
+
+### 计划外新增（本不在 plan，真跑暴露后补）
+- **IP 识别联网取证兜底**（`ffc4e2a`+`1f31b3c`）：发现识别器"联网识别"是假的（判断调用 `tools=[]` 从不联网），裸标题网文（十日终焉）被判 original → 相2 整条跳过。修=两遍（参数 best-of-N 快判 + original 时 grok-4.3-fast Live Search **兜底**复判，用识别器自身 llm_router）。详见 [[ip-recognizer-websearch-rescue-2026-06-26]]。
+- **grok 模型配置**：识别 = grok-4.3-fast；research_summary 槽（研究 fanout web_search）= grok-4.20-multi-agent-low（实测有 Live Search，研究只用 `result.text` 故 citations=0 无害）；注册了 grok-4.3-fast。
+
+### 现状架构（IP 路径是圣经式，原创不是）
+```
+[IP 路径 = 圣经式 ✅]
+IP识别(L0认定,联网兜底) → 研究fanout(广抓,multi-low) → _arbitrate_canon(冻L0前提canon_note版本锚定
+ + 冻L2阵容in_continuity/playable) → 写回干净pack → roster消费canon(strict prune+archetype引导)
+ → 详情grounding+1:1回炉 → events/lore消费canon → union-back冻L1地点 → 评分
+                          ↑ 每层读冻结canon当硬约束、范围逐层收窄
+
+[原创路径 = 自由+约束，非圣经式（有意）]
+描述premise(自带阵容纹理) → roster自由发挥+b4143d2原创性约束 → 详情/events/locations
+ → 仍走 union-back地点 + roster 1:1回炉 + 诚实评分（横切一致性，与IP共用）
+```
+
+### 三处已知缺口（别再当已完成）
+1. **通用契约回炉（相3）没建**——只地点/roster 两处确定性对账，其它违约只报警。
+2. **原创路径无 L0-L2 冻结**——靠 premise 质量 + 横切一致性兜底（union-back/1:1/评分/原创约束都对原创生效，故咸城仍 0 backfill/0 warning/100 分）。残留风险=**用户给的原创 premise 太薄时可能散**（garbage-in，非缺机制）。
+3. **识别子系统在 slot 体系之外**——`ip_recognition_model` 是 config 默认（非 slot 绑定），`build_recognizer_llm` 直构 GrokProvider。与"LLM 全走 slot"原则有出入，识别模型不可在后台 slot 管理（已手动注册 grok-4.3-fast 进 provider_models 但仍 config 驱动）。
+
+### 验证矩阵（哪个世界验了哪一刀）
+| 世界 | 验到的 | 没验到的 |
+|---|---|---|
+| 哈利波特(fantasy) | union-back/playable/诚实分 | **era/版本裁决**（demoted=0 不触发） |
+| 十日终焉(版本糅合) | **识别兜底 + 版本锚定**（ip 4→9，canon_note 压旁支） | 跨时代删除（无此问题） |
+| 如鸢(跨时代,本地) | **跨时代角色降级**（卫青/霍去病 in_continuity=False） | — |
+| 咸城·潮下(原创赛博朋克) | **b4143d2 原创性约束**（27 名全原创、0 抄 IP） + 横切一致性 | IP 圣经层（原创无） |
