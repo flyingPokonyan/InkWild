@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useTranslations } from "next-intl";
@@ -18,12 +18,8 @@ import {
   type AuthProvider,
 } from "@/lib/auth-api";
 import { resolveAuthNextPath } from "@/lib/auth-redirect";
-import { pickFeaturedWorlds } from "@/lib/featured-worlds";
 import { LV_EASE, lvStaggerContainer, lvStaggerItem } from "@/lib/motion";
 import { useAuthStore } from "@/stores/auth";
-import { useWorldList } from "@/lib/api/worlds";
-import { ossThumb } from "@/lib/oss-image";
-import type { WorldListItem } from "@/lib/types";
 
 type AuthMode = "signin" | "register" | "forgot";
 type AuthValues = { email: string; password: string; nickname: string };
@@ -120,6 +116,34 @@ function buildSchema(
 
 function LoginPageInner() {
   const router = useRouter();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const emailId = useId();
+  const passwordId = useId();
+  const nicknameId = useId();
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const compactViewport = window.matchMedia("(max-width: 900px)");
+    const applyMotionPreference = () => {
+      video.playbackRate = 0.5;
+      if (reduceMotion.matches || compactViewport.matches) {
+        video.pause();
+      } else {
+        void video.play().catch(() => {});
+      }
+    };
+
+    applyMotionPreference();
+    reduceMotion.addEventListener("change", applyMotionPreference);
+    compactViewport.addEventListener("change", applyMotionPreference);
+    return () => {
+      reduceMotion.removeEventListener("change", applyMotionPreference);
+      compactViewport.removeEventListener("change", applyMotionPreference);
+    };
+  }, []);
   const searchParams = useSearchParams();
   const t = useTranslations("auth");
   const tp = useTranslations("loginPage");
@@ -129,9 +153,7 @@ function LoginPageInner() {
   const hasLoaded = useAuthStore((s) => s.hasLoaded);
   const user = useAuthStore((s) => s.user);
 
-  // 左侧「本周精选」真实世界数据（甄嬛传置顶 + 按热度取 4），骨架兜底。
-  const { data: worldsData, isLoading: worldsLoading } = useWorldList();
-  const featuredWorlds = useMemo<WorldListItem[]>(() => pickFeaturedWorlds(worldsData, 4), [worldsData]);
+
 
   const [mode, setMode] = useState<AuthMode>(() => {
     const requested = searchParams.get("mode");
@@ -248,150 +270,60 @@ function LoginPageInner() {
   return (
     <main
       className="auth-page lv-theme"
-      /* 关键布局内联，首屏即居中，不等 styled-jsx 注入（消除冷加载时"框先靠左"的 FOUC） */
-      style={{ minHeight: "100dvh", display: "grid", justifyItems: "center", alignItems: "safe center" }}
+      style={{ minHeight: "100dvh" }}
     >
-      {/* 极简深邃背景：纯黑系，用变量留口子（首页色调定后改这两行即可） */}
-      <div className="auth-bg" aria-hidden />
+      <div className="auth-split-layout">
+        {/* 全屏底层画卷（支持视频播放） */}
+        <div className="auth-visual-bg" aria-hidden>
+          <video
+            ref={videoRef}
+            loop
+            muted
+            playsInline
+            preload="metadata"
+            poster="/hero-sky-poster.jpg"
+            className="auth-visual-video"
+          >
+            <source src="/hero-sky-1440.mp4" type="video/mp4" />
+          </video>
+        </div>
 
-      <section className="auth-shell">
-        {/* 左侧：品牌叙事 + 本周精选世界（真实数据） */}
-        <motion.div
-          className="auth-copy"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, ease: LV_EASE }}
-        >
-          <Link href="/" className="auth-back" aria-label={tp("backHome")}>
-            <ArrowLeft size={15} />
-            <span className="lv-t-meta">{tp("backHome")}</span>
-          </Link>
-
-          {/* 一行斜体衬线标语，给世界卡一个引子（克制，不撑高） */}
-          <p className="auth-tagline">{tp("showcaseSlogan")}</p>
-
-          <div className="auth-showcase-list">
-            {worldsLoading && featuredWorlds.length === 0 ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="showcase-card showcase-skeleton">
-                  <div className="card-thumb lv-skel" style={{ borderRadius: "12px" }} />
-                  <div className="card-content">
-                    <div className="card-header-row">
-                      <div className="lv-skel" style={{ height: "15px", width: "40%", borderRadius: "var(--lv-r-pill)" }} />
-                      <div className="lv-skel" style={{ height: "15px", width: "25%", borderRadius: "var(--lv-r-pill)" }} />
-                    </div>
-                    <div className="lv-skel" style={{ height: "18px", width: "30%", borderRadius: "var(--lv-r-pill)", marginBottom: "6px" }} />
-                    <div className="lv-skel" style={{ height: "14px", width: "85%", borderRadius: "var(--lv-r-pill)" }} />
-                  </div>
-                </div>
-              ))
-            ) : featuredWorlds.length > 0 ? (
-              featuredWorlds.map((world, index) => {
-                const cover = ossThumb(world.cover_image || world.hero_image, 240);
-                const tag = [world.genre, world.era].filter(Boolean).join(" · ") || "未知时空";
-                const thumbGradients = [
-                  "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
-                  "linear-gradient(135deg, #14532d 0%, #022c22 100%)",
-                  "linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
-                ];
-                const radialGradients = [
-                  "radial-gradient(circle at 70% 30%, rgba(56, 189, 248, 0.18), transparent 70%)",
-                  "radial-gradient(circle at 30% 70%, rgba(34, 197, 94, 0.15), transparent 70%)",
-                  "radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.15), transparent 75%)",
-                ];
-                const modeLabel = world.has_script ? "剧本模式" : "自由探索";
-                return (
-                  <Link href={`/worlds/${world.id}`} key={world.id} className="showcase-card">
-                    <div
-                      className="card-thumb"
-                      style={{
-                        backgroundImage: cover ? `url(${cover})` : thumbGradients[index % 3],
-                        backgroundSize: "cover",
-                        backgroundPosition: "center",
-                      }}
-                    >
-                      {!cover && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            inset: 0,
-                            background: radialGradients[index % 3],
-                            borderRadius: "11px",
-                          }}
-                        />
-                      )}
-                    </div>
-                    <div className="card-content">
-                      <div className="card-header-row">
-                        <span className="card-badge">{modeLabel}</span>
-                        <span className="card-meta">{tag}</span>
-                      </div>
-                      <h3 className="lv-t-h3 card-title-text">{world.name}</h3>
-                      {world.description && <p className="lv-t-meta card-desc-text">{world.description}</p>}
-                    </div>
-                  </Link>
-                );
-              })
-            ) : (
-              <>
-                <div className="showcase-card">
-                  <div className="card-thumb state-london" />
-                  <div className="card-content">
-                    <div className="card-header-row">
-                      <span className="card-badge">剧本模式</span>
-                      <span className="card-meta">悬疑推理 · 雾都</span>
-                    </div>
-                    <h3 className="lv-t-h3 card-title-text">雾中巷</h3>
-                    <p className="lv-t-meta card-desc-text">
-                      在连绵阴雨的伦敦深巷中收集日记残页与线索，拨开迷雾，推演钟楼密室的终极悬案。
-                    </p>
-                  </div>
-                </div>
-
-                <div className="showcase-card">
-                  <div className="card-thumb state-jianghu" />
-                  <div className="card-content">
-                    <div className="card-header-row">
-                      <span className="card-badge">自由探索</span>
-                      <span className="card-meta">清冷武侠 · 宿命</span>
-                    </div>
-                    <h3 className="lv-t-h3 card-title-text">剑雨江湖</h3>
-                    <p className="lv-t-meta card-desc-text">
-                      清冷客栈，竹影微动。你作为解谜之人，每一次对话和抉择都将彻底重构这场江湖恩怨的走向。
-                    </p>
-                  </div>
-                </div>
-
-                <div className="showcase-card">
-                  <div className="card-thumb state-wasteland" />
-                  <div className="card-content">
-                    <div className="card-header-row">
-                      <span className="card-badge">剧本模式</span>
-                      <span className="card-meta">末日生存 · 机械</span>
-                    </div>
-                    <h3 className="lv-t-h3 card-title-text">废土沙盒</h3>
-                    <p className="lv-t-meta card-desc-text">狂风掠过废土遗迹。指挥并决策 AI 伴侣的行动，在废墟里活下去。</p>
-                  </div>
-                </div>
-              </>
-            )}
+        {/* 左侧：仅仅作为占位和文字容器，背景透明 */}
+        <section className="auth-split-visual">
+          <div className="auth-visual-content">
+             <div className="auth-logo-large">
+               <AuthBrandMark />
+             </div>
+             <h1 className="lv-t-h1 auth-visual-title">InkWild</h1>
+             <p className="auth-tagline">{tp("visualTagline")}</p>
           </div>
-        </motion.div>
+        </section>
 
-        {/* 右侧：玻璃登录卡（表单优先 → OAuth 下沉） */}
-        <motion.div
-          layout="position"
-          className="auth-card"
-          initial={{ opacity: 0, y: 16, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.55, ease: LV_EASE, delay: 0.05 }}
-        >
-          <div className="auth-card-head">
-            <div className="auth-logo" aria-hidden>
-              <AuthBrandMark />
+        {/* 右侧：通顶深色毛玻璃，盖在画卷上方 */}
+        <section className="auth-split-form">
+          <div className="auth-form-container">
+            <div className="auth-header-actions">
+              <Link href="/" className="auth-back" aria-label={tp("backHome")}>
+                <ArrowLeft size={15} />
+                <span className="lv-t-meta">{tp("backHome")}</span>
+              </Link>
             </div>
-            <h2 className="lv-t-h2 auth-card-title">InkWild</h2>
-          </div>
+
+            <div className="auth-mobile-brand">
+              <div className="auth-logo-mobile" aria-hidden>
+                <AuthBrandMark />
+              </div>
+              <h1 className="lv-t-h2 auth-mobile-title">InkWild</h1>
+              <p className="auth-mobile-tagline">{tp("visualTagline")}</p>
+            </div>
+
+            <motion.div
+              layout="position"
+              className="auth-form-body"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.55, ease: LV_EASE, delay: 0.05 }}
+            >
 
           {sent ? (
             /* 发送成功 → 整体换成「查收邮箱」确认面板（不再露空密码框） */
@@ -446,8 +378,11 @@ function LoginPageInner() {
             <form onSubmit={handleSubmit(onSubmit)} className="auth-form" noValidate>
               {mode === "register" && (
                 <motion.div variants={lvStaggerItem} className="auth-field-wrapper">
-                  <span className="lv-form-label">{tp("nicknameLabel")}</span>
+                  <label className="lv-form-label" htmlFor={nicknameId}>
+                    {tp("nicknameLabel")}
+                  </label>
                   <input
+                    id={nicknameId}
                     type="text"
                     autoComplete="nickname"
                     className="auth-input"
@@ -459,8 +394,11 @@ function LoginPageInner() {
               )}
 
               <motion.div variants={lvStaggerItem} className="auth-field-wrapper">
-                <span className="lv-form-label">{t("email")}</span>
+                <label className="lv-form-label" htmlFor={emailId}>
+                  {t("email")}
+                </label>
                 <input
+                  id={emailId}
                   type="email"
                   autoComplete="email"
                   className={`auth-input ${errors.email ? "has-error" : ""}`}
@@ -474,7 +412,9 @@ function LoginPageInner() {
               {mode !== "forgot" && (
                 <motion.div variants={lvStaggerItem} className="auth-field-wrapper">
                   <div className="auth-label-row">
-                    <span className="lv-form-label">{t("password")}</span>
+                    <label className="lv-form-label" htmlFor={passwordId}>
+                      {t("password")}
+                    </label>
                     {mode === "signin" && (
                       <button
                         type="button"
@@ -487,6 +427,7 @@ function LoginPageInner() {
                   </div>
                   <div className="auth-input-wrap">
                     <input
+                      id={passwordId}
                       type={showPassword ? "text" : "password"}
                       autoComplete={mode === "register" ? "new-password" : "current-password"}
                       className={`auth-input has-action ${errors.password ? "has-error" : ""}`}
@@ -567,252 +508,161 @@ function LoginPageInner() {
             </motion.div>
           </motion.div>
           )}
-        </motion.div>
-      </section>
+            </motion.div>
+          </div>
+        </section>
+      </div>
 
       <style jsx global>{`
-        /* ─── 登录页：纯黑双栏，留色调口子 ─── */
+        /* ─── 登录页：居中单卡 + 氛围底（非纯黑） ─── */
         .auth-page {
           --login-canvas: #08080a;
-          --login-canvas-deep: #050507;
-          --login-bloom: rgba(255, 255, 255, 0.02);
           min-height: 100dvh;
           position: relative;
           overflow-x: hidden;
           color: var(--lv-ink);
-          background: var(--login-canvas);
-          display: grid;
-          justify-items: center;
-          align-items: safe center; /* 内容超高时从顶部排，不裁切表单（仍优先居中） */
-          padding: calc(28px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
+          display: flex;
+          flex-direction: column;
         }
 
-        .auth-bg {
+        .auth-split-layout {
+          display: flex;
+          width: 100%;
+          min-height: 100dvh;
+          position: relative;
+        }
+
+        /* 全屏底层画卷 */
+        .auth-visual-bg {
           position: absolute;
           inset: 0;
-          background:
-            linear-gradient(135deg, var(--login-bloom) 0%, transparent 35%),
-            linear-gradient(315deg, rgba(255, 255, 255, 0.015) 0%, transparent 30%),
-            linear-gradient(180deg, var(--login-canvas) 0%, var(--login-canvas-deep) 100%);
           z-index: 0;
+          background: #000;
         }
-        .auth-bg::after {
+        .auth-visual-video {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+        }
+        /* 给全屏画卷加一层暗色遮罩，保证整体暗黑调性 */
+        .auth-visual-bg::after {
           content: "";
           position: absolute;
           inset: 0;
-          background-image: linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px);
-          background-size: 100% 36px;
-          mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 75%);
+          background: rgba(0, 0, 0, 0.2);
         }
 
-        .auth-shell {
+        /* 左侧品牌视觉区 (透明，只作为容器) */
+        .auth-split-visual {
+          flex: 1;
           position: relative;
           z-index: 1;
-          width: min(1140px, 100%);
-          display: grid;
-          grid-template-columns: minmax(0, 1.2fr) 420px;
-          gap: clamp(40px, 6vw, 88px);
+          display: flex;
           align-items: center;
+          justify-content: center;
+          background: transparent;
         }
-
-        /* ─── 左侧展示栏：收紧节奏，列表上提 ─── */
-        .auth-copy {
+        .auth-visual-content {
           display: flex;
           flex-direction: column;
-          align-items: flex-start;
-          gap: var(--lv-s-4);
-          min-width: 0;
+          align-items: center;
+          text-align: center;
+          gap: 16px;
+        }
+        .auth-logo-large {
+          width: 64px;
+          height: 64px;
+          border-radius: 16px;
+          display: grid;
+          place-items: center;
+          background: rgba(10, 10, 12, 0.8);
+          backdrop-filter: blur(20px);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 16px 32px rgba(0, 0, 0, 0.5);
+          margin-bottom: 8px;
+        }
+        .auth-visual-title {
+          margin: 0;
+          letter-spacing: 0;
+          color: #fff;
+          text-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .auth-tagline {
+          margin: 0;
+          max-width: 420px;
+          font-family: var(--lv-font-serif);
+          font-style: italic;
+          font-size: var(--lv-t-h3);
+          color: rgba(255, 255, 255, 0.8);
+          letter-spacing: 0;
+          text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+
+        /* 右侧通顶毛玻璃表单区 - 带有无缝渐现遮罩 */
+        .auth-split-form {
+          flex: 0 0 clamp(460px, 34vw, 560px);
+          position: relative;
+          z-index: 2;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          /* 左侧 padding 留出 60px，确保表单内容完全处于 40px 渐变区之后（即完全毛玻璃的区域） */
+          padding: calc(24px + env(safe-area-inset-top)) 40px calc(24px + env(safe-area-inset-bottom)) 60px;
+        }
+
+        .auth-split-form::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          z-index: -1;
+          background: rgba(5, 5, 7, 0.85);
+          backdrop-filter: blur(16px) saturate(120%);
+          -webkit-backdrop-filter: blur(16px) saturate(120%);
+          /* 从左至右仅 40px 的平滑渐显，避免影响到输入框 */
+          -webkit-mask-image: linear-gradient(to right, transparent, black 40px);
+          mask-image: linear-gradient(to right, transparent, black 40px);
+        }
+
+        .auth-form-container {
+          width: 100%;
+          max-width: 400px;
+          display: flex;
+          flex-direction: column;
+          gap: 40px;
+        }
+
+        .auth-header-actions {
+          display: flex;
+          justify-content: flex-start;
         }
         .auth-back {
           min-height: 36px;
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          color: var(--lv-ink-3);
+          color: rgba(255, 255, 255, 0.5);
           text-decoration: none;
           transition: color var(--lv-dur-fast) var(--lv-ease);
         }
         .auth-back:hover {
-          color: var(--lv-ink);
-        }
-        /* 斜体衬线标语：editorial 口吻，一行，给世界卡作引子 */
-        .auth-tagline {
-          margin: 4px 0 0;
-          max-width: 460px;
-          font-family: var(--lv-font-serif);
-          font-style: italic;
-          font-size: var(--lv-t-narrative);
-          line-height: 1.4;
-          letter-spacing: 0.01em;
-          color: var(--lv-ink-2);
+          color: rgba(255, 255, 255, 0.9);
         }
 
-        .auth-showcase-list {
+        .auth-mobile-brand {
+          display: none;
+        }
+
+        .auth-form-body {
           display: flex;
           flex-direction: column;
-          gap: 14px;
+          gap: 20px;
           width: 100%;
-          max-width: 540px;
-        }
-
-        .showcase-card {
-          display: flex;
-          gap: 18px;
-          padding: 18px;
-          border-radius: var(--lv-r-card);
-          border: var(--lv-card-border);
-          background: var(--lv-card-bg);
-          text-decoration: none;
-          color: inherit;
-          transition:
-            border-color var(--lv-dur-fast) var(--lv-ease),
-            background var(--lv-dur-fast) var(--lv-ease),
-            transform var(--lv-dur-fast) var(--lv-ease),
-            box-shadow var(--lv-dur-fast) var(--lv-ease);
-        }
-        .showcase-card:hover {
-          border: var(--lv-card-border-hover);
-          background: var(--lv-card-bg-hover);
-          transform: translateY(-3px);
-          box-shadow: var(--lv-card-shadow-hover);
-        }
-        .showcase-skeleton {
-          pointer-events: none;
-        }
-
-        .card-thumb {
-          width: 74px;
-          height: 74px;
-          border-radius: 12px;
-          flex-shrink: 0;
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          position: relative;
-        }
-        .state-london {
-          background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        }
-        .state-london::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(circle at 70% 30%, rgba(56, 189, 248, 0.18), transparent 70%);
-          border-radius: 11px;
-        }
-        .state-jianghu {
-          background: linear-gradient(135deg, #14532d 0%, #022c22 100%);
-        }
-        .state-jianghu::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(circle at 30% 70%, rgba(34, 197, 94, 0.15), transparent 70%);
-          border-radius: 11px;
-        }
-        .state-wasteland {
-          background: linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%);
-        }
-        .state-wasteland::after {
-          content: "";
-          position: absolute;
-          inset: 0;
-          background: radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.15), transparent 75%);
-          border-radius: 11px;
-        }
-
-        .card-content {
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          min-width: 0;
-          flex: 1;
-        }
-        .card-header-row {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 8px;
-          margin-bottom: 6px;
-        }
-        .card-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          color: var(--lv-ink-2);
-          font-family: var(--lv-font-sans);
-          font-size: 11px;
-          font-weight: 500;
-          background: rgba(255, 255, 255, 0.04);
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          padding: 2px 8px;
-          border-radius: var(--lv-r-pill);
-        }
-        .card-meta {
-          color: var(--lv-ink-3);
-          font-size: 11px;
-          background: rgba(255, 255, 255, 0.02);
-          padding: 2px 8px;
-          border-radius: var(--lv-r-pill);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 140px;
-        }
-        .card-title-text {
-          margin: 0 0 4px 0;
-          color: var(--lv-ink);
-        }
-        .card-desc-text {
-          margin: 0;
-          color: var(--lv-ink-3);
-          line-height: 1.5;
-          display: -webkit-box;
-          -webkit-line-clamp: 1;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-
-        /* ─── 右侧登录卡 ─── */
-        .auth-card {
-          width: 100%;
-          border-radius: var(--lv-r-card);
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          background: rgba(5, 5, 7, 0.72);
-          box-shadow: 0 40px 100px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-          backdrop-filter: blur(24px) saturate(140%);
-          -webkit-backdrop-filter: blur(24px) saturate(140%);
-          padding: 28px 28px;
-          display: flex;
-          flex-direction: column;
-          gap: 18px;
-        }
-
-        .auth-card-head {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          text-align: center;
-          gap: 10px;
-        }
-        /* 品牌 app-icon tile：玄黑圆角方块（对齐 experiments/brand 规范） */
-        .auth-logo {
-          width: 46px;
-          height: 46px;
-          border-radius: 12px;
-          display: grid;
-          place-items: center;
-          background: #0a0a0c;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 26px rgba(0, 0, 0, 0.5);
-        }
-        .auth-card-title {
-          margin: 0;
-          letter-spacing: -0.01em;
         }
 
         .auth-content-group {
           display: flex;
           flex-direction: column;
-          gap: 16px;
+          gap: 24px;
         }
 
         /* alert */
@@ -1130,24 +980,96 @@ function LoginPageInner() {
           font-size: 11px;
         }
 
-        /* ─── 响应式：双栏 → 单栏极简（移动端只剩品牌 + 表单） ─── */
-        /* ─── 移动端：单列极简，只剩品牌 + 表单（左侧世界卡整列隐藏） ─── */
+        /* ─── 移动端适配 ─── */
         @media (max-width: 900px) {
-          .auth-shell {
-            grid-template-columns: 1fr;
-            gap: 16px;
-            max-width: 420px;
-          }
           .auth-page {
-            align-items: start;
+            display: grid;
+            place-items: center;
+            background: var(--login-canvas);
             padding: calc(20px + env(safe-area-inset-top)) 16px calc(24px + env(safe-area-inset-bottom));
           }
-          .auth-showcase-list {
+          .auth-split-layout {
+            display: block;
+            width: min(420px, 100%);
+            min-height: auto;
+          }
+          .auth-visual-bg {
+            position: fixed;
+            background:
+              linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0%, transparent 35%),
+              linear-gradient(180deg, #08080a 0%, #050507 100%);
+          }
+          .auth-visual-video {
             display: none;
           }
-          .auth-card {
+          .auth-visual-bg::after {
+            background-image: linear-gradient(rgba(255, 255, 255, 0.012) 1px, transparent 1px);
+            background-size: 100% 36px;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.5), transparent 75%);
+          }
+          .auth-split-visual {
+            display: none;
+          }
+          .auth-split-form {
+            width: 100%;
+            display: block;
+            flex: none;
+            padding: 0;
+          }
+          .auth-split-form::before {
+            border-radius: var(--lv-r-card);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(5, 5, 7, 0.72);
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(24px) saturate(140%);
+            -webkit-backdrop-filter: blur(24px) saturate(140%);
+            -webkit-mask-image: none;
+            mask-image: none;
+          }
+          .auth-form-container {
+            max-width: none;
+            gap: 18px;
             padding: 26px 20px;
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+          }
+          .auth-mobile-brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 8px;
+          }
+          .auth-logo-mobile {
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            background: #0a0a0c;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 26px rgba(0, 0, 0, 0.5);
+          }
+          .auth-mobile-title {
+            margin: 0;
+            letter-spacing: 0;
+          }
+          .auth-mobile-tagline {
+            margin: 0;
+            max-width: 280px;
+            color: var(--lv-ink-2);
+            font-family: var(--lv-font-serif);
+            font-style: italic;
+            font-size: 14px;
+            line-height: 1.45;
+            letter-spacing: 0;
+          }
+          .auth-form-body {
+            gap: 18px;
+          }
+          .auth-content-group {
+            gap: 16px;
+          }
+          .auth-form {
+            gap: 14px;
           }
         }
       `}</style>

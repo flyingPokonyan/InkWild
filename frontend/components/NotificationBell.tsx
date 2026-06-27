@@ -146,7 +146,7 @@ export function NotificationBell() {
           border-radius: 999px;
           background: var(--lv-badge); color: #fff;
           font-family: var(--lv-font-sans);
-          font-size: 10.5px; font-weight: 600; line-height: 1; letter-spacing: 0;
+          font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0;
           font-variant-numeric: tabular-nums;
         }
         .lv-notif-pop {

@@ -249,7 +249,7 @@ export function NotificationPanel({
         .lv-notif-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: var(--lv-r-pill); background: transparent; border: none; color: var(--lv-ink-2); font-size: 13px; font-weight: 600; cursor: pointer; transition: color 160ms ease, background 160ms ease; }
         .lv-notif-tab[data-active="true"] { color: var(--lv-ink); background: rgba(255,255,255,0.1); }
         .lv-notif-tab:hover { color: var(--lv-ink); }
-        .lv-notif-tab-count { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--lv-badge); color: #fff; font-size: 10.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
+        .lv-notif-tab-count { min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--lv-badge); color: #fff; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
         .lv-notif-readall { margin-left: auto; background: none; border: none; color: var(--lv-ink-4); font-size: 12px; cursor: pointer; padding: 4px 6px; }
         .lv-notif-readall:hover { color: var(--lv-accent); }
         .lv-notif-readall:disabled { opacity: 0.36; cursor: default; }
@@ -272,7 +272,7 @@ export function NotificationPanel({
         }
         .lv-notif-bar { flex: 0 0 auto; width: 3px; border-radius: 2px; align-self: stretch; }
         .lv-notif-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-        .lv-notif-title { color: var(--lv-ink); font-size: 13.5px; font-weight: 500; line-height: 1.4; }
+        .lv-notif-title { color: var(--lv-ink); font-size: 13px; font-weight: 500; line-height: 1.4; }
         .lv-notif-title[data-unread="true"] { color: var(--lv-ink); font-weight: 600; }
         .lv-notif-sub { color: var(--lv-ink-3); font-size: 12px; line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
         .lv-notif-sub-3 { -webkit-line-clamp: 3; }

@@ -383,16 +383,38 @@ export default function GenerateWorldPage() {
           style={{ width: "100%" }}
         >
           {step === "prompt" && (
-            <PromptComposer
-              value={description}
-              onChange={setDescription}
-              onSubmit={handleNext}
-              placeholder="例如：一座漂浮在云海之上的废墟之城，居民世代搜寻坠落的星骸……"
-              ctaLabel="下一步"
-              ariaLabel="世界描述"
-              canSubmit={!!description.trim()}
-              autoFocus
-            />
+            <>
+              <PromptComposer
+                value={description}
+                onChange={setDescription}
+                onSubmit={handleNext}
+                placeholder="例如：一座漂浮在云海之上的废墟之城，居民世代搜寻坠落的星骸……"
+                ctaLabel="下一步"
+                ariaLabel="世界描述"
+                canSubmit={!!description.trim()}
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => router.push("/workshop/generate/script")}
+                style={{
+                  display: "block",
+                  margin: "16px auto 0",
+                  background: "none",
+                  border: 0,
+                  color: "var(--lv-ink-3)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "8px 12px",
+                  borderRadius: "var(--lv-r-pill)",
+                  transition: "color 150ms ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--lv-ink-2)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--lv-ink-3)"; }}
+              >
+                想给已有世界加剧本？ →
+              </button>
+            </>
           )}
 
           {step === "options" && (

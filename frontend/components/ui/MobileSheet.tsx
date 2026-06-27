@@ -16,8 +16,9 @@ interface MobileSheetProps {
 }
 
 /**
- * 移动端底部 sheet（vaul）。原生 app 手感：抓手、下拉关闭、弹性物理、滚动到顶才接管拖拽。
- * 桌面侧滑面板仍由各自的 Drawer / PlayOverlayDrawer 处理，这个只管窄屏底部形态。
+ * 移动端底部 sheet（基于 vaul 原生能力，物理回弹极佳）。
+ * 移除了过去为了绕过 Safari touch-action 冲突而加入的 hack，
+ * 直接信任 vaul 内部对 Pointer Events 的原生处理，恢复了流畅的滑动体验。
  */
 export function MobileSheet({ open, onClose, title, children, tone = "solid", maxHeight = "72dvh" }: MobileSheetProps) {
   const contentStyle: CSSProperties = {
@@ -29,14 +30,17 @@ export function MobileSheet({ open, onClose, title, children, tone = "solid", ma
     display: "flex",
     flexDirection: "column",
     maxHeight,
-    background: tone === "glass" ? "rgba(17, 17, 20, 0.92)" : tone === "deep" ? "var(--lv-bg)" : "var(--lv-bg-1)",
-    backdropFilter: tone === "glass" ? "blur(28px) saturate(140%)" : undefined,
-    WebkitBackdropFilter: tone === "glass" ? "blur(28px) saturate(140%)" : undefined,
-    borderTop: "1px solid var(--lv-line)",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    // 材质调整：增加高级感
+    background: tone === "glass" ? "rgba(17, 17, 20, 0.76)" : tone === "deep" ? "var(--lv-bg)" : "var(--lv-bg-1)",
+    backdropFilter: tone === "glass" ? "blur(32px) saturate(180%)" : undefined,
+    WebkitBackdropFilter: tone === "glass" ? "blur(32px) saturate(180%)" : undefined,
+    borderTop: "1px solid rgba(255, 255, 255, 0.12)",
+    boxShadow: "0 -8px 40px rgba(0, 0, 0, 0.4)",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
     paddingBottom: "env(safe-area-inset-bottom)",
     outline: "none",
+    willChange: "transform",
   };
 
   return (
@@ -47,15 +51,21 @@ export function MobileSheet({ open, onClose, title, children, tone = "solid", ma
             position: "fixed",
             inset: 0,
             zIndex: "var(--lv-z-drawer)" as unknown as number,
-            background: "rgba(6, 6, 10, 0.55)",
-            backdropFilter: "blur(6px)",
-            WebkitBackdropFilter: "blur(6px)",
+            background: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
           }}
         />
         <Drawer.Content className="lv-sheet" style={contentStyle} aria-describedby={undefined}>
-          {/* 抓手 —— 拖拽热区是整张 sheet（滚动到顶时接管），这里只作视觉提示 */}
-          <div aria-hidden style={{ flexShrink: 0, display: "flex", justifyContent: "center", padding: "10px 0 2px" }}>
-            <span style={{ width: 38, height: 4, borderRadius: 999, background: "rgba(255, 255, 255, 0.22)" }} />
+          {/* 抓手 —— 高级感设计的悬浮短横线 */}
+          <div aria-hidden style={{ flexShrink: 0, display: "flex", justifyContent: "center", padding: "12px 0 4px", touchAction: "none" }}>
+            <span style={{
+              width: 36,
+              height: 5,
+              borderRadius: 999,
+              background: "rgba(255, 255, 255, 0.35)",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.15)"
+            }} />
           </div>
           <header
             style={{
@@ -63,7 +73,8 @@ export function MobileSheet({ open, onClose, title, children, tone = "solid", ma
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "8px 20px 12px",
+              padding: "12px 24px 16px",
+              touchAction: "none",
             }}
           >
             <Drawer.Title
@@ -71,8 +82,9 @@ export function MobileSheet({ open, onClose, title, children, tone = "solid", ma
                 margin: 0,
                 color: "var(--lv-ink)",
                 fontFamily: "var(--lv-font-serif)",
-                fontSize: 18,
+                fontSize: 20,
                 fontWeight: 500,
+                letterSpacing: "0.02em",
                 ...(title ? null : { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }),
               }}
             >
@@ -88,18 +100,27 @@ export function MobileSheet({ open, onClose, title, children, tone = "solid", ma
                 display: "grid",
                 placeItems: "center",
                 borderRadius: "var(--lv-r-pill)",
-                border: "1px solid var(--lv-line)",
-                background: "transparent",
+                border: "none",
+                background: "rgba(255, 255, 255, 0.08)",
                 color: "var(--lv-ink-2)",
                 cursor: "pointer",
+                transition: "background var(--lv-dur-fast) var(--lv-ease), color var(--lv-dur-fast) var(--lv-ease)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)";
+                e.currentTarget.style.color = "var(--lv-ink)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.color = "var(--lv-ink-2)";
               }}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
                 <path d="M18 6 6 18M6 6l12 12" />
               </svg>
             </button>
           </header>
-          <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 4px", overscrollBehavior: "contain" }}>{children}</div>
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 12px", overscrollBehavior: "contain" }}>{children}</div>
         </Drawer.Content>
       </Drawer.Portal>
     </Drawer.Root>

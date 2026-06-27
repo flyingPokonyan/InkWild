@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslations } from "next-intl";
 
@@ -152,7 +152,6 @@ export default function PlaySetupPage() {
   const [focusedScriptId, setFocusedScriptId] = useState<string | null>(null);
   const [focusedCharacterId, setFocusedCharacterId] = useState<string | null>(null);
   const [focusedStageId, setFocusedStageId] = useState<string | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
     if (world && selection.mode === null && selection.character === null) {
@@ -226,45 +225,30 @@ export default function PlaySetupPage() {
     return resolvePlayableCharacters(world, selectedScript);
   }, [world, selection.mode, selection.script]);
 
-  const attachCarousel = useCallback(
-    (node: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      if (!node) return;
-      if (currentStepId !== "script" && currentStepId !== "character") return;
-      // PC（hover 可用）只用 hover 驱动 strip，避免 IO 在初始 observe 时自动选中中间卡。
-      // 触屏设备走 IO，根据 scroll-snap 中心卡设置 focus。
-      if (typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches) {
-        return;
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const center = container.scrollLeft + container.clientWidth / 2;
+    let closestId: string | null = null;
+    let minDistance = Infinity;
+
+    Array.from(container.children).forEach((child) => {
+      const cardId = child.getAttribute("data-card-id");
+      if (!cardId) return;
+      const childElement = child as HTMLElement;
+      const childCenter = childElement.offsetLeft + childElement.offsetWidth / 2 - container.offsetLeft;
+      const distance = Math.abs(childCenter - center);
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestId = cardId;
       }
+    });
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          let bestId: string | null = null;
-          let bestRatio = 0;
-          entries.forEach((e) => {
-            if (e.isIntersecting && e.intersectionRatio > bestRatio) {
-              bestRatio = e.intersectionRatio;
-              bestId = e.target.getAttribute("data-card-id");
-            }
-          });
-          if (bestId) {
-            if (currentStepId === "script") setFocusedScriptId(bestId);
-            else setFocusedCharacterId(bestId);
-          }
-        },
-        {
-          root: node,
-          rootMargin: "0px -40% 0px -40%",
-          threshold: [0.5, 0.75, 1],
-        },
-      );
-
-      node.querySelectorAll("[data-card-id]").forEach((card) => observer.observe(card));
-      observerRef.current = observer;
-    },
-    [currentStepId, scriptCards, world?.characters],
-  );
+    if (closestId) {
+      if (currentStepId === "script") setFocusedScriptId(closestId);
+      else setFocusedCharacterId(closestId);
+    }
+  }, [currentStepId]);
 
   const handleSelectMode = (mode: WorldMode) => {
     dispatch({ type: "selectMode", mode });
@@ -456,9 +440,10 @@ export default function PlaySetupPage() {
         );
 
       case "script": {
-        const focusedScript = focusedScriptId
-          ? scriptCards.find((s) => s.id === focusedScriptId) ?? null
-          : null;
+        const focusedScript =
+          (focusedScriptId ? scriptCards.find((s) => s.id === focusedScriptId) : null) ??
+          scriptCards[0] ??
+          null;
         const scriptEntries: DetailEntry[] = focusedScript
           ? [
               { label: "难度", value: t("difficultyName", { level: difficultyLevel(focusedScript.difficulty) }) },
@@ -468,8 +453,7 @@ export default function PlaySetupPage() {
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--lv-s-4)" }}>
             <div
-              ref={attachCarousel}
-              onMouseLeave={() => setFocusedScriptId(null)}
+              onScroll={handleScroll}
               className="lv-media-grid"
               style={{
                 maxWidth: 920,
@@ -477,6 +461,7 @@ export default function PlaySetupPage() {
                 width: "100%",
               }}
             >
+              <div className="lv-carousel-spacer" />
               {scriptCards.map((script) => (
                 <MediaChoiceCard
                   key={script.id}
@@ -484,10 +469,12 @@ export default function PlaySetupPage() {
                   coverImage={script.coverImage}
                   title={script.name}
                   selected={false}
+                  isFocused={focusedScript?.id === script.id}
                   onSelect={() => handleSelectScript(script.id)}
                   onFocus={() => setFocusedScriptId(script.id)}
                 />
               ))}
+              <div className="lv-carousel-spacer" />
             </div>
             <CardDetailStrip
               cardKey={focusedScript?.id ?? "empty"}
@@ -500,9 +487,10 @@ export default function PlaySetupPage() {
       }
 
       case "character": {
-        const focusedCharacter = focusedCharacterId
-          ? world.characters.find((c) => c.id === focusedCharacterId) ?? null
-          : null;
+        const focusedCharacter =
+          (focusedCharacterId ? playableCharacters.find((c) => c.id === focusedCharacterId) : null) ??
+          playableCharacters[0] ??
+          null;
         const characterEntries: DetailEntry[] = focusedCharacter
           ? [
               ...(focusedCharacter.abilities[0]
@@ -524,8 +512,7 @@ export default function PlaySetupPage() {
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--lv-s-4)" }}>
             <div
-              ref={attachCarousel}
-              onMouseLeave={() => setFocusedCharacterId(null)}
+              onScroll={handleScroll}
               className="lv-media-grid"
               style={{
                 maxWidth: 920,
@@ -533,6 +520,7 @@ export default function PlaySetupPage() {
                 width: "100%",
               }}
             >
+              <div className="lv-carousel-spacer" />
               {playableCharacters.map((character) => (
                 <MediaChoiceCard
                   key={character.id}
@@ -540,10 +528,12 @@ export default function PlaySetupPage() {
                   coverImage={character.avatar}
                   title={character.name}
                   selected={false}
+                  isFocused={focusedCharacter?.id === character.id}
                   onSelect={() => handleSelectCharacter(character.id)}
                   onFocus={() => setFocusedCharacterId(character.id)}
                 />
               ))}
+              <div className="lv-carousel-spacer" />
             </div>
             <CardDetailStrip
               cardKey={focusedCharacter?.id ?? "empty"}

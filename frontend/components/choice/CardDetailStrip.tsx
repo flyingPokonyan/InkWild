@@ -70,16 +70,16 @@ export function CardDetailStrip({
       <style jsx global>{`
         .lv-theme .lv-detail-strip {
           width: 100%;
-          max-width: 780px;
+          max-width: 600px; /* 收窄宽度以保持阅读舒适度 */
           margin: 0 auto;
-          padding: 4px 16px 0;
-          min-height: 112px;
+          padding: 8px 16px 0;
+          min-height: 120px;
           position: relative;
         }
         .lv-theme .lv-detail-strip-inner {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 12px;
           align-items: center;
           text-align: center;
         }
@@ -88,26 +88,23 @@ export function CardDetailStrip({
           flex-wrap: wrap;
           justify-content: center;
           row-gap: 6px;
-          column-gap: 14px;
-          align-items: baseline;
+          column-gap: 12px;
+          align-items: center;
         }
         .lv-theme .lv-detail-strip-meta-item {
           display: inline-flex;
-          align-items: baseline;
-          gap: 8px;
+          align-items: center;
+          gap: 6px;
         }
         .lv-theme .lv-detail-strip-meta-label {
-          font-family: var(--lv-font-mono);
-          font-size: 10px;
-          letter-spacing: 0.2em;
-          text-transform: uppercase;
-          color: var(--lv-ink-4);
+          display: none; /* 隐藏 Label 让界面更极简（只看值即可） */
         }
         .lv-theme .lv-detail-strip-meta-value {
-          font-family: var(--lv-font-sans);
-          font-size: 13px;
-          color: var(--lv-ink-2);
-          letter-spacing: 0.01em;
+          font-family: var(--lv-font-mono);
+          font-size: 11px;
+          color: var(--lv-ink-3);
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
         }
         .lv-theme .lv-detail-strip-meta-sep {
           margin-left: 6px;
@@ -117,10 +114,10 @@ export function CardDetailStrip({
         .lv-theme .lv-detail-strip-desc {
           margin: 0 auto;
           font-family: var(--lv-font-sans);
-          font-size: 13px;
-          line-height: 1.65;
-          color: var(--lv-ink-3);
-          max-width: 72ch;
+          font-size: 14px;
+          line-height: 1.8;
+          color: var(--lv-ink-2);
+          max-width: 60ch;
           display: -webkit-box;
           -webkit-line-clamp: 3;
           -webkit-box-orient: vertical;
@@ -129,16 +126,20 @@ export function CardDetailStrip({
         @media (max-width: 768px) {
           .lv-theme .lv-detail-strip {
             padding: 4px 16px 0;
-            min-height: 92px;
+            min-height: 104px;
+          }
+          .lv-theme .lv-detail-strip-inner {
+            gap: 8px;
           }
           .lv-theme .lv-detail-strip-meta {
-            column-gap: 10px;
+            column-gap: 8px;
           }
           .lv-theme .lv-detail-strip-meta-value {
-            font-size: 12px;
+            font-size: 10px;
           }
           .lv-theme .lv-detail-strip-desc {
-            font-size: 12px;
+            font-size: 13px;
+            line-height: 1.6;
           }
         }
       `}</style>

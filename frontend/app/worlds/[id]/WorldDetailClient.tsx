@@ -596,7 +596,7 @@ export function WorldDetailClient() {
         .lv-world-script-desc {
           margin: 4px 0 0;
           color: var(--lv-ink-3);
-          font-size: 12.5px;
+          font-size: 12px;
           line-height: 1.45;
           display: -webkit-box;
           -webkit-line-clamp: 1;
@@ -610,7 +610,7 @@ export function WorldDetailClient() {
           gap: 10px;
           margin-top: 8px;
           color: var(--lv-ink-3);
-          font-size: 11.5px;
+          font-size: 12px;
         }
         .lv-world-script-time {
           font-variant-numeric: tabular-nums;
@@ -722,14 +722,14 @@ export function WorldDetailClient() {
         }
         .lv-world-mobile-script-card .lv-world-script-desc {
           margin-top: 4px;
-          font-size: 11.5px;
+          font-size: 12px;
           line-height: 1.42;
           -webkit-line-clamp: 1;
         }
         .lv-world-mobile-script-card .lv-world-script-meta {
           gap: 6px;
           margin-top: 7px;
-          font-size: 10.5px;
+          font-size: 11px;
         }
         .lv-world-mobile-script-toggle {
           margin: 12px 4px 0;

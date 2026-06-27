@@ -16,11 +16,11 @@
 | 改游戏回合流程 / SSE / 多 Agent | [`modules/orchestrator.md`](modules/orchestrator.md), [`modules/sse-protocol.md`](modules/sse-protocol.md), [`modules/director.md`](modules/director.md), [`modules/npc.md`](modules/npc.md), [`modules/narrator.md`](modules/narrator.md) |
 | 改记忆 / 案件板 / 状态持久化 | [`modules/memory.md`](modules/memory.md), [`modules/case-board.md`](modules/case-board.md), [`modules/state-and-persistence.md`](modules/state-and-persistence.md) |
 | 改 LLM provider / 模型后台 / 成本限流 | [`modules/llm-router.md`](modules/llm-router.md), [`modules/cost-rate-moderation.md`](modules/cost-rate-moderation.md), [`operations/latency-ttft.md`](operations/latency-ttft.md) |
-| 改创作工坊 / 生成 Agent / 参考型复刻 | [`modules/world-creator.md`](modules/world-creator.md), [`design/cover-art-spec.md`](design/cover-art-spec.md) |
+| 改创作工坊 / 生成 Agent / 参考型复刻 | [`modules/world-creator.md`](modules/world-creator.md), [`design/cover-art-spec.md`](design/cover-art-spec.md), [`design/image-style-direction.md`](design/image-style-direction.md) |
 | 改登录 / admin / audit | [`modules/auth-and-admin.md`](modules/auth-and-admin.md) |
 | 改数据库 schema | [`data/schema.md`](data/schema.md), [`MIGRATION_NOTES.md`](MIGRATION_NOTES.md) |
 | 改主站视觉 / Play 页 | [`../frontend/AGENTS.md`](../frontend/AGENTS.md)（前端唯一参考；旧 visual-principles / frontend-spec / play-mode-spec 已合并归档到 `_archive/`） |
-| 改封面 / 生图产物 | [`design/cover-art-spec.md`](design/cover-art-spec.md) |
+| 改封面 / 生图产物 | [`design/cover-art-spec.md`](design/cover-art-spec.md), [`design/image-style-direction.md`](design/image-style-direction.md) |
 | 理解产品方向 | [`product/product-spec.md`](product/product-spec.md) |
 
 ## 目录含义

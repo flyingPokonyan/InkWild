@@ -348,7 +348,10 @@ export default function MePage() {
                     </span>
                   </span>
                   <span className="me-history-title">{game.world_name}</span>
-                  <span className="me-history-meta">{relTime(game.last_played_at, th)}</span>
+                  <span className="me-history-meta">
+                    {game.character_name ? `${game.character_name} · ` : ""}
+                    {relTime(game.last_played_at, th)}
+                  </span>
                 </button>
               ))}
               <Link href="/history" className="me-history-all">
@@ -486,7 +489,7 @@ export default function MePage() {
         }
         .me-avatar span {
           font-family: var(--lv-font-serif);
-          font-size: 24px;
+          font-size: var(--lv-t-h2);
           font-weight: 500;
           color: var(--lv-ink);
         }
@@ -556,7 +559,7 @@ export default function MePage() {
           color: var(--lv-ink);
           padding: 0 16px;
           font-family: var(--lv-font-sans);
-          font-size: 13px;
+          font-size: var(--lv-t-compact);
           outline: none;
           transition:
             border-color var(--lv-dur-fast) var(--lv-ease),
@@ -594,7 +597,7 @@ export default function MePage() {
         .me-profile h1 {
           margin: 0;
           font-family: var(--lv-font-serif);
-          font-size: 20px;
+          font-size: var(--lv-t-h3);
           font-weight: 500;
           line-height: 1.15;
           color: var(--lv-ink);
@@ -625,10 +628,13 @@ export default function MePage() {
           gap: 16px;
           padding: 16px 18px;
           border-radius: var(--lv-r-card);
-          border: 1px solid var(--lv-line);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           background:
-            linear-gradient(180deg, rgba(255, 255, 255, 0.024), rgba(255, 255, 255, 0.012)),
-            var(--lv-bg);
+            radial-gradient(circle at 100% 0%, rgba(223, 194, 144, 0.06), transparent 50%),
+            linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01)),
+            var(--lv-bg-1);
+          backdrop-filter: blur(12px);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         .me-credit-label {
           color: var(--lv-ink-3);
@@ -638,7 +644,7 @@ export default function MePage() {
           display: flex;
           align-items: baseline;
           gap: 8px;
-          font-size: 24px;
+          font-size: var(--lv-t-h2);
           font-weight: 600;
           font-variant-numeric: tabular-nums;
         }
@@ -705,6 +711,20 @@ export default function MePage() {
           text-align: left;
           text-decoration: none;
           cursor: pointer;
+          transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .me-history-card:not(:disabled):hover,
+        .me-history-all:hover {
+          transform: translateY(-2px);
+        }
+        .me-history-card:not(:disabled):active,
+        .me-history-all:active {
+          transform: scale(0.97);
+        }
+        .me-history-card:not(:disabled):hover .me-history-cover,
+        .me-history-all:hover .me-history-all-box {
+          border-color: rgba(255, 255, 255, 0.12);
+          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
         }
         .me-history-card:disabled {
           opacity: 0.65;
@@ -719,6 +739,7 @@ export default function MePage() {
           border-radius: 11px;
           overflow: hidden;
           box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+          transition: all 300ms cubic-bezier(0.16, 1, 0.3, 1);
         }
         .me-history-cover {
           border: 1px solid var(--lv-line);
@@ -739,11 +760,11 @@ export default function MePage() {
           background: linear-gradient(180deg, transparent 45%, rgba(0, 0, 0, 0.5));
         }
         .me-history-all-box {
-          border: 1px solid rgba(223, 194, 144, 0.28);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           background:
-            radial-gradient(ellipse at 50% 40%, rgba(223, 194, 144, 0.16), transparent 62%),
-            linear-gradient(150deg, rgba(223, 194, 144, 0.08), rgba(255, 255, 255, 0.015));
-          color: var(--lv-accent);
+            radial-gradient(ellipse at 50% 40%, rgba(255, 255, 255, 0.04), transparent 62%),
+            linear-gradient(150deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.005));
+          color: var(--lv-ink-2);
         }
         .me-history-badge {
           position: absolute;
@@ -818,6 +839,14 @@ export default function MePage() {
           font-size: var(--lv-t-compact);
           width: 100%;
           cursor: pointer;
+          transition: background 250ms var(--lv-ease), border-color 250ms var(--lv-ease), transform 250ms var(--lv-ease);
+        }
+        .me-more-row:hover:not(.is-disabled) {
+          background: rgba(255, 255, 255, 0.05);
+          border-color: rgba(255, 255, 255, 0.15);
+        }
+        .me-more-row:active:not(.is-disabled) {
+          transform: scale(0.98);
         }
         .me-more-row span:first-child {
           display: inline-flex;
@@ -858,6 +887,7 @@ export default function MePage() {
           .me-credit-card {
             align-items: stretch;
             flex-direction: column;
+            gap: 12px;
           }
           .me-credit-action {
             justify-content: center;

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -167,7 +167,7 @@ export default function WorkshopDemoPage() {
     onSuccess: (d) => router.push(`/workshop/worlds/drafts/${d.id}`),
     onSettled: () => setBusyTarget(null),
     onError: (e: unknown) => {
-      setError(e instanceof Error ? e.message : "打开世界草稿失败");
+      setError(e instanceof Error ? e.message : tWorkshop("error.openWorldDraft"));
     },
   });
 
@@ -181,14 +181,14 @@ export default function WorkshopDemoPage() {
     onSuccess: (d) => router.push(`/workshop/scripts/drafts/${d.id}`),
     onSettled: () => setBusyTarget(null),
     onError: (e: unknown) => {
-      setError(e instanceof Error ? e.message : "打开剧本草稿失败");
+      setError(e instanceof Error ? e.message : tWorkshop("error.openScriptDraft"));
     },
   });
 
   // ====== Mutations: delete ======
   const onDeleteError = useCallback(
-    (e: unknown) => setError(e instanceof Error ? e.message : "删除失败"),
-    [],
+    (e: unknown) => setError(e instanceof Error ? e.message : tWorkshop("error.delete")),
+    [tWorkshop],
   );
 
   const deleteWorld = useMutation({
@@ -196,7 +196,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/worlds/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workshop", "worlds"] });
-      setNotice("世界已成功删除");
+      setNotice(tWorkshop("toast.worldDeleted"));
       setDeleteConfirmWorldId(null);
     },
     onError: onDeleteError,
@@ -207,7 +207,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/world-drafts/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workshop", "worlds"] });
-      setNotice("世界草稿已成功删除");
+      setNotice(tWorkshop("toast.worldDraftDeleted"));
       setDeleteConfirmWorldId(null);
     },
     onError: onDeleteError,
@@ -219,7 +219,7 @@ export default function WorkshopDemoPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workshop", "scripts"] });
       queryClient.invalidateQueries({ queryKey: ["workshop", "worlds"] });
-      setNotice("剧本已成功删除");
+      setNotice(tWorkshop("toast.scriptDeleted"));
       setDeleteConfirmScriptId(null);
     },
     onError: onDeleteError,
@@ -230,7 +230,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/script-drafts/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workshop", "scripts"] });
-      setNotice("剧本草稿已成功删除");
+      setNotice(tWorkshop("toast.scriptDraftDeleted"));
       setDeleteConfirmScriptId(null);
     },
     onError: onDeleteError,
@@ -238,8 +238,8 @@ export default function WorkshopDemoPage() {
 
   // ====== Mutations: publish lifecycle (submit / withdraw submission / unpublish) ======
   const onLifecycleError = useCallback(
-    (e: unknown) => setError(e instanceof Error ? e.message : "操作失败"),
-    [],
+    (e: unknown) => setError(e instanceof Error ? e.message : tWorkshop("error.lifecycle")),
+    [tWorkshop],
   );
   const refetchBoth = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["workshop", "worlds"] });
@@ -251,7 +251,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/world-drafts/${draftId}/submit`, { method: "POST" }),
     onSuccess: () => {
       refetchBoth();
-      setNotice("已提交审核，通过后将对全网可见");
+      setNotice(tWorkshop("toast.worldSubmitted"));
     },
     onError: onLifecycleError,
   });
@@ -262,7 +262,7 @@ export default function WorkshopDemoPage() {
       }),
     onSuccess: () => {
       refetchBoth();
-      setNotice("已撤回提交，回到私有");
+      setNotice(tWorkshop("toast.withdrawn"));
     },
     onError: onLifecycleError,
   });
@@ -271,7 +271,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/worlds/${worldId}/withdraw`, { method: "POST" }),
     onSuccess: () => {
       refetchBoth();
-      setNotice("已下架，转为私有");
+      setNotice(tWorkshop("toast.worldUnpublished"));
     },
     onError: onLifecycleError,
   });
@@ -281,7 +281,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/script-drafts/${draftId}/submit`, { method: "POST" }),
     onSuccess: () => {
       refetchBoth();
-      setNotice("剧本已提交审核");
+      setNotice(tWorkshop("toast.scriptSubmitted"));
     },
     onError: onLifecycleError,
   });
@@ -292,7 +292,7 @@ export default function WorkshopDemoPage() {
       }),
     onSuccess: () => {
       refetchBoth();
-      setNotice("已撤回提交");
+      setNotice(tWorkshop("toast.scriptWithdrawn"));
     },
     onError: onLifecycleError,
   });
@@ -301,7 +301,7 @@ export default function WorkshopDemoPage() {
       workshopFetch<unknown>(`/api/workshop/scripts/${scriptId}/withdraw`, { method: "POST" }),
     onSuccess: () => {
       refetchBoth();
-      setNotice("剧本已下架，转为私有");
+      setNotice(tWorkshop("toast.scriptUnpublished"));
     },
     onError: onLifecycleError,
   });
@@ -333,10 +333,10 @@ export default function WorkshopDemoPage() {
   const errorMessage = useMemo(() => {
     if (worldsQuery.isError && tab === "worlds") {
       const e = worldsQuery.error;
-      return e instanceof Error ? e.message : "获取数据失败";
+      return e instanceof Error ? e.message : tWorkshop("error.fetch");
     }
     return error;
-  }, [worldsQuery.isError, worldsQuery.error, tab, error]);
+  }, [worldsQuery.isError, worldsQuery.error, tab, error, tWorkshop]);
 
   // Loading skeleton and status
   const isWorldsLoading = worldsQuery.isPending && tab === "worlds";
@@ -475,7 +475,7 @@ export default function WorkshopDemoPage() {
             style={{ marginTop: 20 }}
           >
             <div className="ws-permission-banner">
-              你还没有创作权限。当前处于只读模式，可以浏览已发布的世界与剧本；如需开通创作权限，请联系管理员开通。
+              {tWorkshop("permissionBanner")}
             </div>
           </motion.div>
         )}
@@ -492,12 +492,12 @@ export default function WorkshopDemoPage() {
             {/* Toolbar: filter & counts */}
             <div className="toolbar">
               <div className="toolbar-left">
-                <span className="lv-t-caps" style={{ color: "var(--lv-accent)" }}>全部世界</span>
+                <span className="lv-t-caps" style={{ color: "var(--lv-accent)" }}>{tWorkshop("worlds.captionAll")}</span>
                 <span className="lv-t-meta toolbar-count">
                   {isWorldsLoading ? (
-                    "读取中..."
+                    tWorkshop("loading")
                   ) : (
-                    `${(worldsQuery.data?.published.length ?? 0) + (worldsQuery.data?.drafts.length ?? 0)} 个世界 · ${worldsQuery.data?.drafts.length ?? 0} 个草稿`
+                    tWorkshop("worlds.count", { total: (worldsQuery.data?.published.length ?? 0) + (worldsQuery.data?.drafts.length ?? 0), drafts: worldsQuery.data?.drafts.length ?? 0 })
                   )}
                 </span>
               </div>
@@ -508,7 +508,7 @@ export default function WorkshopDemoPage() {
                     className={`toolbar-chip ${worldFilter === mode ? "active" : ""}`}
                     onClick={() => setWorldFilter(mode)}
                   >
-                    {mode === "all" ? "全部" : mode === "published" ? "已发布" : "私有"}
+                    {mode === "all" ? tWorkshop("filters.all") : mode === "published" ? tWorkshop("filters.published") : tWorkshop("filters.private")}
                   </button>
                 ))}
               </div>
@@ -576,9 +576,9 @@ export default function WorkshopDemoPage() {
                       <div className="new-card-plus">+</div>
                     </div>
                     <div className="world-card-body">
-                      <h3 className="lv-t-h3 world-title">创造新世界</h3>
+                      <h3 className="lv-t-h3 world-title">{tWorkshop("worlds.createCta")}</h3>
                       <div className="world-meta lv-t-meta">
-                        <span>AI 驱动的一键生成</span>
+                        <span>{tWorkshop("worlds.createCtaHint")}</span>
                       </div>
                     </div>
                   </button>
@@ -592,18 +592,33 @@ export default function WorkshopDemoPage() {
              (worldsQuery.data?.drafts.length ?? 0) === 0 && (
               <div className="ws-empty-slate">
                 <Globe size={40} style={{ color: "var(--lv-ink-4)", marginBottom: 16 }} />
-                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>你还没有创建过世界</h3>
-                <p className="lv-t-meta" style={{ margin: "8px 0 20px" }}>从一个想法开始，新建你的第一个世界。</p>
+                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>{tWorkshop("worlds.emptyTitle")}</h3>
+                <p className="lv-t-meta" style={{ margin: "8px 0 20px" }}>{tWorkshop("worlds.emptyHint")}</p>
                 {canCreate && (
-                  <motion.button 
+                  <motion.button
                     whileHover={{ scale: 1.03 }}
                     onClick={() => router.push("/workshop/generate/world")}
                     className="ws-cta"
                   >
                     <Plus size={16} className="ws-cta-plus" />
-                    <span>新建第一个世界</span>
+                    <span>{tWorkshop("worlds.emptyCta")}</span>
                   </motion.button>
                 )}
+              </div>
+            )}
+
+            {/* Filter empty fallback */}
+            {!isWorldsLoading &&
+             ((worldsQuery.data?.published.length ?? 0) > 0 || (worldsQuery.data?.drafts.length ?? 0) > 0) &&
+             worldFilter !== "all" &&
+             (worldsQuery.data?.published ?? []).filter((w) =>
+               worldFilter === "published" ? w.status === "published" : w.status !== "published"
+             ).length === 0 &&
+             (worldFilter === "published" || (worldsQuery.data?.drafts ?? []).length === 0) && (
+              <div className="ws-empty-slate">
+                <Globe size={32} style={{ color: "var(--lv-ink-4)", marginBottom: 16 }} />
+                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>{tWorkshop("worlds.filterEmptyTitle")}</h3>
+                <p className="lv-t-meta" style={{ margin: "8px 0 0" }}>{tWorkshop("worlds.filterEmptyHint")}</p>
               </div>
             )}
           </section>
@@ -637,13 +652,13 @@ export default function WorkshopDemoPage() {
             <div className="toolbar">
               <div className="toolbar-left">
                 <span className="lv-t-caps" style={{ color: "var(--lv-accent)" }}>
-                  {worldsWithScripts.find((w) => w.id === effectiveWorldId)?.name || "无所属世界"} · 剧本
+                  {worldsWithScripts.find((w) => w.id === effectiveWorldId)?.name || tWorkshop("noWorld")} · 剧本
                 </span>
                 <span className="lv-t-meta toolbar-count">
                   {isScriptsLoading ? (
-                    "读取中..."
+                    tWorkshop("loading")
                   ) : (
-                    `${(scriptsQuery.data?.published.length ?? 0) + (scriptsQuery.data?.drafts.length ?? 0)} 部剧本 · ${scriptsQuery.data?.drafts.length ?? 0} 个草稿`
+                    tWorkshop("scripts.count", { total: (scriptsQuery.data?.published.length ?? 0) + (scriptsQuery.data?.drafts.length ?? 0), drafts: scriptsQuery.data?.drafts.length ?? 0 })
                   )}
                 </span>
               </div>
@@ -654,7 +669,7 @@ export default function WorkshopDemoPage() {
                     className={`toolbar-chip ${scriptFilter === mode ? "active" : ""}`}
                     onClick={() => setScriptFilter(mode)}
                   >
-                    {mode === "all" ? "全部" : mode === "published" ? "已发布" : "私有"}
+                    {mode === "all" ? tWorkshop("filters.all") : mode === "published" ? tWorkshop("filters.published") : tWorkshop("filters.private")}
                   </button>
                 ))}
               </div>
@@ -730,9 +745,9 @@ export default function WorkshopDemoPage() {
                       <div className="new-card-plus">+</div>
                     </div>
                     <div className="world-card-body">
-                      <h3 className="lv-t-h3 world-title">创作新剧本</h3>
+                      <h3 className="lv-t-h3 world-title">{tWorkshop("scripts.createCta")}</h3>
                       <div className="world-meta lv-t-meta">
-                        <span>一键生成剧情分支与线索</span>
+                        <span>{tWorkshop("scripts.createCtaHint")}</span>
                       </div>
                     </div>
                   </button>
@@ -744,14 +759,14 @@ export default function WorkshopDemoPage() {
             {(worldsQuery.data?.published.length ?? 0) === 0 && (
               <div className="ws-empty-slate">
                 <AlertTriangle size={32} style={{ color: "var(--lv-warn)", marginBottom: 16 }} />
-                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>写剧本前，需要先发布一个世界</h3>
-                <p className="lv-t-meta" style={{ margin: "8px 0 20px" }}>剧本依附于世界。先创建并发布一个世界，再来写剧本。</p>
+                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>{tWorkshop("scripts.needWorldTitle")}</h3>
+                <p className="lv-t-meta" style={{ margin: "8px 0 20px" }}>{tWorkshop("scripts.needWorldHint")}</p>
                 <motion.button 
                   whileHover={{ scale: 1.03 }}
                   onClick={() => handleTabChange("worlds")}
                   className="ws-cta"
                 >
-                  <span>去世界列表看看</span>
+                  <span>{tWorkshop("scripts.goToWorlds")}</span>
                   <ArrowRight size={14} style={{ marginLeft: 6 }} />
                 </motion.button>
               </div>
@@ -760,8 +775,8 @@ export default function WorkshopDemoPage() {
             {worldsWithScripts.length === 0 && (worldsQuery.data?.published.length ?? 0) > 0 && (
               <div className="ws-empty-slate">
                 <BookOpen size={40} style={{ color: "var(--lv-ink-4)", marginBottom: 16 }} />
-                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>当前世界尚未拥有独立剧本</h3>
-                <p className="lv-t-meta" style={{ margin: "8px 0 20px" }}>来为这个波澜壮阔的世界，撰写第一部供玩家推演的剧本主线线索。</p>
+                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>{tWorkshop("scripts.noScriptsForWorldTitle")}</h3>
+                <p className="lv-t-meta" style={{ margin: "8px 0 20px" }}>{tWorkshop("scripts.noScriptsForWorldHint")}</p>
                 {canCreate && (
                   <motion.button 
                     whileHover={{ scale: 1.03 }}
@@ -769,9 +784,24 @@ export default function WorkshopDemoPage() {
                     className="ws-cta"
                   >
                     <Plus size={16} className="ws-cta-plus" />
-                    <span>新建一部剧本</span>
+                    <span>{tWorkshop("scripts.emptyCta")}</span>
                   </motion.button>
                 )}
+              </div>
+            )}
+
+            {/* Filter empty fallback */}
+            {!isScriptsLoading &&
+             worldsWithScripts.length > 0 &&
+             scriptFilter !== "all" &&
+             (scriptsQuery.data?.published ?? []).filter((s) =>
+               scriptFilter === "published" ? s.status === "published" : s.status !== "published"
+             ).length === 0 &&
+             (scriptFilter === "published" || (scriptsQuery.data?.drafts ?? []).length === 0) && (
+              <div className="ws-empty-slate">
+                <BookOpen size={32} style={{ color: "var(--lv-ink-4)", marginBottom: 16 }} />
+                <h3 className="lv-t-h3" style={{ color: "var(--lv-ink-2)" }}>{tWorkshop("scripts.filterEmptyTitle")}</h3>
+                <p className="lv-t-meta" style={{ margin: "8px 0 0" }}>{tWorkshop("scripts.filterEmptyHint")}</p>
               </div>
             )}
           </section>
@@ -892,7 +922,7 @@ export default function WorkshopDemoPage() {
           border: 1px solid var(--lv-ink);
           color: #0a0a0c;
           font-family: var(--lv-ff-sans);
-          font-size: 13.5px;
+          font-size: 13px;
           font-weight: 600;
           cursor: pointer;
           transition: all 250ms var(--lv-ease);
@@ -1187,7 +1217,7 @@ export default function WorkshopDemoPage() {
           gap: 5px;
           align-items: center;
           flex-wrap: wrap;
-          font-size: 11.5px;
+          font-size: 12px;
         }
         .world-meta-sep {
           color: var(--lv-ink-5);
@@ -1255,7 +1285,7 @@ export default function WorkshopDemoPage() {
           border: 1px solid var(--lv-line);
           color: var(--lv-ink-3);
           font-family: var(--lv-ff-sans);
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 500;
           cursor: pointer;
           transition: all 200ms var(--lv-ease);
@@ -1274,7 +1304,7 @@ export default function WorkshopDemoPage() {
         }
         .world-pill-count {
           font-family: var(--lv-ff-mono);
-          font-size: 9.5px;
+          font-size: 10px;
           color: var(--lv-ink-3);
         }
         .world-pill.active .world-pill-count {
@@ -1327,7 +1357,7 @@ export default function WorkshopDemoPage() {
           border-radius: var(--lv-r-card);
         }
         .confirm-delete-title {
-          font-size: 12.5px;
+          font-size: 12px;
           font-weight: 600;
           color: #fff;
         }
@@ -1360,7 +1390,7 @@ export default function WorkshopDemoPage() {
           gap: 10px;
           padding: 12px 18px;
           border-radius: 8px;
-          font-size: 13.5px;
+          font-size: 13px;
           width: 100%;
         }
         .ws-toast.is-error {
@@ -1410,9 +1440,13 @@ export default function WorkshopDemoPage() {
           justify-content: center;
           text-align: center;
           padding: 80px 24px;
-          background: rgba(255, 255, 255, 0.01);
-          border: 1px dashed var(--lv-line);
           border-radius: var(--lv-r-card);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
+            rgba(255, 255, 255, 0.005);
+          backdrop-filter: blur(12px);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 8px 32px rgba(0, 0, 0, 0.15);
         }
 
         /* Script fallback covers layout */
@@ -1491,11 +1525,12 @@ function WorldDraftCard({
   onCancelDelete,
   onConfirmDelete,
 }: WorldDraftCardProps) {
+  const tWorkshop = useTranslations("admin.workshop");
   const isGenerating = draft.generation_status === "pending" || draft.generation_status === "running";
   const isFailed = draft.generation_status === "failed";
   
   // Progress calculations
-  const progressText = isGenerating ? "生成中" : isFailed ? "失败" : "草稿";
+  const progressText = isGenerating ? tWorkshop("card.statusGenerating") : isFailed ? tWorkshop("card.statusFailed") : tWorkshop("card.statusDraft");
   const statusClass = isGenerating ? "generating" : isFailed ? "failed" : "draft";
 
   const handleCardClick = () => {
@@ -1510,10 +1545,10 @@ function WorldDraftCard({
         {/* Deletion confirmations overlay */}
         {confirmingDelete && (
           <div className="confirm-delete-overlay" onClick={(e) => e.stopPropagation()}>
-            <span className="confirm-delete-title">确认丢弃此草稿？</span>
+            <span className="confirm-delete-title">{tWorkshop("card.confirmDeleteWorld")}</span>
             <div className="confirm-delete-btns">
-              <button className="confirm-delete-btn yes" onClick={onConfirmDelete}>丢弃</button>
-              <button className="confirm-delete-btn no" onClick={onCancelDelete}>取消</button>
+              <button className="confirm-delete-btn yes" onClick={onConfirmDelete}>{tWorkshop("card.confirmYes")}</button>
+              <button className="confirm-delete-btn no" onClick={onCancelDelete}>{tWorkshop("card.confirmNo")}</button>
             </div>
           </div>
         )}
@@ -1555,7 +1590,7 @@ function WorldDraftCard({
         {!isGenerating && !confirmingDelete && (
           <button
             className="card-action-btn"
-            aria-label="删除"
+            aria-label={tWorkshop("card.deleteLabel")}
             onClick={(e) => {
               e.stopPropagation();
               onDeleteConfirm(draft.id);
@@ -1567,11 +1602,11 @@ function WorldDraftCard({
       </div>
 
       <div className="world-card-body">
-        <h3 className="lv-t-h3 world-title">{draft.name || "未命名草稿"}</h3>
+        <h3 className="lv-t-h3 world-title">{draft.name || tWorkshop("card.untitled")}</h3>
         <div className="world-meta lv-t-meta">
-          <span>{(draft as { genre?: string | null }).genre || "无特定分类"}</span>
+          <span>{(draft as { genre?: string | null }).genre || tWorkshop("noGenre")}</span>
           <span className="world-meta-sep">·</span>
-          <span>草稿修改中</span>
+          <span>{tWorkshop("card.editing")}</span>
         </div>
       </div>
     </article>
@@ -1593,12 +1628,12 @@ interface WorldPublishedCardProps {
   onConfirmDelete: () => void;
 }
 
-function worldStatusBadge(world: AdminWorldPublishedItem): { label: string; color: string } {
-  if (world.status === "published") return { label: "已发布", color: "var(--lv-accent)" };
+function worldStatusBadge(world: AdminWorldPublishedItem, tWorkshop: (key: string) => string): { label: string; color: string } {
+  if (world.status === "published") return { label: tWorkshop("card.statusPublished"), color: "var(--lv-accent)" };
   if (world.status === "withdrawn") return { label: "已下架", color: "var(--lv-danger)" };
   if (world.review_status === "submitted") return { label: "审核中", color: "var(--lv-accent-2)" };
   if (world.review_status === "rejected") return { label: "已驳回", color: "var(--lv-danger)" };
-  return { label: "私有", color: "var(--lv-ink-2)" };
+  return { label: tWorkshop("card.statusPrivate"), color: "var(--lv-ink-2)" };
 }
 
 function WorldPublishedCard({
@@ -1614,8 +1649,9 @@ function WorldPublishedCard({
   onCancelDelete,
   onConfirmDelete,
 }: WorldPublishedCardProps) {
+  const tWorkshop = useTranslations("admin.workshop");
   const isOwner = world.is_owner;
-  const badge = worldStatusBadge(world);
+  const badge = worldStatusBadge(world, tWorkshop);
 
   // Owner clicks edit the draft; visitors (published worlds by others) preview.
   const handleCardClick = () => {
@@ -1630,10 +1666,10 @@ function WorldPublishedCard({
 
         {confirmingDelete && (
           <div className="confirm-delete-overlay" onClick={(e) => e.stopPropagation()}>
-            <span className="confirm-delete-title">确定要删除此世界及其关联的剧本么？</span>
+            <span className="confirm-delete-title">{tWorkshop("card.confirmDeletePublished")}</span>
             <div className="confirm-delete-btns">
-              <button className="confirm-delete-btn yes" onClick={onConfirmDelete}>删除</button>
-              <button className="confirm-delete-btn no" onClick={onCancelDelete}>取消</button>
+              <button className="confirm-delete-btn yes" onClick={onConfirmDelete}>{tWorkshop("card.confirmDelete")}</button>
+              <button className="confirm-delete-btn no" onClick={onCancelDelete}>{tWorkshop("card.confirmNo")}</button>
             </div>
           </div>
         )}
@@ -1712,11 +1748,11 @@ function WorldPublishedCard({
                 onClick={onSubmit}
                 disabled={busy || !world.draft_id}
               >
-                提交发布
+                {tWorkshop("card.submitPublish")}
               </button>
             )}
             <button type="button" className="lv-btn lv-btn-sm" onClick={onOpen} disabled={busy}>
-              编辑
+              {tWorkshop("card.edit")}
             </button>
           </div>
         )}
@@ -1762,10 +1798,10 @@ function ScriptDraftCard({
         
         {confirmingDelete && (
           <div className="confirm-delete-overlay" onClick={(e) => e.stopPropagation()}>
-            <span className="confirm-delete-title">确认丢弃此剧本草稿？</span>
+            <span className="confirm-delete-title">{tCard("confirmDeleteScript")}</span>
             <div className="confirm-delete-btns">
-              <button className="confirm-delete-btn yes" onClick={onConfirmDelete}>丢弃</button>
-              <button className="confirm-delete-btn no" onClick={onCancelDelete}>取消</button>
+              <button className="confirm-delete-btn yes" onClick={onConfirmDelete}>{tCard("confirmYes")}</button>
+              <button className="confirm-delete-btn no" onClick={onCancelDelete}>{tCard("confirmNo")}</button>
             </div>
           </div>
         )}
@@ -1795,7 +1831,7 @@ function ScriptDraftCard({
         {!isGenerating && !confirmingDelete && (
           <button
             className="card-action-btn"
-            aria-label="删除"
+            aria-label={tCard("deleteLabel")}
             style={{ zIndex: 5 }}
             onClick={(e) => {
               e.stopPropagation();
@@ -1834,12 +1870,12 @@ interface ScriptPublishedCardProps {
   onConfirmDelete: () => void;
 }
 
-function scriptStatusBadge(s: AdminScriptPublishedItem): { label: string; color: string } {
-  if (s.status === "published") return { label: "已发布", color: "var(--lv-accent)" };
+function scriptStatusBadge(s: AdminScriptPublishedItem, tWorkshop: (key: string) => string): { label: string; color: string } {
+  if (s.status === "published") return { label: tWorkshop("card.statusPublished"), color: "var(--lv-accent)" };
   if (s.status === "withdrawn") return { label: "已下架", color: "var(--lv-danger)" };
   if (s.review_status === "submitted") return { label: "审核中", color: "var(--lv-accent-2)" };
   if (s.review_status === "rejected") return { label: "已驳回", color: "var(--lv-danger)" };
-  return { label: "私有", color: "var(--lv-ink-2)" };
+  return { label: tWorkshop("card.statusPrivate"), color: "var(--lv-ink-2)" };
 }
 
 function ScriptPublishedCard({
@@ -1856,8 +1892,9 @@ function ScriptPublishedCard({
   onConfirmDelete,
 }: ScriptPublishedCardProps) {
   const t = useTranslations("workshopPage");
+  const tWorkshop = useTranslations("admin.workshop");
   const isOwner = script.is_owner;
-  const badge = scriptStatusBadge(script);
+  const badge = scriptStatusBadge(script, tWorkshop);
 
   const handleCardClick = () => {
     if (confirmingDelete || busy) return;
@@ -1984,11 +2021,11 @@ function ScriptPublishedCard({
                 onClick={onSubmit}
                 disabled={busy || !script.draft_id}
               >
-                提交发布
+                {tWorkshop("card.submitPublish")}
               </button>
             )}
             <button type="button" className="lv-btn lv-btn-sm" onClick={onOpen} disabled={busy}>
-              编辑
+              {tWorkshop("card.edit")}
             </button>
           </div>
         )}
@@ -2042,7 +2079,7 @@ function MobileWorkshopView({
   const user = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<MobileTab>("drafts");
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
-  const [sheetOpen, setSheetOpen] = useState(false);
+
 
   const worldDrafts = useMemo(() => worldsQuery.data?.drafts ?? [], [worldsQuery.data?.drafts]);
   const worldsPublished = worldsQuery.data?.published ?? [];
@@ -2150,7 +2187,7 @@ function MobileWorkshopView({
                 marginBottom: 6,
               }}
             >
-              {t("eyebrow")}
+              {tab === "scripts" ? "Creative Studio · Script" : t("eyebrow")}
             </div>
             <h1
               style={{
@@ -2162,7 +2199,7 @@ function MobileWorkshopView({
                 marginBottom: 6,
               }}
             >
-              {t("heroTitle")}
+              {tab === "scripts" ? "构筑新剧本" : t("heroTitle")}
             </h1>
             <p
               style={{
@@ -2172,7 +2209,7 @@ function MobileWorkshopView({
                 margin: 0,
               }}
             >
-              {t("subtitle")}
+              {tab === "scripts" ? "为已有世界添加新故事线。" : t("subtitle")}
             </p>
           </div>
           <button
@@ -2182,7 +2219,7 @@ function MobileWorkshopView({
                 router.push(buildLoginHref("/workshop"));
                 return;
               }
-              setSheetOpen(true);
+              router.push(tab === "scripts" ? "/workshop/generate/script" : "/workshop/generate/world");
             }}
             disabled={!canCreate && !!user}
             style={{
@@ -2205,7 +2242,7 @@ function MobileWorkshopView({
               alignSelf: "center",
             }}
           >
-            <span style={{ fontSize: 18, lineHeight: 1, marginTop: -1 }}>+</span> {t("createCta")}
+            <span style={{ fontSize: 18, lineHeight: 1, marginTop: -1 }}>+</span> {tab === "scripts" ? tWorkshop("scripts.createCta") : t("createCta")}
           </button>
         </section>
 
@@ -2290,18 +2327,33 @@ function MobileWorkshopView({
                 type="button"
                 onClick={() => setTab(seg.k)}
                 style={{
+                  position: "relative",
                   height: 34,
                   borderRadius: 999,
                   border: 0,
-                  background: active ? "rgba(245,242,235,0.90)" : "transparent",
+                  background: "transparent",
                   color: active ? "var(--lv-bg)" : "var(--lv-ink-3)",
-                  fontFamily: "var(--lv-font-mono)",
-                  fontSize: 9,
-                  letterSpacing: "0.14em",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
                   cursor: "pointer",
+                  zIndex: 1,
                 }}
               >
-                {seg.label}
+                {active && (
+                  <motion.div
+                    layoutId="ws-mobile-tab-bg"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      borderRadius: 999,
+                      background: "rgba(245, 242, 235, 0.90)",
+                      zIndex: -1,
+                    }}
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
+                <span style={{ position: "relative", zIndex: 1 }}>{seg.label}</span>
               </button>
             );
           })}
@@ -2449,8 +2501,8 @@ function MobileWorkshopView({
                       key={w.id}
                       cover={w.cover_image}
                       status="published"
-                      badgeLabel={worldStatusBadge(w).label}
-                      badgeColor={worldStatusBadge(w).color}
+                      badgeLabel={worldStatusBadge(w, tWorkshop).label}
+                      badgeColor={worldStatusBadge(w, tWorkshop).color}
                       isOwner={w.is_owner}
                       kind="world"
                       title={w.name}
@@ -2482,8 +2534,8 @@ function MobileWorkshopView({
                       key={s.id}
                       cover={null}
                       status="published"
-                      badgeLabel={scriptStatusBadge(s).label}
-                      badgeColor={scriptStatusBadge(s).color}
+                      badgeLabel={scriptStatusBadge(s, tWorkshop).label}
+                      badgeColor={scriptStatusBadge(s, tWorkshop).color}
                       isOwner={s.is_owner}
                       kind="script"
                       title={s.name}
@@ -2508,112 +2560,6 @@ function MobileWorkshopView({
         </div>
       </div>
 
-      {/* create bottom sheet */}
-      <AnimatePresence>
-        {sheetOpen && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setSheetOpen(false)}
-              style={{
-                position: "fixed",
-                inset: 0,
-                background: "rgba(0,0,0,0.55)",
-                zIndex: 80,
-              }}
-            />
-            <motion.div
-              initial={{ y: "100%" }}
-              animate={{ y: 0 }}
-              exit={{ y: "100%" }}
-              transition={{ type: "spring", stiffness: 320, damping: 32 }}
-              style={{
-                position: "fixed",
-                left: 0,
-                right: 0,
-                bottom: 0,
-                zIndex: 81,
-                background: "var(--lv-bg-1)",
-                borderTopLeftRadius: 22,
-                borderTopRightRadius: 22,
-                padding: "12px 16px calc(20px + env(safe-area-inset-bottom))",
-                boxShadow: "0 -20px 40px rgba(0,0,0,0.55)",
-              }}
-            >
-              <div
-                aria-hidden
-                style={{
-                  width: 44,
-                  height: 4,
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.18)",
-                  margin: "4px auto 16px",
-                }}
-              />
-              <h3
-                style={{
-                  fontFamily: "var(--lv-font-serif)",
-                  fontSize: 18,
-                  fontWeight: 500,
-                  color: "var(--lv-ink)",
-                  marginBottom: 12,
-                }}
-              >
-                创建
-              </h3>
-              <Link
-                href="/workshop/generate/world"
-                onClick={() => setSheetOpen(false)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "14px 16px",
-                  borderRadius: 14,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.035)",
-                  textDecoration: "none",
-                  color: "var(--lv-ink)",
-                  marginBottom: 8,
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>生成世界</div>
-                  <div style={{ color: "var(--lv-ink-3)", fontSize: 12, marginTop: 2 }}>
-                    用一句话描述，AI 帮你生成完整世界设定。
-                  </div>
-                </div>
-                <span style={{ color: "var(--lv-ink-3)", fontFamily: "var(--lv-font-mono)" }}>→</span>
-              </Link>
-              <Link
-                href="/workshop/generate/script"
-                onClick={() => setSheetOpen(false)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "14px 16px",
-                  borderRadius: 14,
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.035)",
-                  textDecoration: "none",
-                  color: "var(--lv-ink)",
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 14 }}>生成剧本</div>
-                  <div style={{ color: "var(--lv-ink-3)", fontSize: 12, marginTop: 2 }}>
-                    给已有世界加一条剧情线、目标和结局。
-                  </div>
-                </div>
-                <span style={{ color: "var(--lv-ink-3)", fontFamily: "var(--lv-font-mono)" }}>→</span>
-              </Link>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
 
     </div>
   );
@@ -2677,6 +2623,7 @@ function MobileWorkCard({
   onPrimaryAction,
   primaryActionVariant = "ghost",
 }: MobileWorkCardProps) {
+  const tWorkshop = useTranslations("admin.workshop");
   const statusLabel =
     badgeLabel ??
     (status === "running" ? "生成中" : status === "published" ? "已发布" : "草稿");
@@ -2848,7 +2795,7 @@ function MobileWorkCard({
                 letterSpacing: "0.04em",
               }}
             >
-              {isOwner ? "编辑" : "查看"}
+              {isOwner ? tWorkshop("card.edit") : tWorkshop("card.view")}
             </span>
           )}
         </div>

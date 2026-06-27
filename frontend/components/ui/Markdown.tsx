@@ -29,10 +29,10 @@ export function Markdown({ children }: { children: string }) {
         .lv-md ul, .lv-md ol { margin: 0 0 0.7em; padding-left: 1.3em; }
         .lv-md li { margin: 0.2em 0; }
         .lv-md h1, .lv-md h2, .lv-md h3 { color: var(--lv-ink); font-family: var(--lv-font-serif); margin: 0.8em 0 0.4em; line-height: 1.3; }
-        .lv-md h1 { font-size: 19px; }
+        .lv-md h1 { font-size: 20px; }
         .lv-md h2 { font-size: 17px; }
         .lv-md h3 { font-size: 15px; }
-        .lv-md code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 5px; font-size: 12.5px; font-family: var(--lv-font-mono); }
+        .lv-md code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 5px; font-size: 13px; font-family: var(--lv-font-mono); }
         .lv-md blockquote { margin: 0.6em 0; padding-left: 0.9em; border-left: 2px solid var(--lv-line); color: var(--lv-ink-3); }
         .lv-md img { max-width: 100%; border-radius: var(--lv-r-input); margin: 0.4em 0; }
         .lv-md hr { border: none; border-top: 1px solid var(--lv-line); margin: 1em 0; }

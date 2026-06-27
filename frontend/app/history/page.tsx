@@ -265,7 +265,7 @@ export default function HistoryPage() {
               style={{
                 margin: "6px 0 0",
                 fontFamily: "var(--lv-font-serif), Georgia, serif",
-                fontSize: "clamp(26px, 3.5vw, 36px)",
+                fontSize: "var(--lv-t-h1)",
                 fontWeight: 500,
                 letterSpacing: "-0.01em",
               }}
@@ -333,6 +333,7 @@ export default function HistoryPage() {
             />
             <input
               type="text"
+              className="lv-history-search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t("searchPlaceholder")}
@@ -344,9 +345,9 @@ export default function HistoryPage() {
                 border: "1px solid rgba(255,255,255,0.05)",
                 borderRadius: 100,
                 color: "var(--lv-ink)",
-                fontSize: 13,
+                fontSize: "var(--lv-t-compact)",
                 outline: 0,
-                transition: "all 0.25s ease",
+                transition: "all 300ms var(--lv-ease)",
               }}
             />
           </div>
@@ -358,9 +359,9 @@ export default function HistoryPage() {
               marginTop: 20,
               padding: "12px 18px",
               borderRadius: 8,
-              background: "rgba(184, 92, 92, 0.08)",
-              border: "1px solid rgba(184, 92, 92, 0.2)",
-              color: "#f7aaaa",
+              background: "rgba(239, 130, 118, 0.08)",
+              border: "1px solid rgba(239, 130, 118, 0.2)",
+              color: "var(--lv-danger)",
               fontSize: 13,
               display: "flex",
               justifyContent: "space-between",
@@ -376,8 +377,8 @@ export default function HistoryPage() {
                 alignItems: "center",
                 gap: 6,
                 background: "transparent",
-                border: "1px solid rgba(247, 170, 170, 0.3)",
-                color: "#f7aaaa",
+                border: "1px solid rgba(239, 130, 118, 0.3)",
+                color: "var(--lv-danger)",
                 padding: "4px 12px",
                 borderRadius: 100,
                 fontSize: 12,
@@ -488,11 +489,16 @@ export default function HistoryPage() {
           transform: scale(1.08);
         }
         .lv-history-end-btn:hover {
-          color: #ef8276 !important;
+          color: var(--lv-danger) !important;
           border-color: rgba(239, 130, 118, 0.4) !important;
         }
         .lv-history-end-btn:disabled {
           cursor: wait;
+        }
+        .lv-history-search:focus {
+          background: rgba(255,255,255,0.035) !important;
+          border-color: rgba(255,255,255,0.12) !important;
+          box-shadow: 0 0 0 2px rgba(223, 194, 144, 0.15) !important;
         }
         @media (max-width: 768px) {
           .lv-history-desktop { display: none !important; }
@@ -721,7 +727,7 @@ function HistoryCard({
             position: "absolute",
             inset: 0,
             background:
-              "linear-gradient(to top, rgba(8, 8, 10, 0.28) 0%, transparent 35%)",
+              "linear-gradient(to top, var(--lv-bg-1) 0%, transparent 45%)",
           }}
         />
 
@@ -785,7 +791,7 @@ function HistoryCard({
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
           fontFamily: "var(--lv-font-serif)",
-          fontSize: 18,
+          fontSize: "var(--lv-t-h3)",
           fontWeight: 500,
           transition: "color 200ms ease",
         }}
@@ -797,7 +803,7 @@ function HistoryCard({
       <p
         style={{
           margin: "0 0 10px",
-          fontSize: 12.5,
+          fontSize: "var(--lv-t-compact)",
           color: "var(--lv-ink-3)",
           lineHeight: 1.45,
           overflow: "hidden",
@@ -816,19 +822,20 @@ function HistoryCard({
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          gap: 10,
           color: "var(--lv-ink-3)",
           fontSize: 11.5,
-          borderTop: "1px solid rgba(255, 255, 255, 0.04)",
-          paddingTop: 8,
+          marginTop: 2,
         }}
       >
         <span style={{ fontFamily: "var(--lv-font-mono)", letterSpacing: "0.04em" }}>
           {timeLabel}
           {game.rounds_played != null ? ` · R${game.rounds_played}` : ""}
         </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 14 }}>
-          {onEnd && !isEnded && (
+
+        {onEnd && !isEnded && (
+          <>
+            <span style={{ color: "var(--lv-line)", fontSize: 10 }}>|</span>
             <button
               type="button"
               className="lv-history-end-btn"
@@ -842,29 +849,21 @@ function HistoryCard({
                 alignItems: "center",
                 gap: 4,
                 background: "transparent",
-                border: 0,
+                border: "none",
+                color: "var(--lv-ink-3)",
                 padding: 0,
-                color: "var(--lv-ink-4)",
-                fontWeight: 600,
-                fontSize: 11.5,
                 cursor: ending ? "wait" : "pointer",
                 transition: "color 0.2s ease",
               }}
             >
               {ending ? <RefreshCw size={11} className="spin-slow" /> : t("endAction")}
             </button>
-          )}
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 3,
-              color: badge.color,
-              fontWeight: 600,
-            }}
-          >
-            {actionLabel} <ChevronRight size={11} />
-          </span>
+          </>
+        )}
+
+        <span style={{ color: "var(--lv-line)", fontSize: 10 }}>|</span>
+        <span style={{ color: "var(--lv-accent)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 2 }}>
+          {actionLabel} <ChevronRight size={12} style={{ opacity: 0.8, verticalAlign: "-2px" }} />
         </span>
       </div>
     </motion.article>
@@ -974,18 +973,33 @@ function MobileHistoryView({
                 type="button"
                 onClick={() => setFilter(seg.k)}
                 style={{
+                  position: "relative",
                   height: 34,
                   borderRadius: 999,
                   border: 0,
-                  background: active ? "rgba(245,242,235,0.90)" : "transparent",
+                  background: "transparent",
                   color: active ? "var(--lv-bg)" : "var(--lv-ink-3)",
-                  fontFamily: "var(--lv-font-mono)",
-                  fontSize: 9,
-                  letterSpacing: "0.14em",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  letterSpacing: "0.04em",
                   cursor: "pointer",
+                  zIndex: 1,
                 }}
               >
-                {seg.label}
+                {active && (
+                  <motion.div
+                    layoutId="history-mobile-filter-bg"
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      borderRadius: 999,
+                      background: "rgba(245, 242, 235, 0.90)",
+                      zIndex: -1,
+                    }}
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
+                <span style={{ position: "relative", zIndex: 1 }}>{seg.label}</span>
               </button>
             );
           })}
@@ -1000,18 +1014,21 @@ function MobileHistoryView({
             {activeGames.length === 0 ? (
               <MobileEmpty text={isLoading ? "" : t("emptyActiveDesc")} />
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 4 }}>
-                {activeGames.map((g) => (
-                  <MobileHistoryRow
-                    key={g.session_id}
-                    game={g}
-                    busy={busySession === g.session_id}
-                    ending={endingSession === g.session_id}
-                    onOpen={() => onOpen(g)}
-                    onEnd={() => onEnd(g)}
-                  />
-                ))}
-              </div>
+              <AnimatePresence mode="popLayout">
+                <div style={{ display: "flex", flexDirection: "column", gap: 9, marginBottom: 4 }}>
+                  {activeGames.map((g, i) => (
+                    <MobileHistoryRow
+                      key={g.session_id}
+                      index={i}
+                      game={g}
+                      busy={busySession === g.session_id}
+                      ending={endingSession === g.session_id}
+                      onOpen={() => onOpen(g)}
+                      onEnd={() => onEnd(g)}
+                    />
+                  ))}
+                </div>
+              </AnimatePresence>
             )}
           </>
         )}
@@ -1025,15 +1042,17 @@ function MobileHistoryView({
             {endedGames.length === 0 ? (
               <MobileEmpty text={isLoading ? "" : t("emptyEndedDesc")} />
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                {endedGames.map((g) => (
-                  <MobileHistoryRow
-                    key={g.session_id}
-                    game={g}
-                    busy={busySession === g.session_id}
-                    onOpen={() => onOpen(g)}
-                  />
-                ))}
+              <AnimatePresence mode="popLayout">
+                <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                  {endedGames.map((g, i) => (
+                    <MobileHistoryRow
+                      key={g.session_id}
+                      index={i}
+                      game={g}
+                      busy={busySession === g.session_id}
+                      onOpen={() => onOpen(g)}
+                    />
+                  ))}
                 <div
                   style={{
                     textAlign: "center",
@@ -1045,6 +1064,7 @@ function MobileHistoryView({
                   {t("bottomReached")}
                 </div>
               </div>
+              </AnimatePresence>
             )}
           </>
         )}
@@ -1107,12 +1127,14 @@ function MobileEmpty({ text }: { text: string }) {
 // 移动端列 —— 对齐 discover/MobileWorldRow 的 40/60 split
 function MobileHistoryRow({
   game,
+  index = 0,
   busy,
   ending = false,
   onOpen,
   onEnd,
 }: {
   game: GameHistoryItem;
+  index?: number;
   busy: boolean;
   ending?: boolean;
   onOpen: () => void;
@@ -1131,7 +1153,12 @@ function MobileHistoryRow({
       .join(" · ");
 
   return (
-    <article
+    <motion.article
+      layout
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: busy || ending ? 0.7 : 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.98 }}
+      transition={{ duration: 0.35, delay: Math.min(index * 0.03, 0.15) }}
       onClick={busy || ending ? undefined : onOpen}
       style={{
         display: "grid",
@@ -1142,7 +1169,6 @@ function MobileHistoryRow({
         border: "1px solid rgba(255,255,255,0.08)",
         background: "rgba(255,255,255,0.055)",
         cursor: busy || ending ? "wait" : "pointer",
-        opacity: busy || ending ? 0.7 : 1,
       }}
     >
       <div
@@ -1276,6 +1302,6 @@ function MobileHistoryRow({
           </span>
         </div>
       </div>
-    </article>
+    </motion.article>
   );
 }

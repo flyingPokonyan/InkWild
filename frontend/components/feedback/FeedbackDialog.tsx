@@ -160,7 +160,7 @@ const FB_CSS = `
   .fb-cat {
     flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
     height: 42px; border-radius: var(--lv-r-pill); border: 1px solid var(--lv-line-2);
-    background: transparent; color: var(--lv-ink-3); font-size: 13.5px; font-weight: 500;
+    background: transparent; color: var(--lv-ink-3); font-size: 13px; font-weight: 500;
     cursor: pointer; transition: color 180ms var(--lv-ease), background 180ms var(--lv-ease), border-color 180ms var(--lv-ease);
   }
   .fb-cat:hover { color: var(--lv-ink-2); border-color: var(--lv-line-2); background: rgba(255,255,255,0.03); }
@@ -180,11 +180,11 @@ const FB_CSS = `
     position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; display: grid; place-items: center;
     border-radius: 50%; background: var(--lv-bg-2); border: 1px solid var(--lv-line-2); color: var(--lv-ink-2); cursor: pointer;
   }
-  .fb-err { color: var(--lv-danger); font-size: 12.5px; margin: 4px 0 0; }
+  .fb-err { color: var(--lv-danger); font-size: 12px; margin: 4px 0 0; }
   .fb-block { width: 100%; justify-content: center; }
   .fb-submit { margin-top: 20px; }
   .fb-done { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 14px 8px 6px; }
   .fb-done-mark { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: rgba(127,176,145,0.14); color: var(--lv-success); margin-bottom: 15px; }
   .fb-done h3 { margin: 0 0 7px; color: var(--lv-ink); font-family: var(--lv-font-serif); font-size: 20px; font-weight: 500; }
-  .fb-done p { margin: 0 0 22px; color: var(--lv-ink-3); font-size: 13.5px; }
+  .fb-done p { margin: 0 0 22px; color: var(--lv-ink-3); font-size: 13px; }
 `;

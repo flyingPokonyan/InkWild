@@ -1386,7 +1386,7 @@ textarea {
   border-color: transparent;
 }
 .ta-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
-.ta-btn.sm { height: 26px; padding: 0 10px; font-size: 11.5px; gap: 6px; }
+.ta-btn.sm { height: 26px; padding: 0 10px; font-size: 12px; gap: 6px; }
 .ta-btn.danger { color: var(--ta-err); }
 .ta-btn.danger:hover:not(:disabled) {
   border-color: rgba(217, 139, 124, 0.4);
@@ -1415,7 +1415,7 @@ textarea {
   transition: border-color var(--ta-t-fast) var(--ta-ease), background var(--ta-t-fast) var(--ta-ease);
 }
 .ta-input:focus { border-color: rgba(201, 180, 138, 0.5); background: var(--ta-bg-2); }
-.ta-input.mono { font-family: var(--font-mono); font-size: 12.5px; }
+.ta-input.mono { font-family: var(--font-mono); font-size: 12px; }
 .ta-input.textarea { height: auto; min-height: 88px; padding: 10px 12px; resize: vertical; }
 
 /* Subtle film grain overlay for the workshop stage (no animation) */
@@ -1616,7 +1616,7 @@ textarea {
 .lv-theme .lv-caps {
   font-family: var(--lv-font-mono);
   letter-spacing: 0.04em;
-  font-size: 10.5px;
+  font-size: var(--lv-t-caps);
   color: var(--lv-ink-3);
 }
 
@@ -1905,26 +1905,28 @@ textarea {
 /* ===== 媒体卡 carousel 容器（start 选择页 + 工坊生成页共用）===== */
 .lv-theme .lv-media-grid {
   display: flex;
-  gap: 12px;
+  align-items: center; /* 修复 Safari/PC flexbox aspect-ratio 高度塌陷问题 */
+  gap: 16px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 2px 4px 6px;
+  padding: 10px 4px 20px;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
-  justify-content: safe center;
+  /* justify-content: safe center 移除，因为有 spacer 存在，必须从 start 渲染，否则会导致初始位置偏移到右侧 */
 }
 .lv-theme .lv-media-grid::-webkit-scrollbar { display: none; }
 .lv-theme .lv-media-grid > * {
-  flex: 0 0 200px;
+  flex: 0 0 240px; /* 增大卡片宽度以提升高级感 */
   scroll-snap-align: center;
+  scroll-snap-stop: always; /* 强制每次滑动最多停留在下一张卡片，防止一划就飞过去好几个 */
 }
 @media (max-width: 768px) {
   .lv-theme .lv-media-grid {
-    gap: 10px;
-    padding: 2px 4px 4px;
+    gap: 12px;
+    padding: 10px 4px 20px;
   }
   .lv-theme .lv-media-grid > * {
-    flex: 0 0 176px;
+    flex: 0 0 200px;
   }
 }
 
@@ -3499,7 +3501,7 @@ textarea {
 
 .lv-clean-card-title {
   font-family: var(--lv-font-serif);
-  font-size: 19px;
+  font-size: var(--lv-t-h2);
   font-weight: 400;
   color: var(--lv-ink);
   margin: 0;
@@ -3677,7 +3679,7 @@ textarea {
 }
 
 .lv-discover-hero-desc {
-  font-size: 13.5px;
+  font-size: var(--lv-t-compact);
   line-height: 1.6;
   color: var(--lv-ink-3);
   margin: 0;
@@ -3774,4 +3776,15 @@ textarea {
   background: radial-gradient(circle at center, transparent 30%, rgba(10, 10, 12, 0.15) 100%);
   pointer-events: none;
   z-index: 1;
+}
+
+/* Cover Flow 居中占位符，保证首尾卡片可滚动到中央 */
+.lv-theme .lv-carousel-spacer {
+  flex: 0 0 calc(50% - 136px); /* 50% 减去半个卡片(120)和一整个gap(16) */
+  pointer-events: none;
+}
+@media (max-width: 768px) {
+  .lv-theme .lv-carousel-spacer {
+    flex: 0 0 calc(50% - 112px); /* 移动端：半个卡片(100) + 一整个gap(12) */
+  }
 }

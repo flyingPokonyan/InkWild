@@ -90,7 +90,7 @@ export function NotificationDetailView({
         .lv-notif-detail-tag {
           display: inline-flex; align-items: center; height: 19px; padding: 0 8px;
           border: 1px solid currentColor; border-radius: var(--lv-r-pill);
-          font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em;
+          font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
         }
         .lv-notif-detail-title {
           margin: 0; color: var(--lv-ink); font-family: var(--lv-font-serif);

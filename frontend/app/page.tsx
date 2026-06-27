@@ -4,16 +4,16 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import {
-  ArrowRight,
   ChevronDown,
   PenLine,
   Play,
 } from "lucide-react";
+import { BentoModes } from "@/components/home/BentoModes";
 import { useTranslations } from "next-intl";
 
 import { LangChip } from "@/components/LangChip";
 import { ProductNav } from "@/components/ProductNav";
-import { LV_EASE, lvStaggerContainer, lvStaggerItem } from "@/lib/motion";
+import { LV_EASE } from "@/lib/motion";
 
 const COPYRIGHT_YEAR = 2026;
 const HERO_VIDEO = "/hero-sky-1440.mp4";
@@ -41,27 +41,6 @@ export default function HomePage() {
     mq.addEventListener("change", applyMotionPreference);
     return () => mq.removeEventListener("change", applyMotionPreference);
   }, []);
-
-  const modeCards = [
-    {
-      key: "script",
-      href: "/discover?mode=script",
-      eyebrow: t("modes.scriptEyebrow"),
-      title: t("modes.scriptTitle"),
-      body: t("modes.scriptBullet2"),
-      cta: t("modes.scriptCta"),
-      image: "https://images.unsplash.com/photo-1426604966848-d7adac402bff?w=1600&q=82&auto=format&fit=crop",
-    },
-    {
-      key: "free",
-      href: "/discover?mode=free",
-      eyebrow: t("modes.freeEyebrow"),
-      title: t("modes.freeTitle"),
-      body: t("modes.freeBullet2"),
-      cta: t("modes.freeCta"),
-      image: "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1600&q=82&auto=format&fit=crop",
-    },
-  ];
 
   return (
     <main className="lv-home lv-theme">
@@ -146,46 +125,12 @@ export default function HomePage() {
 
       <section id="modes" className="lv-home-section lv-home-modes">
         <div className="lv-home-inner">
-          <motion.p
-            className="lv-home-section-brief lv-t-narrative"
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.45 }}
-            transition={{ duration: 0.45, ease: LV_EASE }}
-          >
+          <p className="lv-home-section-brief lv-t-narrative">
             {t("modes.body")}
-          </motion.p>
+          </p>
 
-          <div className="lv-home-mode-showcase">
-            <motion.div
-              className="lv-home-mode-grid"
-              variants={lvStaggerContainer}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true, amount: 0.25 }}
-            >
-              {modeCards.map((card) => (
-                <motion.div key={card.key} variants={lvStaggerItem}>
-                  <Link href={card.href} className="lv-home-mode-card">
-                    <span
-                      className="lv-home-mode-image"
-                      style={{ backgroundImage: `url(${card.image})` }}
-                      aria-hidden
-                    />
-                    <span className="lv-home-mode-scrim" aria-hidden />
-                    <div className="lv-home-mode-copy">
-                      <span className="lv-home-mode-eyebrow">{card.eyebrow}</span>
-                      <h3>{card.title}</h3>
-                      <p>{card.body}</p>
-                      <span className="lv-home-card-cta">
-                        {card.cta}
-                        <ArrowRight size={14} />
-                      </span>
-                    </div>
-                  </Link>
-                </motion.div>
-              ))}
-            </motion.div>
+          <div style={{ marginTop: "40px" }}>
+            <BentoModes />
           </div>
         </div>
       </section>

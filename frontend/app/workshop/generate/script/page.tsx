@@ -65,7 +65,7 @@ function GenerateScriptPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialWorldId = searchParams?.get("world_id");
-  
+
   const [step, setStep] = useState<GenStep>(initialWorldId ? "prompt" : "world_select");
   const [worldId, setWorldId] = useState<string | null>(initialWorldId);
   const [worlds, setWorlds] = useState<AdminWorldListResponse["published"] | null>(null);
@@ -84,37 +84,36 @@ function GenerateScriptPageContent() {
   const [elapsed, setElapsed] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
 
-  // 移动端用 IntersectionObserver 跟随 scroll-snap 中心卡驱动 CardDetailStrip；
-  // PC（hover 可用）只走 onFocus（hover）。与 start 页 attachCarousel 同款。
-  const attachCarousel = useCallback(
-    (node: HTMLDivElement | null) => {
-      observerRef.current?.disconnect();
-      observerRef.current = null;
-      if (!node) return;
-      if (typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches) return;
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const center = container.scrollLeft + container.clientWidth / 2;
+    let closestId: string | null = null;
+    let minDistance = Infinity;
 
-      const observer = new IntersectionObserver(
-        (entries) => {
-          let bestId: string | null = null;
-          let bestRatio = 0;
-          entries.forEach((e) => {
-            if (e.isIntersecting && e.intersectionRatio > bestRatio) {
-              bestRatio = e.intersectionRatio;
-              bestId = e.target.getAttribute("data-card-id");
-            }
-          });
-          if (bestId) setFocusedWorldId(bestId);
-        },
-        { root: node, rootMargin: "0px -40% 0px -40%", threshold: [0.5, 0.75, 1] },
-      );
-      node.querySelectorAll("[data-card-id]").forEach((card) => observer.observe(card));
-      observerRef.current = observer;
-    },
-    // ref 回调在 grid 挂载/卸载时由 React 调用，挂载时世界卡已渲染；无需依赖 worlds。
-    [],
-  );
+    Array.from(container.children).forEach((child) => {
+      const cardId = child.getAttribute("data-card-id");
+      if (!cardId) return;
+      const childElement = child as HTMLElement;
+      const childCenter = childElement.offsetLeft + childElement.offsetWidth / 2 - container.offsetLeft;
+      const distance = Math.abs(childCenter - center);
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestId = cardId;
+      }
+    });
+
+    if (closestId) {
+      setFocusedWorldId(closestId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (step === "world_select" && worlds && worlds.length > 0 && !focusedWorldId) {
+      setFocusedWorldId(worlds[0].id);
+    }
+  }, [step, worlds, focusedWorldId]);
 
   useEffect(() => {
     return () => {
@@ -192,10 +191,10 @@ function GenerateScriptPageContent() {
 
   const handleGenerate = async () => {
     if (!worldId || generating) return;
-    
-    setGenerating(true); 
-    setError(null); 
-    setPhases([]); 
+
+    setGenerating(true);
+    setError(null);
+    setPhases([]);
     startTimer();
 
     let taskMeta: AdminGenerationTaskCreateResponse | null = null;
@@ -268,18 +267,18 @@ function GenerateScriptPageContent() {
     }
 
     stopTimer();
-    
+
     if (!taskMeta) {
       setGenerating(false);
       return;
     }
 
-    if (!didComplete) { 
-      setGenerating(false); 
+    if (!didComplete) {
+      setGenerating(false);
       setPhases((prev) => markLatestAdminPhaseAsError(prev));
-      return; 
+      return;
     }
-    
+
     setPhases((prev) => completeAdminPhaseTimeline(prev));
     router.push(taskMeta.draft_url);
   };
@@ -382,11 +381,11 @@ function GenerateScriptPageContent() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--lv-s-4)" }}>
                 <div
-                  ref={attachCarousel}
-                  onMouseLeave={() => setFocusedWorldId(null)}
+                  onScroll={handleScroll}
                   className="lv-media-grid"
                   style={{ maxWidth: 920, margin: "0 auto", width: "100%" }}
                 >
+                  <div className="lv-carousel-spacer" />
                   {worlds?.map((w) => (
                     <MediaChoiceCard
                       key={w.id}
@@ -394,10 +393,12 @@ function GenerateScriptPageContent() {
                       coverImage={w.cover_image}
                       title={w.name}
                       selected={false}
+                      isFocused={focusedWorldId === w.id}
                       onSelect={() => handleSelectWorld(w.id)}
                       onFocus={() => setFocusedWorldId(w.id)}
                     />
                   ))}
+                  <div className="lv-carousel-spacer" />
                 </div>
                 <CardDetailStrip
                   cardKey={focusedWorld?.id ?? "empty"}
@@ -477,6 +478,26 @@ function GenerateScriptPageContent() {
                 ariaLabel="剧本概述"
                 autoFocus
               />
+              <button
+                type="button"
+                onClick={() => router.push("/workshop/generate/world")}
+                style={{
+                  display: "block",
+                  margin: "16px auto 0",
+                  background: "none",
+                  border: 0,
+                  color: "var(--lv-ink-3)",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  padding: "8px 12px",
+                  borderRadius: "var(--lv-r-pill)",
+                  transition: "color 150ms ease",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--lv-ink-2)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--lv-ink-3)"; }}
+              >
+                想去世界就跳转去创造世界？ →
+              </button>
             </div>
           )}
         </motion.div>

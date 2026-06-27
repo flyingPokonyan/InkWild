@@ -92,9 +92,9 @@ export function FeedbackThread({ feedbackId }: { feedbackId: string }) {
         .fbt-card { border: 1px solid var(--lv-line); border-radius: var(--lv-r-card); padding: 11px 13px; background: rgba(174,180,184,0.05); }
         .fbt-card--mine { background: rgba(255,255,255,0.02); }
         .fbt-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; }
-        .fbt-card-head b { color: var(--lv-ink); font-size: 12.5px; font-weight: 600; }
+        .fbt-card-head b { color: var(--lv-ink); font-size: 13px; font-weight: 600; }
         .fbt-card-head time { color: var(--lv-ink-4); font-size: 11px; white-space: nowrap; }
-        .fbt-card-body { margin: 0; color: var(--lv-ink-2); font-size: 13.5px; line-height: 1.7; white-space: pre-wrap; }
+        .fbt-card-body { margin: 0; color: var(--lv-ink-2); font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
         .fbt-card-img { width: 100%; max-height: 160px; object-fit: cover; border-radius: var(--lv-r-input); margin-top: 8px; }
       `}</style>
     </div>
