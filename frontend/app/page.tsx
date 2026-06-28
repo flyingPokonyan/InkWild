@@ -129,7 +129,7 @@ export default function HomePage() {
             {t("modes.body")}
           </p>
 
-          <div style={{ marginTop: "40px" }}>
+          <div className="lv-home-bento-wrap">
             <BentoModes />
           </div>
         </div>
@@ -436,6 +436,11 @@ export default function HomePage() {
           margin: 0 auto;
           max-width: 560px;
           text-align: center;
+        }
+
+        .lv-home-bento-wrap {
+          width: 100%;
+          margin-top: 40px;
         }
 
         .lv-home-mode-showcase {
