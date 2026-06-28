@@ -141,7 +141,7 @@ export function AccountShell({ active, children }: { active: Section; children: 
           object-fit: cover;
         }
         .acct-avatar span {
-          font-family: var(--lv-font-serif);
+          font-family: var(--lv-font-sans);
           font-size: 21px;
           font-weight: 500;
           color: var(--lv-ink);
@@ -150,7 +150,7 @@ export function AccountShell({ active, children }: { active: Section; children: 
           min-width: 0;
         }
         .acct-name {
-          font-family: var(--lv-font-serif);
+          font-family: var(--lv-font-sans);
           font-size: 18px;
           font-weight: 500;
           color: var(--lv-ink);

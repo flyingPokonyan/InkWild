@@ -429,7 +429,8 @@ export default function HomePage() {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: var(--lv-s-8);
+          gap: 0;
+          transform: translateY(-18px);
         }
 
         .lv-home-modes .lv-home-section-head {
@@ -440,7 +441,7 @@ export default function HomePage() {
 
         .lv-home-bento-wrap {
           width: 100%;
-          margin-top: 40px;
+          margin-top: 28px;
         }
 
         .lv-home-mode-showcase {
@@ -771,6 +772,11 @@ export default function HomePage() {
           .lv-home-modes .lv-home-inner {
             flex-direction: column;
             gap: 24px;
+            transform: none;
+          }
+
+          .lv-home-bento-wrap {
+            margin-top: 0;
           }
 
           .lv-home-mode-grid {

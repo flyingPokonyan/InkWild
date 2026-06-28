@@ -687,7 +687,11 @@
       "freeBullet1": "没有预设主线，目标自己定",
       "freeBullet2": "NPC 按自己的日程行动，会回应你的介入",
       "freeBullet3": "侧栏跟踪身份、地点、关系和物品",
-      "freeCta": "进入自由世界"
+      "freeCta": "进入自由世界",
+      "workshopEyebrow": "创作工坊",
+      "workshopTitle": "构筑你的宇宙",
+      "workshopBody": "从一个题材开始，生成专属世界、剧本与角色设定。",
+      "workshopCta": "进入工坊"
     },
     "steps": {
       "eyebrow": "游玩方式",
@@ -770,6 +774,8 @@
     "filterEnded": "已达成",
     "activeSectionTitle": "继续游玩",
     "endedSectionTitle": "最近结束",
+    "showMore": "展开更多",
+    "collapse": "收起",
     "emptyActiveDesc": "暂无进行中的故事。",
     "emptyEndedDesc": "还没有结束的故事。",
     "archiveEmptyTitle": "还没有任何存档",

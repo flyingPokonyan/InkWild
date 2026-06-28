@@ -488,7 +488,7 @@ export default function MePage() {
           object-fit: cover;
         }
         .me-avatar span {
-          font-family: var(--lv-font-serif);
+          font-family: var(--lv-font-sans);
           font-size: var(--lv-t-h2);
           font-weight: 500;
           color: var(--lv-ink);
@@ -596,7 +596,7 @@ export default function MePage() {
         }
         .me-profile h1 {
           margin: 0;
-          font-family: var(--lv-font-serif);
+          font-family: var(--lv-font-sans);
           font-size: var(--lv-t-h3);
           font-weight: 500;
           line-height: 1.15;

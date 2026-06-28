@@ -687,7 +687,11 @@
       "freeBullet1": "No preset mainline, you set the goals",
       "freeBullet2": "NPCs follow their own schedules, and respond to you",
       "freeBullet3": "Sidebar tracks identity, location, relations, inventory",
-      "freeCta": "Enter a free world"
+      "freeCta": "Enter a free world",
+      "workshopEyebrow": "Creation workshop",
+      "workshopTitle": "Build your universe",
+      "workshopBody": "Start from a premise and generate a dedicated world, script, and roles.",
+      "workshopCta": "Enter workshop"
     },
     "steps": {
       "eyebrow": "How it plays",
@@ -770,6 +774,8 @@
     "filterEnded": "Reached",
     "activeSectionTitle": "Continue playing",
     "endedSectionTitle": "Recently ended",
+    "showMore": "Show more",
+    "collapse": "Collapse",
     "emptyActiveDesc": "No stories in progress.",
     "emptyEndedDesc": "No ended stories yet.",
     "archiveEmptyTitle": "No saves yet",

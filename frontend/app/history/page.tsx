@@ -110,6 +110,7 @@ export default function HistoryPage() {
 
   const [busySession, setBusySession] = useState<string | null>(null);
   const [endingSession, setEndingSession] = useState<string | null>(null);
+  const [isEndedCollapsed, setIsEndedCollapsed] = useState(true);
   const [openError, setOpenError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -433,7 +434,7 @@ export default function HistoryPage() {
                 gap: 24,
               }}
             >
-              {filteredEnded.map((g, i) => (
+              {(isEndedCollapsed && filter !== "ended" ? filteredEnded.slice(0, 8) : filteredEnded).map((g, i) => (
                 <HistoryCard
                   key={g.session_id}
                   game={g}
@@ -443,6 +444,35 @@ export default function HistoryPage() {
                 />
               ))}
             </div>
+            {filter !== "ended" && filteredEnded.length > 8 && (
+              <div style={{ textAlign: "center", marginTop: 28 }}>
+                <button
+                  onClick={() => setIsEndedCollapsed((prev) => !prev)}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--lv-line-2)",
+                    borderRadius: 999,
+                    padding: "6px 20px",
+                    color: "var(--lv-ink-2)",
+                    fontSize: 13,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    transition: "color 0.2s, background 0.2s"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = "var(--lv-ink)";
+                    e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = "var(--lv-ink-2)";
+                    e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  {isEndedCollapsed ? t("showMore") : t("collapse")}
+                </button>
+              </div>
+            )}
           </section>
         )}
 
@@ -616,9 +646,10 @@ function SectionHeader({ title, hint }: { title: string; hint: string }) {
         display: "flex",
         alignItems: "baseline",
         justifyContent: "space-between",
-        marginBottom: 16,
+        marginBottom: 20,
       }}
     >
+      <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
       <h2
         style={{
           display: "inline-flex",
@@ -644,6 +675,7 @@ function SectionHeader({ title, hint }: { title: string; hint: string }) {
       >
         {hint}
       </span>
+      </div>
     </div>
   );
 }
@@ -902,6 +934,7 @@ function MobileHistoryView({
   const t = useTranslations("historyPage");
   const showActive = filter !== "ended";
   const showEnded = filter !== "active";
+  const [isEndedCollapsed, setIsEndedCollapsed] = useState(true);
 
   return (
     <div
@@ -1044,7 +1077,7 @@ function MobileHistoryView({
             ) : (
               <AnimatePresence mode="popLayout">
                 <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
-                  {endedGames.map((g, i) => (
+                  {(isEndedCollapsed && filter !== "ended" ? endedGames.slice(0, 3) : endedGames).map((g, i) => (
                     <MobileHistoryRow
                       key={g.session_id}
                       index={i}
@@ -1053,17 +1086,38 @@ function MobileHistoryView({
                       onOpen={() => onOpen(g)}
                     />
                   ))}
-                <div
-                  style={{
-                    textAlign: "center",
-                    padding: "18px 0 2px",
-                    color: "var(--lv-ink-4)",
-                    fontSize: 12,
-                  }}
-                >
-                  {t("bottomReached")}
+
+                  {filter !== "ended" && endedGames.length > 3 && (
+                    <div style={{ textAlign: "center", padding: "12px 0 2px" }}>
+                      <button
+                        onClick={() => setIsEndedCollapsed((prev) => !prev)}
+                        style={{
+                          background: "rgba(255, 255, 255, 0.04)",
+                          border: "1px solid rgba(255, 255, 255, 0.08)",
+                          borderRadius: 999,
+                          padding: "8px 24px",
+                          color: "var(--lv-ink-3)",
+                          fontSize: 12,
+                        }}
+                      >
+                        {isEndedCollapsed ? t("showMore") : t("collapse")}
+                      </button>
+                    </div>
+                  )}
+
+                  {!isEndedCollapsed && (
+                    <div
+                      style={{
+                        textAlign: "center",
+                        padding: "18px 0 2px",
+                        color: "var(--lv-ink-4)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {t("bottomReached")}
+                    </div>
+                  )}
                 </div>
-              </div>
               </AnimatePresence>
             )}
           </>
@@ -1083,8 +1137,10 @@ function MobileSectionHead({ title, hint }: { title: string; hint: string }) {
         padding: "12px 4px 10px",
       }}
     >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <h2
         style={{
+          margin: 0,
           fontFamily: "var(--lv-font-serif)",
           fontSize: 21,
           fontWeight: 500,
@@ -1103,6 +1159,7 @@ function MobileSectionHead({ title, hint }: { title: string; hint: string }) {
       >
         {hint}
       </span>
+      </div>
     </div>
   );
 }

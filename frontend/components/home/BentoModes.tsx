@@ -44,7 +44,7 @@ export function BentoModes() {
         </div>
 
         {/* 右上小区域：剧本模式 */}
-        <div className="lv-bento-card lv-bento-small-top">
+        <div className="lv-bento-card lv-bento-card-script lv-bento-small-top">
           <Link href="/discover?mode=script" className="lv-bento-link">
             <div className="lv-bento-bg-dark" />
 
@@ -89,12 +89,12 @@ export function BentoModes() {
             <div className="lv-bento-content">
               <span className="lv-bento-eyebrow">
                 <PenLine size={14} />
-                共创工坊
+                {t("modes.workshopEyebrow")}
               </span>
-              <h3>构筑你的宇宙</h3>
-              <p>零门槛创建并分享专属剧本、角色与世界设定，与万千跑团爱好者共创无限可能。</p>
+              <h3>{t("modes.workshopTitle")}</h3>
+              <p>{t("modes.workshopBody")}</p>
               <div className="lv-bento-cta">
-                探索工坊 <ArrowRight size={14} />
+                {t("modes.workshopCta")} <ArrowRight size={14} />
               </div>
             </div>
           </Link>
@@ -114,14 +114,15 @@ export function BentoModes() {
           grid-template-columns: 6fr 4fr;
           grid-template-rows: 1fr 1fr;
           gap: 16px;
-          min-height: 600px;
-          max-height: 800px;
+          width: 100%;
+          height: clamp(500px, calc(100dvh - 360px), 620px);
         }
 
         @media (max-width: 1024px) {
           .lv-bento-grid {
             grid-template-columns: 1fr;
             grid-template-rows: auto auto auto;
+            height: auto;
             max-height: none;
           }
         }
@@ -133,7 +134,6 @@ export function BentoModes() {
           background: rgba(20, 20, 22, 0.4);
           box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
           transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s ease;
-          min-height: 300px;
         }
 
         .lv-bento-card:hover {
@@ -211,8 +211,16 @@ export function BentoModes() {
           position: absolute;
           inset: 0;
           z-index: 1;
-          background: linear-gradient(to top, rgba(0,0,0,0.9) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.1) 100%);
+          background:
+            linear-gradient(to top, rgba(0,0,0,0.80) 0%, rgba(0,0,0,0.18) 52%, rgba(0,0,0,0.04) 100%),
+            radial-gradient(100% 64% at 50% 100%, rgba(0,0,0,0.24), transparent 72%);
           pointer-events: none;
+        }
+
+        .lv-bento-card-script .lv-bento-vignette {
+          background:
+            linear-gradient(to top, rgba(0,0,0,0.90) 0%, rgba(0,0,0,0.68) 34%, rgba(0,0,0,0.20) 68%, rgba(0,0,0,0.04) 100%),
+            radial-gradient(72% 62% at 22% 84%, rgba(0,0,0,0.60), transparent 76%);
         }
 
         .lv-bento-content {
@@ -224,6 +232,10 @@ export function BentoModes() {
           flex-direction: column;
           justify-content: flex-end;
           pointer-events: none;
+        }
+
+        .lv-bento-card-script .lv-bento-content {
+          padding: 28px 30px;
         }
 
         @media (max-width: 768px) {
@@ -247,7 +259,7 @@ export function BentoModes() {
 
         .lv-bento-content h2 {
           font-family: var(--lv-font-serif);
-          font-size: 42px;
+          font-size: clamp(34px, 3vw, 40px);
           font-weight: 400;
           color: #fff;
           margin: 0 0 12px;
@@ -256,7 +268,7 @@ export function BentoModes() {
 
         .lv-bento-content h3 {
           font-family: var(--lv-font-serif);
-          font-size: 28px;
+          font-size: clamp(24px, 2vw, 27px);
           font-weight: 400;
           color: #fff;
           margin: 0 0 12px;
@@ -296,17 +308,25 @@ export function BentoModes() {
         /* 剧本卡牌排版 */
         .lv-bento-script-cards {
           position: absolute;
-          inset: 0 0 40% 0;
+          inset: 8px 14px 36% 14px;
           z-index: 1;
           display: flex;
           align-items: center;
           justify-content: center;
-          gap: 16px;
+          gap: 10px;
           perspective: 1000px;
+          opacity: 0.9;
+          transform: translateY(-14px) scale(0.86);
+          transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .lv-bento-card-script:hover .lv-bento-script-cards {
+          opacity: 0.98;
+          transform: translateY(-18px) scale(0.9);
         }
 
         .lv-bento-script-card {
-          width: 120px;
+          width: 110px;
           aspect-ratio: 2.5 / 4;
           background-size: cover;
           background-position: center;
@@ -316,7 +336,7 @@ export function BentoModes() {
         }
 
         .lv-bento-script-card-center {
-          width: 140px;
+          width: 128px;
           transform: translateY(-10px);
           box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3), 0 15px 30px rgba(0,0,0,0.6);
         }
