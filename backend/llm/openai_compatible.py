@@ -11,10 +11,8 @@ from llm.base import ImageGenerator, ImageResult, LLMProvider
 
 # httpx-level safety net for streaming calls. ``read`` is the per-chunk
 # inter-arrival gap: if the upstream emits no bytes for this long the SDK
-# raises ReadTimeout, which the router classifies as transient. Pairs with
-# the asyncio per-chunk timeout in ``LLMRouter._stream_one_provider`` so a
-# mid-stream stall is surfaced at either layer rather than hanging forever.
-_DEFAULT_HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=10.0, pool=10.0)
+# raises ReadTimeout, which the router classifies as transient.
+_DEFAULT_HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=150.0, write=10.0, pool=10.0)
 
 # Image generation is non-streaming and legitimately slow, but the OpenAI SDK
 # default is 600s/attempt. Use a bounded per-attempt read timeout; the workshop
