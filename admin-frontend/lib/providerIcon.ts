@@ -6,6 +6,9 @@
 
 // 关键词 → icon 文件名（注意顺序：更具体的关键词先于通用的）
 const ICON_RULES: Array<[RegExp, string]> = [
+  [/opencode/i, "opencode.png"],
+  [/jiuuij|joverna/i, "jiuuij.png"],
+  [/gptimage\.pokonyan\.com|gptimage/i, "gptimage.ico"],
   [/deepseek/i, "deepseek"],
   [/claude|anthropic/i, "claude"],
   [/(^|[^a-z])(gpt|openai|chatgpt|o\d|gpt-?image)/i, "openai"],
@@ -40,7 +43,9 @@ export function resolveProviderIcon(
 ): string | null {
   const haystack = `${name || ""} ${providerType || ""}`;
   for (const [pattern, file] of ICON_RULES) {
-    if (pattern.test(haystack)) return `/providers/${file}.svg`;
+    if (pattern.test(haystack)) {
+      return `/providers/${file.includes(".") ? file : `${file}.svg`}`;
+    }
   }
   if (providerType && TYPE_FALLBACK[providerType]) {
     return `/providers/${TYPE_FALLBACK[providerType]}.svg`;
