@@ -133,6 +133,53 @@ async def test_batches_extra_npc_dropped():
 
 @pytest.mark.asyncio
 @pytest.mark.no_db
+async def test_batches_rebinds_renamed_characters():
+    """详情 LLM 改名的三种情况都要绑回 roster 槽位，而不是当"多余"丢掉
+    （甄嬛传一次掉 12 个角色的回归测试）。身份按"我们点名要了谁"决定，name 只作展示。
+
+    覆盖：① 塞角色定位"允礼（悲情亲王）"② 简称/全名互换"宜修"↔"乌拉那拉·宜修"
+    ③ 封号/本名（字符串完全不同）"华妃"→年世兰——去括号那种补丁救不了 ③。"""
+    roster = [
+        CharacterRosterEntry(name="爱新觉罗·允礼", role_tag="悲情亲王"),
+        CharacterRosterEntry(name="乌拉那拉·宜修", role_tag="皇后"),
+        CharacterRosterEntry(name="年世兰", role_tag="华妃"),
+    ]
+    router = _make_router([
+        '{"characters":['
+        '{"name":"爱新觉罗·允礼（悲情亲王）","personality":"p"},'   # 塞定位
+        '{"name":"宜修","personality":"p"},'                        # 简称
+        '{"name":"华妃","personality":"p"}'                          # 封号≠本名
+        ']}'
+    ])
+    chars = await build_characters_in_batches(
+        roster, description="x", ip_canon=IPCanon(),
+        locations=[], passages=[], llm_router=router,
+    )
+    # 三个全保住，且 name 全部回写成 roster 规范名
+    assert {c.name for c in chars} == {"爱新觉罗·允礼", "乌拉那拉·宜修", "年世兰"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_db
+async def test_batches_renamed_character_keeps_planner_tags():
+    """改名的角色绑回 roster 后，role_tag/is_image_target 等 planner 标签必须继承，
+    不能因为名字对不上就退回 LLM 默认（is_image_target=False → must-have 被错标成不可玩）。"""
+    roster = [CharacterRosterEntry(name="爱新觉罗·允礼", role_tag="悲情亲王", is_image_target=True)]
+    router = _make_router([
+        '{"characters":[{"name":"果郡王允礼","personality":"p"}]}'  # 加前缀头衔 + 漏 is_image_target
+    ])
+    chars = await build_characters_in_batches(
+        roster, description="x", ip_canon=IPCanon(),
+        locations=[], passages=[], llm_router=router,
+    )
+    assert len(chars) == 1
+    assert chars[0].name == "爱新觉罗·允礼"
+    assert chars[0].is_image_target is True   # 继承 planner，而非退回 False
+    assert chars[0].role_tag == "悲情亲王"
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_db
 async def test_batches_missing_npc_warn_no_placeholder():
     roster = [CharacterRosterEntry(name=n, role_tag="r") for n in ["A", "B", "C"]]
     router = _make_router([

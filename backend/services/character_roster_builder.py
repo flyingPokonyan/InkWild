@@ -137,8 +137,14 @@ def _heuristic_count(description: str) -> int | None:
 
 
 def _norm_name(name: str) -> str:
-    """规范化人名用于白名单匹配：去空白与中点。"""
-    return re.sub(r"[\s·•・]", "", str(name or "")).strip()
+    """规范化人名用于匹配：去尾部括号角色注、空白与中点。
+
+    LLM 写详情时常把角色定位/派系塞进 name（"允礼（悲情亲王）"），与 roster 规范名做
+    严格匹配会失败 → 角色被误判"多余"丢弃（甄嬛传一次掉 12 个角色的直接原因）。在所有
+    name 匹配点统一吸收这种噪声；只裁尾部一段或多段全角/半角括号注，不动名字主体。
+    """
+    s = re.sub(r"(?:[（(][^（()）]*[)）]\s*)+$", "", str(name or ""))
+    return re.sub(r"[\s·•・]", "", s).strip()
 
 
 def _prune_to_canon(
@@ -383,7 +389,7 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
 输出严格 JSON，格式：
 {"characters":[
   {
-    "name":"人物名（必须与 roster 完全一致）",
+    "name":"人物本名（与上方「姓名：」后的名字完全一致；禁止带括号/角色定位/派系）",
     "personality":"性格描写（2-3句）",
     "voice_style":"说话方式：自称/称谓、句式、口头禅，附1-2句范例台词（30-80字）；各人嗓音要可区分；若是原作角色须贴合其原作台词口吻",
     "description":"角色简介：背景、动机、关键经历（2-3句）",
@@ -401,7 +407,8 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
 ]}
 
 规则：
-- 每个 name 必须与 roster 子集中的名字完全一致，不要改名、不要新增不在列表中的人物
+- 每个 name 只填「姓名：」后的本名，与之完全一致；**禁止把角色定位/派系写进 name**
+  （错误示范："允礼（悲情亲王）" → 正确："允礼"）；不要改名、不要新增不在列表中的人物
 - description / abilities / starting_inventory 对**所有角色**都要写（不只是玩家角色）；
   abilities/inventory 各 1-4 条，平凡 NPC 也要给些日常擅长与随身物（如"算账"/"看人脸色"，"算盘"/"半斤碎银"）
 - voice_style 对**所有角色**都要写，要能明显区分各人嗓音、避免千人一腔；
@@ -439,7 +446,8 @@ def _build_batch_prompt(
     name matches an IP character. fidelity_mode == "none" or no ip_pack: legacy behavior.
     """
     batch_list = "\n".join(
-        f"- {e.name}（{e.role_tag}）{f'  派系：{e.faction}' if e.faction else ''}"
+        f"- 姓名：{e.name}　｜　角色定位：{e.role_tag}"
+        f"{f'　｜　派系：{e.faction}' if e.faction else ''}"
         for e in batch
     )
     loc_str = "、".join(location_names) if location_names else "（无地点约束）"
@@ -487,8 +495,13 @@ async def _process_batch(
     *,
     ip_pack: IPKnowledgePack | None = None,
     fidelity_mode: FidelityMode = "none",
+    roster_norms: set[str] | None = None,
 ) -> list[Character]:
-    """处理单批，失败时返回空 list（不传播异常，由 gather return_exceptions 捕获）。"""
+    """处理单批，失败时返回空 list（不传播异常，由 gather return_exceptions 捕获）。
+
+    ``roster_norms``：整个 roster 的归一化名集合，用于兜底绑定时判断某个产出名是不是
+    「别的批」的角色（是则不抢，留给那批）。不传时跳过该保护（测试 / 单批场景）。
+    """
     async with sem:
         user_content = _build_batch_prompt(
             batch, description, ip_canon, location_names,
@@ -550,15 +563,54 @@ async def _process_batch(
         logger.warning("batch_invalid_format", batch_names=[e.name for e in batch])
         return []
 
-    # role_tag / faction / is_image_target 由 roster planner 决定，不能让
-    # character-detail LLM 推翻（它常常漏掉这几个字段，导致 is_image_target=False
-    # → 下游 playable 选 0 个 → images 阶段只画一张 hero、所有 NPC 头像 = placeholder）。
-    roster_lookup = {entry.name.strip(): entry for entry in batch}
+    valid_items = [it for it in raw_chars if isinstance(it, dict) and it.get("name")]
+
+    # 把产出「绑回」本批点名要的 roster 条目——角色身份由 roster 决定，不信详情 LLM 回吐的
+    # name 字符串。详情 LLM 经常改名：塞角色定位（"允礼（悲情亲王）"）、用封号指代本名
+    # （"华妃"→年世兰）、简称/全名互换（"允礼"↔"爱新觉罗·允礼"）；还常漏掉 planner 拥有的
+    # role_tag/faction/is_image_target。所以用「我们点名要了谁」来绑，而不是用精确名字匹配
+    # 当硬闸门把对不上的角色丢掉（那才是甄嬛传一次掉 12 个、且把 must-have 错标成不可玩的
+    # 根因）。绑定后一律用 roster 规范名 + 继承 planner 标签，name 只作展示。
+    #   ① 先按归一化名贪心配（吸收括号/中点/空白差异，且对乱序稳健）
+    #   ② 没配上的产出 ↔ 本批尚未认领的条目，按出现顺序兜底绑（吸收封号/异名/完全不同名）
+    #   ③ 兜底时若产出名其实是「别的批」的 roster 角色，则不抢（留给那批），按 extra 丢
+    #   ④ 超出本批点名数的多余产出 = LLM 自己加的，丢弃
+    entry_by_norm: dict[str, CharacterRosterEntry] = {}
+    for e in batch:
+        entry_by_norm.setdefault(_norm_name(e.name), e)
+
+    pairs: list[tuple[dict, CharacterRosterEntry]] = []
+    leftovers: list[dict] = []
+    claimed: set[str] = set()
+    for item in valid_items:
+        e = entry_by_norm.get(_norm_name(str(item["name"])))
+        if e is not None and _norm_name(e.name) not in claimed:
+            claimed.add(_norm_name(e.name))
+            pairs.append((item, e))
+        else:
+            leftovers.append(item)
+
+    free_entries = [e for e in batch if _norm_name(e.name) not in claimed]
+    fi = 0
+    for item in leftovers:
+        # 该产出名若是别的批的 roster 角色 → 它放错了批，不抢，交回那批
+        if roster_norms and _norm_name(str(item["name"])) in roster_norms:
+            logger.warning("character_extra_dropped", name=item.get("name"), reason="belongs_to_other_batch")
+            continue
+        if fi < len(free_entries):
+            entry = free_entries[fi]
+            fi += 1
+            logger.info(
+                "character_bound_by_position",
+                returned_name=item.get("name"),
+                roster_name=entry.name,
+            )
+            pairs.append((item, entry))
+        else:
+            logger.warning("character_extra_dropped", name=item.get("name"), reason="beyond_batch_size")
 
     result: list[Character] = []
-    for item in raw_chars:
-        if not isinstance(item, dict) or not item.get("name"):
-            continue
+    for item, entry in pairs:
         try:
             relations_raw = item.get("initial_peer_relations") or []
             relations: list[CharacterPeerRelation] = []
@@ -574,22 +626,13 @@ async def _process_batch(
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("batch_relation_parse_error", rel=rel, error=str(exc))
 
-            # Inherit roster planner's authoritative tags. If the LLM happened to
-            # echo a non-empty value back we still prefer the planner — planner
-            # ran first with the global view, the detail LLM only sees one batch.
-            roster_entry = roster_lookup.get(str(item["name"]).strip())
-            inherited_role_tag = roster_entry.role_tag if roster_entry else item.get("role_tag", "")
-            inherited_faction = roster_entry.faction if roster_entry else item.get("faction", "")
-            inherited_image_target = (
-                roster_entry.is_image_target if roster_entry
-                else bool(item.get("is_image_target", False))
-            )
-
+            # name + role_tag/faction/is_image_target 全部以 roster planner 为准（planner
+            # 先跑、有全局视角；详情 LLM 只看一批，常漏标签 / 改名）。
             char = Character(
-                name=item["name"],
-                role_tag=inherited_role_tag,
-                faction=inherited_faction,
-                is_image_target=inherited_image_target,
+                name=entry.name,
+                role_tag=entry.role_tag,
+                faction=entry.faction,
+                is_image_target=entry.is_image_target,
                 personality=item.get("personality", ""),
                 voice_style=item.get("voice_style", ""),
                 secret=item.get("secret", ""),
@@ -603,7 +646,7 @@ async def _process_batch(
             )
             result.append(char)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("batch_char_parse_error", name=item.get("name"), error=str(exc))
+            logger.warning("batch_char_parse_error", name=entry.name, error=str(exc))
     return result
 
 
@@ -644,13 +687,14 @@ async def build_characters_in_batches(
     # 切批
     batches = [roster[i : i + batch_size] for i in range(0, len(roster), batch_size)]
     sem = asyncio.Semaphore(concurrency)
+    roster_norms = {_norm_name(r.name) for r in roster}
 
     # 并发调用，return_exceptions=True 保证单批失败不传播
     results = await asyncio.gather(
         *[
             _process_batch(
                 batch, description, ip_canon, location_names, passages, llm_router, sem,
-                ip_pack=ip_pack, fidelity_mode=fidelity_mode,
+                ip_pack=ip_pack, fidelity_mode=fidelity_mode, roster_norms=roster_norms,
             )
             for batch in batches
         ],
@@ -666,26 +710,37 @@ async def build_characters_in_batches(
         else:
             all_returned.extend(res)  # type: ignore[arg-type]
 
-    # dedup 校验：roster name 严格 1:1
+    # dedup 校验：roster name 1:1，但匹配按 _norm_name 归一化（吸收尾部括号角色注 /
+    # 中点 / 空白差异）。LLM 详情阶段常把角色定位塞进 name（"允礼（悲情亲王）"），严格
+    # 精确匹配会把生成成功的角色误判"多余"丢弃 → 整条角色凭空消失。匹配后把 c.name 回写
+    # 成 roster 规范名，保证下游（事件引用 NPC / must_have 校验）拿到干净名。
     roster_names = [r.name for r in roster]
-    roster_set = set(roster_names)
-    seen: set[str] = set()
+    norm_to_canon: dict[str, str] = {}
+    for _rn in roster_names:
+        norm_to_canon.setdefault(_norm_name(_rn), _rn)
+    seen: set[str] = set()  # 存归一化名
     deduped: list[Character] = []
 
-    for c in all_returned:
-        if c.name not in roster_set:
+    def _keep_if_in_roster(c: Character) -> None:
+        canon = norm_to_canon.get(_norm_name(c.name))
+        if canon is None:
             logger.warning("character_extra_dropped", name=c.name)
-            continue
-        if c.name in seen:
+            return
+        key = _norm_name(canon)
+        if key in seen:
             logger.warning("character_duplicate_dropped", name=c.name)
-            continue
-        seen.add(c.name)
+            return
+        c.name = canon  # 回写 roster 规范名，去掉 LLM 加的括号后缀
+        seen.add(key)
         deduped.append(c)
+
+    for c in all_returned:
+        _keep_if_in_roster(c)
 
     # 1:1 定向回炉（有界 +1 轮）：详情阶段丢掉的 roster 角色，**只重跑这几个名字**，
     # 干掉 critic 阶段的薄 backfill（backfill 合成的占位 persona 信息量低）。源头补全 >
     # 兜底补占位。仍丢的留给 critic backfill 兜底（不至于主角凭空消失）。
-    missing_entries = [r for r in roster if r.name not in seen]
+    missing_entries = [r for r in roster if _norm_name(r.name) not in seen]
     if missing_entries:
         logger.info(
             "character_missing_refetching",
@@ -700,7 +755,7 @@ async def build_characters_in_batches(
             *[
                 _process_batch(
                     b, description, ip_canon, location_names, passages, llm_router, sem,
-                    ip_pack=ip_pack, fidelity_mode=fidelity_mode,
+                    ip_pack=ip_pack, fidelity_mode=fidelity_mode, roster_norms=roster_norms,
                 )
                 for b in retry_batches
             ],
@@ -711,13 +766,11 @@ async def build_characters_in_batches(
                 logger.warning("character_refetch_batch_failed", error=str(res))
                 continue
             for c in res:  # type: ignore[assignment]
-                if c.name in roster_set and c.name not in seen:
-                    seen.add(c.name)
-                    deduped.append(c)
+                _keep_if_in_roster(c)
 
     # 缺失警告（回炉后仍缺的）
     for n in roster_names:
-        if n not in seen:
+        if _norm_name(n) not in seen:
             logger.warning("character_missing", name=n)
 
     # 按 roster 顺序排列
