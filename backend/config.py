@@ -103,15 +103,20 @@ class Settings(BaseSettings):
     # fall back. Once tokens start flowing the timeout is no longer enforced
     # (a streaming generation can legitimately run minutes).
     # ``llm_call_max_retries`` retries the same provider on transient errors
-    # (timeout / connection / 5xx) before moving to the next provider in the
-    # fallback chain.
+    # (timeout / connection / 5xx / 429) before moving to the next provider in
+    # the fallback chain.
     # 2026-05-24: bumped from 60 → 120 because reasoning models (Qwen 3.x thinking,
     # DeepSeek V4 Pro) often take 60-100s to emit the first JSON token under
     # generation-phase load. Runtime turn timing isn't affected — early-stream
     # narrative tokens still arrive quickly.
     llm_call_timeout_seconds: float = 120.0
-    llm_call_max_retries: int = 1
-    llm_call_retry_backoff_seconds: float = 0.5
+    # 2026-07-01: 1→3 retries, 0.5→3.0s backoff. grok console 429s come in bursts
+    # (xAI rate-limits concurrent requests per IP); an immediate 0.5s retry lands
+    # in the same window and fails. 3s backoff waits the burst out; the gateway
+    # then hands a fresh account. Only fires on transient errors (rare), so game
+    # turn latency is unaffected in the common case.
+    llm_call_max_retries: int = 3
+    llm_call_retry_backoff_seconds: float = 3.0
     # Director JSON-mode output budget. The v2 director schema is large
     # (scene_brief + per-NPC focus + case_board_ops + …); DeepSeek's JSON mode
     # returns truncated/empty output when max_tokens is too small (official

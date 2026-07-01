@@ -125,12 +125,21 @@ def _is_transient(exc: BaseException) -> bool:
         return True
     if exc.__class__.__name__ in _TRANSIENT_EXC_NAMES:
         return True
-    # 5xx wrapped in provider-specific status errors
+    # 429 rate-limit + 5xx wrapped in provider-specific status errors.
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None)
-    if isinstance(status, int) and 500 <= status < 600:
+    if isinstance(status, int) and (status == 429 or 500 <= status < 600):
+        return True
+    # 429 often arrives as a generic APIError WITHOUT a clean status_code — the
+    # gateway surfaces the code in the message ("Console API returned 429" /
+    # "rate_limit_exceeded"), so also sniff the text. Without this, grok console
+    # 429s fall through and the generation subtask is dropped instead of retried
+    # (the 甄嬛传 掉角色 / lore_dimension_content_failed root cause: 429 went
+    # straight to failure with no llm.retry).
+    text = str(exc).lower()
+    if "429" in text or "rate limit" in text or "rate_limit" in text or "too many request" in text:
         return True
     return False
 
