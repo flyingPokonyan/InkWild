@@ -51,6 +51,7 @@ export default function DiscoverPage() {
   const isSearchMode = query.trim() !== "";
   const isCategoryMode = !isSearchMode && activeCategory !== "全部";
   const isGridMode = isSearchMode || isCategoryMode;
+  const hasSpotlight = !isGridMode && spotlightWorlds.length > 0;
 
   // ── Mobile filtered worlds ──
   const mobileFilteredWorlds = useMemo(() => {
@@ -137,10 +138,10 @@ export default function DiscoverPage() {
   }, []);
 
   return (
-    <main className={`lv-theme product-discover-page ${isGridMode ? "is-grid-mode" : ""}`}>
+    <main className={`lv-theme product-discover-page ${!hasSpotlight ? "no-spotlight" : ""}`}>
       <ProductNav
         active="discover"
-        variant={isGridMode ? "solid" : "transparent"}
+        variant={hasSpotlight ? "transparent" : "solid"}
         search={{
           value: query,
           onChange: handleDesktopSearchChange,
@@ -258,7 +259,7 @@ export default function DiscoverPage() {
           position: relative;
           z-index: 2;
         }
-        .product-discover-page.is-grid-mode .category-rail-wrapper {
+        .product-discover-page.no-spotlight .category-rail-wrapper {
           margin-top: 68px;
         }
 
