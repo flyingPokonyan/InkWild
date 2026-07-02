@@ -226,12 +226,45 @@ _STAGE_INDEX = {
     "relations_pack": 8,
     "events_data": 9,
     "playable": 10,
-    "critic": 11,
-    "visual_brief": 12,
-    "images": 13,
-    "validating": 14,
+    "free_start_stages": 11,
+    "critic": 12,
+    "visual_brief": 13,
+    "images": 14,
+    "validating": 15,
 }
 TOTAL_STAGES = len(_STAGE_INDEX)
+
+# 自由模式「人生进度」起点选择的生成系统提示。产出严格 JSON，name-based。
+_FREE_START_STAGES_SYSTEM = """你在为一个互动叙事世界设计「自由模式起点选择」——让玩家挑主角人生的哪个阶段开局。
+
+只有当主角拥有**贯穿全篇、阶段分明**的人生 / 成长弧线时才产出阶段，典型如：
+- 修仙境界（炼气 → 筑基 → 元婴…）
+- 宫廷位份（常在 → 妃 → 皇太后）
+- 力量体系序列 / 段位（序列9 → 序列0）
+- 年龄 / 事业成长（少年 → 成名 → 巅峰）
+
+若主角只处于**单一时间切片**（一次探案 / 一场事件 / 短篇），返回 {"has_arc": false, "stages": []}。
+
+有弧线时产出 3–5 档，按时间先后排序，输出：
+{
+  "has_arc": true,
+  "stages": [
+    {
+      "milestone": "阶段里程碑（该体系的黑话，如"筑基期"/"熹贵妃"/"序列7·诡术师"）——行标题主体",
+      "subtitle": "情境定位（如"七玄门内门弟子"），一句 8–16 字",
+      "tagline": "节奏 / 体验取向（如"从零经营，步步惊心"/"权势正盛，暗流已至"），一句 ≤20 字",
+      "start_location": "开局地点，**必须**是给定「可用地点」中的原名",
+      "opening_framing": "该阶段开局处境的 1–2 句白描（主角此刻是谁、面对什么）",
+      "known_relations": [{"npc": "另一角色本名（须在给定角色名单里）", "standing": "此阶段与主角的关系一句话"}]
+    }
+  ]
+}
+
+纪律：
+- milestone 用该题材观众认得的「进度黑话」，不要写成剧情梗概
+- 各档的 known_relations 要随阶段变化（早期的盟友后期可能成敌）
+- start_location 只能用给定地点原名；known_relations 的 npc 只能用给定角色名单里的名字
+- 只输出 JSON，不含任何解释文字"""
 
 # Script stage index map
 _SCRIPT_STAGE_INDEX = {
@@ -789,6 +822,12 @@ class WorldCreatorAgentV2:
                 message=identity_issues[0],
             )
 
+        # ---- Stage G2: free_start_stages（自由模式人生进度起点，需 playable 已定主角）----
+        async for ev in self._run_free_start_stages(
+            description, genre, era, characters, playable, locations,
+        ):
+            yield ev
+
         # ---- Build working payload (needed for critic + moderation) ----
         working_payload = self._build_working_payload(
             world_base=world_base,
@@ -800,6 +839,10 @@ class WorldCreatorAgentV2:
             research_pack=research_pack,
             relations_pack=relations_pack,
         )
+        # name-based free_start_stages（protagonist_name + stages）；apply_world_payload
+        # 落库时解析成 protagonist_character_id。无弧线世界为 None → 不写该字段。
+        if self._last_free_start_stages:
+            working_payload["free_start_stages"] = self._last_free_start_stages
 
         # ---- Stage H: critic (H1 shape + H2 light critic + H2.5 heavy critic + H3 moderation) ----
         async for ev in self._run_critic(
@@ -1943,6 +1986,146 @@ class WorldCreatorAgentV2:
             playable_count=len(playable_list),
             names=", ".join(p["name"] for p in playable_list),
             sample=[p["name"] for p in playable_list[:3] if p.get("name")],
+        )
+
+    # =========================================================================
+    # Stage G2: free_start_stages（自由模式「人生进度」起点预设）
+    # =========================================================================
+
+    async def _run_free_start_stages(
+        self,
+        description: str,
+        genre: str,
+        era: str,
+        characters: list[Character],
+        playable: list[dict],
+        locations: list[dict],
+    ) -> AsyncIterator[dict]:
+        """仅当主角拥有贯穿全篇、阶段分明的人生 / 成长弧线（修仙境界 · 宫廷位份 ·
+        序列途径 · 年龄成长 · 事业升迁…）时，产出自由模式起点选择。否则留空 →
+        world.free_start_stages 保持 None，自由模式走固定 initial_location 老开局。
+
+        非关键阶段：任何失败都静默跳过（不 warn、不阻塞后续），起点选择只是增益。
+        产出用**角色本名**记 protagonist（UUID 在 publish/apply 阶段解析），
+        与 known_relations 的 npc 名一致，全程 name-based 才能跨 publish 稳定。
+        """
+        start = time.monotonic()
+        yield progress_event(
+            "free_start_stages", "started",
+            stage_index=_STAGE_INDEX["free_start_stages"],
+            total_stages=TOTAL_STAGES,
+        )
+        self._last_free_start_stages = None
+
+        # 选主角：playable 里 role_tag 点明主角的第一个，否则第一个可玩角色
+        protagonist: dict | None = None
+        for p in playable or []:
+            rt = (p.get("role_tag") or "").strip()
+            if rt in {"主", "主角", "男主", "女主", "男主角", "女主角"} or "主角" in rt:
+                protagonist = p
+                break
+        if protagonist is None and playable:
+            protagonist = playable[0]
+        if protagonist is None or not protagonist.get("name"):
+            yield progress_event(
+                "free_start_stages", "skipped",
+                stage_index=_STAGE_INDEX["free_start_stages"],
+                total_stages=TOTAL_STAGES,
+                duration_ms=int((time.monotonic() - start) * 1000),
+                reason="no_playable_protagonist",
+            )
+            return
+
+        loc_names = [
+            loc.get("name", "") for loc in (locations or [])
+            if isinstance(loc, dict) and loc.get("name")
+        ]
+        roster_names = {c.name for c in characters if getattr(c, "name", "")}
+        prot_name = protagonist["name"]
+        prot_persona = (protagonist.get("description") or "")[:160]
+        # 主角真实住所（playable dict 没这字段，得回 characters 里查）——作 start_location 兜底
+        prot_home = next(
+            (c.initial_location for c in characters
+             if getattr(c, "name", "") == prot_name and getattr(c, "initial_location", "")),
+            "",
+        )
+
+        user_message = (
+            f"世界背景：{description}\n题材：{genre}　时代：{era}\n"
+            f"主角：{prot_name}（{protagonist.get('role_tag', '')}）{('：' + prot_persona) if prot_persona else ''}\n"
+            f"可用地点：{'、'.join(loc_names) if loc_names else '（无）'}\n"
+            f"其他角色（关系可引用其名）：{'、'.join(list(roster_names)[:40])}\n\n"
+            "判断主角是否拥有『贯穿全篇、阶段分明』的人生 / 成长弧线；若有，产出 3–5 个"
+            "可选起点，按时间先后排序。只输出 JSON。"
+        )
+
+        def _attempt() -> Any:
+            async def _call() -> dict | None:
+                text = await _collect_stream_text(
+                    self.llm,
+                    system=_FREE_START_STAGES_SYSTEM,
+                    messages=[{"role": "user", "content": user_message}],
+                    max_tokens=2048,
+                )
+                return _extract_json_from_text(text)
+            return _call()
+
+        data: dict | None = None
+        try:
+            work = with_transient_retry(
+                _attempt,
+                max_attempts=2,
+                on_retry=self._make_retry_logger("free_start_stages"),
+            )
+            async for item in self._run_with_pulse("free_start_stages", work):
+                if isinstance(item, tuple) and item[0] == "result":
+                    data = item[1]
+                else:
+                    yield item
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("free_start_stages_failed", error=str(exc))
+            data = None
+
+        stages_out: list[dict] = []
+        if isinstance(data, dict) and data.get("has_arc") and isinstance(data.get("stages"), list):
+            for i, raw in enumerate(data["stages"][:5]):
+                if not isinstance(raw, dict) or not raw.get("milestone"):
+                    continue
+                start_loc = raw.get("start_location", "") or ""
+                if loc_names and start_loc not in loc_names:
+                    start_loc = prot_home if prot_home in loc_names else loc_names[0]
+                rels: list[dict] = []
+                for rel in raw.get("known_relations") or []:
+                    if not isinstance(rel, dict):
+                        continue
+                    npc = rel.get("npc", "")
+                    if npc and (not roster_names or npc in roster_names) and npc != prot_name:
+                        rels.append({"npc": npc, "standing": rel.get("standing", "") or ""})
+                stages_out.append({
+                    "id": f"stage_{i + 1:02d}",
+                    "milestone": str(raw["milestone"])[:40],
+                    "subtitle": str(raw.get("subtitle", "") or "")[:60],
+                    "tagline": str(raw.get("tagline", "") or "")[:80],
+                    "order": i + 1,
+                    "start_location": start_loc,
+                    "opening_framing": str(raw.get("opening_framing", "") or "")[:200],
+                    "known_relations": rels[:6],
+                })
+
+        # 少于 2 档不成"选择"，直接不给（单档没有选的意义）
+        if len(stages_out) >= 2:
+            self._last_free_start_stages = {
+                "protagonist_name": prot_name,
+                "stages": stages_out,
+            }
+
+        yield progress_event(
+            "free_start_stages", "completed",
+            stage_index=_STAGE_INDEX["free_start_stages"],
+            total_stages=TOTAL_STAGES,
+            duration_ms=int((time.monotonic() - start) * 1000),
+            stage_count=len(stages_out),
+            protagonist=prot_name if self._last_free_start_stages else "",
         )
 
     # =========================================================================

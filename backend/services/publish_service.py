@@ -243,6 +243,7 @@ def normalize_world_payload(payload: dict) -> dict:
     for v2_key in (
         "lore_pack", "shared_events", "relations_pack",
         "events_data", "playable", "quality_warnings",
+        "free_start_stages",
     ):
         if payload.get(v2_key) is not None:
             normalized[v2_key] = payload[v2_key]
@@ -308,6 +309,7 @@ async def apply_world_payload(db: AsyncSession, world: World, payload: dict) -> 
         world.lore_pack = payload["lore_pack"]
 
     playable_ids: list[str] = []
+    name_to_id: dict[str, str] = {}
     existing_characters = (
         await db.execute(select(WorldCharacter).where(WorldCharacter.world_id == world.id))
     ).scalars().all()
@@ -356,10 +358,25 @@ async def apply_world_payload(db: AsyncSession, world: World, payload: dict) -> 
         wc.avatar = wc_data.get("avatar")
         wc.initial_peer_relations = wc_data.get("initial_peer_relations") or None
         wc.narrative_weight = _derive_narrative_weight(wc_data)
+        name_to_id[wc.name] = str(wc.id)
         if wc.playable:
             playable_ids.append(str(wc.id))
 
     world.free_playable_character_ids = playable_ids
+
+    # 自由模式起点：payload 里的 free_start_stages 是 name-based（{protagonist_name,
+    # stages}）——因为生成阶段还没有角色 UUID。这里 upsert 完角色后把 protagonist_name
+    # 解析成现存 WorldCharacter UUID，落成消费侧 schema（{protagonist_character_id,
+    # stages}）。名字解析不到就不动 world.free_start_stages（保住既有 / backfill 数据，
+    # 避免一次缺字段的 re-save 把起点清空）。known_relations 已是 name-based，无需转换。
+    fss = payload.get("free_start_stages")
+    if isinstance(fss, dict) and fss.get("stages"):
+        prot_id = name_to_id.get(fss.get("protagonist_name") or "")
+        if prot_id:
+            world.free_start_stages = {
+                "protagonist_character_id": prot_id,
+                "stages": fss["stages"],
+            }
 
 
 def apply_script_payload(
