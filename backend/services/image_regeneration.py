@@ -61,11 +61,15 @@ def _append_hint(prompt: str, hint: str) -> str:
 
 
 def _world_data_from_payload(payload: dict) -> dict:
+    research_summary = (
+        ((payload.get("research_pack") or {}).get("summary") or "")[:800]
+    )
     return {
         "name": (payload.get("name") or "").strip(),
         "genre": (payload.get("genre") or "").strip(),
         "era": (payload.get("era") or "").strip(),
         "description": (payload.get("description") or "").strip(),
+        "research_summary": research_summary,
     }
 
 

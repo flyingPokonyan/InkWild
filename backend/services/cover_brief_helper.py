@@ -36,7 +36,7 @@ logger = structlog.get_logger()
 
 _WORLD_HELPER_SYSTEM = """你是 InkWild 的美术指导，给一个虚构故事世界的"封面图生成"提供文本辅助信息。
 
-输入：world 元数据 + 需要画肖像的角色列表 + (可选) IP 识别结果。
+输入：world 元数据 + (可选) research_summary + 需要画肖像的角色列表 + (可选) IP 识别结果。
 输出：严格 JSON，仅一个对象，首字符 `{`，末字符 `}`，无解释文字。
 
 输出 schema：
@@ -57,14 +57,15 @@ _WORLD_HELPER_SYSTEM = """你是 InkWild 的美术指导，给一个虚构故事
 
 genre_category 规则（用于决定封面画法，要选准）：
 - 只能从这些大类里精确选一个填入：古风宫廷、武侠仙侠、赛博科幻、末世废土、悬疑推理、民国谍战、现代都市、校园日常、奇幻童话、恐怖诡秘、其他。
-- 按世界的 name / genre / description / IP 综合判断它最贴近哪个大类；拿不准就选最接近的，实在无法归类才用「其他」。
+- 按世界的 name / genre / description / research_summary / IP 综合判断它最贴近哪个大类；拿不准就选最接近的，实在无法归类才用「其他」。
 - 注意只判「题材大类」，不要判画法——具体画法由系统按大类自动分配。
 
 cover_focus 规则（给封面定方向，关键）：
 - 读懂这个世界后，提炼它最独特、最勾人的「主题 + 情绪钩子」——核心冲突 / 气质 / 最抓人的那个点，让人想点进去玩。
 - 只给主题和钩子，**不要规定构图、人数、视角、姿势、具体摆位**——把「画成什么样」留给生图模型自己发挥思考。
 - 一句话，必须独属于这个世界（避免放哪个世界都成立的泛话）。
-- 是已知 IP 就把 IP 名和它的标志元素带进钩子（如「哈利·波特的魔法学院，禁林深处的危险与未知」），不要把 IP 泛化掉；审核/IP 风险由生图层兜底，不要自我阉割。
+- 如果有 research_summary，汲取它的**气质与核心冲突**凝成**一个**最抓人的情绪钩子——越精炼越好（≤20 字优先）；**不要罗列角色/道具/场景清单**（那是摆拍规格，违背"留给模型发挥"），也**不要复述 IP 已知的标志元素**：生图模型看到 IP 名就懂原作，钩子只补气质方向即可。
+- 是已知 IP 就在钩子里点出 IP 名作锚（如「凡人修仙的冷峻隐忍与残酷攀升」），保持精炼；不要把 IP 泛化掉，也不要堆砌。审核/IP 风险由生图层兜底，不要自我阉割。
 
 characters 规则：
 - 当某角色是已知 IP 内的人物（输入会标注 `_has_ip_ref: true`），可以省略 gender/age_band/role_class（填空字符串）；mood_anchor 仍要填。
@@ -210,6 +211,7 @@ async def derive_world_cover_brief(
             "genre": genre,
             "era": era,
             "description": world_data.get("description", "")[:600],
+            "research_summary": (world_data.get("research_summary") or "")[:800],
         },
         "ip_recognition": {
             "kind": recognition.kind if recognition else "original",
