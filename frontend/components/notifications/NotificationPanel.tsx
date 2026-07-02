@@ -59,7 +59,8 @@ function relativeTime(iso: string | null): string {
   if (hr < 24) return `${hr} 小时前`;
   const day = Math.floor(hr / 24);
   if (day < 30) return `${day} 天前`;
-  return parseBackendIso(iso).toLocaleDateString();
+  const d = parseBackendIso(iso);
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 function iconFor(type: NotificationType) {

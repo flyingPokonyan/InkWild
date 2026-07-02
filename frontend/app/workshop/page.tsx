@@ -2638,7 +2638,7 @@ function MobileWorkCard({
 
   const updated = updatedAt ? parseBackendIso(updatedAt) : null;
   const updatedLabel = updated
-    ? `${kind === "world" ? "世界" : "剧本"} · ${updated.toLocaleDateString("zh-CN", { month: "short", day: "numeric" })}`
+    ? `${kind === "world" ? "世界" : "剧本"} · ${updated.getMonth() + 1}月${updated.getDate()}日`
     : `${kind === "world" ? "世界" : "剧本"} · 已发布`;
 
   const onCardTap = busy ? undefined : isOwner ? onEdit : onPlay;
@@ -2679,9 +2679,9 @@ function MobileWorkCard({
             border: "1px solid rgba(255,255,255,0.12)",
             display: "inline-flex",
             alignItems: "center",
-            fontFamily: "var(--lv-font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.12em",
+            fontFamily: "var(--lv-font-sans)",
+            fontSize: 10,
+            letterSpacing: "0.02em",
             color: statusColor,
           }}
         >
@@ -2691,9 +2691,9 @@ function MobileWorkCard({
       <div style={{ padding: "13px 12px 10px", display: "flex", flexDirection: "column", minWidth: 0 }}>
         <span
           style={{
-            fontFamily: "var(--lv-font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.14em",
+            fontFamily: "var(--lv-font-sans)",
+            fontSize: 10,
+            fontVariantNumeric: "tabular-nums",
             color: "var(--lv-ink-3)",
             marginBottom: 4,
           }}
@@ -2741,9 +2741,10 @@ function MobileWorkCard({
         >
           <span
             style={{
-              fontFamily: "var(--lv-font-mono)",
-              fontSize: 9,
-              letterSpacing: "0.12em",
+              fontFamily: "var(--lv-font-sans)",
+              fontSize: 10,
+              letterSpacing: "0.02em",
+              fontVariantNumeric: "tabular-nums",
               color: "var(--lv-ink-4)",
             }}
           >
@@ -2865,9 +2866,9 @@ function MobileWorkGridTile({
             border: "1px solid rgba(255,255,255,0.12)",
             display: "inline-flex",
             alignItems: "center",
-            fontFamily: "var(--lv-font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.12em",
+            fontFamily: "var(--lv-font-sans)",
+            fontSize: 10,
+            letterSpacing: "0.02em",
             color: statusColor,
           }}
         >
@@ -2893,9 +2894,10 @@ function MobileWorkGridTile({
           style={{
             display: "block",
             marginTop: 3,
-            fontFamily: "var(--lv-font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.12em",
+            fontFamily: "var(--lv-font-sans)",
+            fontSize: 10,
+            letterSpacing: "0.02em",
+            fontVariantNumeric: "tabular-nums",
             color: "var(--lv-ink-3)",
             whiteSpace: "nowrap",
             overflow: "hidden",

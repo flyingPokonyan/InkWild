@@ -26,7 +26,7 @@ export function SavesCarouselCard({ game, busy, onOpen }: SavesCarouselCardProps
     if (h < 24) return `${h} 小时前`;
     const days = Math.round(h / 24);
     if (days < 7) return `${days} 天前`;
-    return d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
   };
 
   const subTitle = [
@@ -121,6 +121,7 @@ export function SavesCarouselCard({ game, busy, onOpen }: SavesCarouselCardProps
               whiteSpace: "nowrap",
               fontSize: "11px",
               fontFamily: "var(--lv-font-sans)",
+              fontVariantNumeric: "tabular-nums",
             }}
           >
             {subTitle}
@@ -138,6 +139,7 @@ export function SavesCarouselCard({ game, busy, onOpen }: SavesCarouselCardProps
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
               fontFamily: "var(--lv-font-sans)",
+              fontVariantNumeric: "tabular-nums",
             }}
           >
             {footerText}
