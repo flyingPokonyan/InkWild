@@ -24,6 +24,7 @@ from models.npc_relation import NPCRelation
 from models.script import Script
 from models.world import Ending, Event, World, WorldCharacter
 from schemas.game import GameSessionDetailResponse, SessionMessageDTO
+from schemas.world import normalize_free_start_stages
 from utils import utcnow
 
 logger = structlog.get_logger()
@@ -266,17 +267,26 @@ class GameService:
             elif not world.script_setting:
                 raise AppError(40008, "当前世界没有可用剧本")
 
-        # 自由模式「人生进度」起点：仅自由模式 + 世界配了 free_start_stages + 选的是主角
-        # + stage_id 命中，四者俱全才生效；否则 None，走老的固定 initial_location 开局。
+        # 自由模式「人生进度」起点：仅自由模式 + 所选角色在 free_start_stages 里配了阶段
+        # + stage_id 命中，三者俱全才生效；否则 None，走老的固定 initial_location 开局。
+        # 存储可能是旧单主角形状，normalize 统一成 {"characters": [...]}。
         # （spec docs/plans/2026-06-24-free-start-stages.md）
         start_stage: dict | None = None
-        if mode == "free" and start_stage_id and isinstance(world.free_start_stages, dict):
-            fss = world.free_start_stages
-            if str(fss.get("protagonist_character_id") or "") == str(character.id):
+        if mode == "free" and start_stage_id:
+            fss = normalize_free_start_stages(world.free_start_stages)
+            entry = next(
+                (
+                    e
+                    for e in (fss or {}).get("characters", [])
+                    if str(e.get("character_id") or "") == str(character.id)
+                ),
+                None,
+            )
+            if entry:
                 start_stage = next(
                     (
                         s
-                        for s in (fss.get("stages") or [])
+                        for s in (entry.get("stages") or [])
                         if isinstance(s, dict) and str(s.get("id") or "") == str(start_stage_id)
                     ),
                     None,
@@ -373,11 +383,11 @@ class GameService:
                 initial_state.npc_locations[npc.name] = npc.initial_location
 
         # 强制单局：开新局前，把同键下所有进行中的旧局结束掉。键与 start 页查重一致
-        # （剧本模式 = 世界+剧本，自由模式 = 世界+角色）。堵住"评测/直叩 API/多 tab
-        # 无限堆 playing"；与顶部 force_abandon_session_id（只结束单个）互补——这里
-        # 把同键的全部清掉，保证一个键始终至多一个进行中局。
+        # （剧本模式 = 世界+剧本，自由模式 = 世界——换角色也算重开，同一自由世界
+        # 至多一个进行中局）。堵住"评测/直叩 API/多 tab 无限堆 playing"；与顶部
+        # force_abandon_session_id（只结束单个）互补——这里把同键的全部清掉。
         await self._retire_active_sessions_for_key(
-            db, user_id, world.id, mode, resolved_script_id, character.id
+            db, user_id, world.id, mode, resolved_script_id
         )
 
         session = GameSession(
@@ -677,11 +687,12 @@ class GameService:
         world_id,
         mode: str,
         script_id,
-        character_id,
     ) -> None:
         """强制单局：把同键下所有进行中(playing/paused)的旧局置为 ended+abandoned。
         - 键与 start 页查重一致：剧本模式 (user, world, script)，自由模式
-          (user, world, character)。
+          (user, world)——换角色不豁免，同一自由世界至多一个进行中局
+          （2026-07-02 由 (user, world, character) 收紧：按角色分键时换个角色
+          就能无限多开，玩家实际堆出一堆平行局）。
         - 剧本模式但无离散 script_id（world.script_setting 内联剧本）时无法判键，
           跳过不误伤。
         - 调用方负责 commit（start_game 内联调用时跟主流程一起 commit）。
@@ -697,7 +708,6 @@ class GameService:
             conditions.append(GameSession.script_id == script_id)
         else:
             conditions.append(GameSession.mode == "free")
-            conditions.append(GameSession.character_id == character_id)
 
         rows = (await db.execute(select(GameSession).where(*conditions))).scalars().all()
         now = utcnow()

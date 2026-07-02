@@ -52,7 +52,7 @@ const WORLD_PHASE_WEIGHTS: Record<string, number> = {
   relations_pack:   1,
   events_data:      3,
   playable:         2,
-  free_start_stages: 2,
+  free_start_stages: 5, // 2026-07-02 多弧线角色：1 次挑选 + 至多 3 次逐角色生成
   critic:           3,
   visual_brief:     1,
   images:          40,
@@ -67,6 +67,7 @@ export const EXPECTED_PHASE_SECONDS: Record<string, number> = {
   characters:    45,
   research_pack: 40,
   lore_pack:     25,
+  free_start_stages: 60, // 多弧线角色：1 次挑选 + 至多 3 次逐角色生成，串行
 };
 
 // 剧本生成 8 阶段权重（v2 _SCRIPT_STAGE_INDEX 顺序），总和 100。

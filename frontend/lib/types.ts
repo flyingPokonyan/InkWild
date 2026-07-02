@@ -207,10 +207,14 @@ export interface StartStage {
   known_relations: StartStageRelation[];
 }
 
-export interface FreeStartStages {
-  // 这套阶段属于哪个可玩角色（主角）。前端据此判断「选中的是不是主角」。
-  protagonist_character_id: string;
+export interface CharacterStartStages {
+  // 这套阶段属于哪个可玩角色。一个世界可有多个弧线角色各配一套阶段。
+  character_id: string;
   stages: StartStage[];
+}
+
+export interface FreeStartStages {
+  characters: CharacterStartStages[];
 }
 
 export interface WorldDetail {

@@ -337,8 +337,9 @@ async def test_start_game_retires_other_active_sessions_same_script(db, monkeypa
 
 @pytest.mark.asyncio
 async def test_start_game_retires_other_active_sessions_same_free_character(db, monkeypatch):
-    """强制单局（自由模式）：开新局时同 (user, world, character) 下进行中旧局
-    自动结束；同世界但不同角色的自由局不受影响。"""
+    """强制单局（自由模式）：键 = (user, world)，开新局时同世界所有进行中的
+    自由局自动结束——**换角色也算重开**（2026-07-02 由按角色分键收紧：按角色
+    分键时换个角色就能无限多开）。"""
     monkeypatch.setattr(settings, "npc_initial_stance_enabled", False)
 
     user = User(nickname="tester")
@@ -372,7 +373,7 @@ async def test_start_game_retires_other_active_sessions_same_free_character(db, 
         )
 
     old_same = _free_sess(hero.id)
-    old_other_char = _free_sess(other_hero.id)  # 控制组：不同角色，不应被结束
+    old_other_char = _free_sess(other_hero.id)  # 不同角色的自由局，同样被结束
     db.add_all([old_same, old_other_char])
     await db.commit()
     old_same_id = old_same.id
@@ -384,14 +385,17 @@ async def test_start_game_retires_other_active_sessions_same_free_character(db, 
     await db.refresh(old_same)
     await db.refresh(old_other_char)
     assert old_same.status == "ended" and old_same.ending_type == "abandoned"
-    assert old_other_char.status == "playing"  # 不同角色不动
+    assert old_other_char.status == "ended"  # 换角色不豁免
+    assert old_other_char.ending_type == "abandoned"
 
     rows = (await db.execute(
         select(GameSession).where(
-            GameSession.character_id == hero.id, GameSession.status == "playing"
+            GameSession.world_id == world.id,
+            GameSession.mode == "free",
+            GameSession.status == "playing",
         )
     )).scalars().all()
-    assert len(rows) == 1
+    assert len(rows) == 1  # 同一自由世界只剩刚开的这局
     assert rows[0].id != old_same_id
 
 

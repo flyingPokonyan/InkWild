@@ -364,19 +364,34 @@ async def apply_world_payload(db: AsyncSession, world: World, payload: dict) -> 
 
     world.free_playable_character_ids = playable_ids
 
-    # 自由模式起点：payload 里的 free_start_stages 是 name-based（{protagonist_name,
-    # stages}）——因为生成阶段还没有角色 UUID。这里 upsert 完角色后把 protagonist_name
-    # 解析成现存 WorldCharacter UUID，落成消费侧 schema（{protagonist_character_id,
-    # stages}）。名字解析不到就不动 world.free_start_stages（保住既有 / backfill 数据，
-    # 避免一次缺字段的 re-save 把起点清空）。known_relations 已是 name-based，无需转换。
+    # 自由模式起点：payload 里的 free_start_stages 是 name-based——因为生成阶段还没有
+    # 角色 UUID。这里 upsert 完角色后把角色名解析成现存 WorldCharacter UUID，落成消费侧
+    # schema（{"characters": [{"character_id", "stages"}]}）。兼容两代 draft 形状：
+    # 新（多弧线角色）{"characters": [{"character_name", "stages"}]} 与旧（单主角）
+    # {"protagonist_name", "stages"}。单个角色名解析不到只剔除那一条；全部解析不到
+    # 就不动 world.free_start_stages（保住既有 / backfill 数据，避免一次缺字段的
+    # re-save 把起点清空）。known_relations 已是 name-based，无需转换。
     fss = payload.get("free_start_stages")
-    if isinstance(fss, dict) and fss.get("stages"):
-        prot_id = name_to_id.get(fss.get("protagonist_name") or "")
-        if prot_id:
-            world.free_start_stages = {
-                "protagonist_character_id": prot_id,
-                "stages": fss["stages"],
-            }
+    if isinstance(fss, dict):
+        if isinstance(fss.get("characters"), list):
+            raw_entries = fss["characters"]
+        elif fss.get("stages"):
+            raw_entries = [
+                {"character_name": fss.get("protagonist_name"), "stages": fss["stages"]}
+            ]
+        else:
+            raw_entries = []
+        resolved = []
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            char_id = name_to_id.get(str(entry.get("character_name") or ""))
+            stages = entry.get("stages")
+            # 少于 2 档不成"选择"，与生成侧规则一致
+            if char_id and isinstance(stages, list) and len(stages) >= 2:
+                resolved.append({"character_id": char_id, "stages": stages})
+        if resolved:
+            world.free_start_stages = {"characters": resolved}
 
 
 def apply_script_payload(

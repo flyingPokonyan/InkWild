@@ -178,16 +178,16 @@ export default function PlaySetupPage() {
     }
   }, [world, selection.mode, selection.character, presetMode, presetScriptId]);
 
-  // 自由模式起点：世界配了 free_start_stages，且当前选的角色就是那套阶段的主角。
+  // 自由模式起点：当前选中的角色在 free_start_stages.characters 里配了阶段才出现该步。
   const stageList = useMemo(() => {
-    const stages = world?.free_start_stages?.stages ?? [];
+    const entry = world?.free_start_stages?.characters?.find(
+      (c) => c.character_id === selection.character,
+    );
+    const stages = entry?.stages ?? [];
     return [...stages].sort((a, b) => a.order - b.order);
-  }, [world]);
+  }, [world, selection.character]);
   const hasStageStep = Boolean(
-    selection.mode === "free" &&
-      stageList.length > 0 &&
-      selection.character &&
-      world?.free_start_stages?.protagonist_character_id === selection.character,
+    selection.mode === "free" && selection.character && stageList.length > 0,
   );
 
   const steps = useMemo(
@@ -254,9 +254,9 @@ export default function PlaySetupPage() {
     dispatch({ type: "selectMode", mode });
   };
 
-  // 查重：剧本模式按 (world, script) 比对；自由模式按 (world, character, free)。
-  // 用户已明确「选了该剧本则提示」「无剧本世界 + 重复 character 则提示」，
-  // 所以两个 select 入口分别拦一下；命中就弹 modal、暂停步进。
+  // 查重：剧本模式按 (world, script) 比对；自由模式按 (world, free)——换角色不豁免，
+  // 同一自由世界至多一个进行中局（与后端 _retire_active_sessions_for_key 的键一致）。
+  // 两个 select 入口分别拦一下；命中就弹 modal、暂停步进。
   const handleSelectScript = (sid: string) => {
     const dup = activeSameWorld.find(
       (g) => g.script_id === sid && g.session_id !== forceAbandonSessionId,
@@ -271,10 +271,7 @@ export default function PlaySetupPage() {
   const handleSelectCharacter = (cid: string) => {
     if (selection.mode === "free") {
       const dup = activeSameWorld.find(
-        (g) =>
-          g.mode === "free" &&
-          g.character_id === cid &&
-          g.session_id !== forceAbandonSessionId,
+        (g) => g.mode === "free" && g.session_id !== forceAbandonSessionId,
       );
       if (dup) {
         setDuplicatePrompt({ session: dup, pending: { type: "character", id: cid } });
@@ -551,7 +548,7 @@ export default function PlaySetupPage() {
           (focusedStageId ? stageList.find((s) => s.id === focusedStageId) : null) ??
           stageList[0] ??
           null;
-        const protagonistName =
+        const stageCharacterName =
           world.characters.find((c) => c.id === selection.character)?.name ?? "";
         const knownNames = shownStage?.known_relations.map((r) => r.npc).join(" · ") ?? "";
         return (
@@ -560,7 +557,7 @@ export default function PlaySetupPage() {
               className="lv-t-meta"
               style={{ textAlign: "center", color: "var(--lv-ink-3)", margin: 0 }}
             >
-              {protagonistName ? `想从${protagonistName}人生的哪一段开始？` : "想从哪一段人生开始？"}
+              {stageCharacterName ? `想从${stageCharacterName}人生的哪一段开始？` : "想从哪一段人生开始？"}
             </p>
 
             {/* 桌面：左列表 / 右处境两栏；移动端：上下堆 */}

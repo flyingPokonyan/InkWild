@@ -6,7 +6,13 @@ from dependencies import get_current_user_optional, get_db
 from models.script import Script
 from models.user import User
 from models.world import World, WorldCharacter
-from schemas.world import CharacterDTO, ScriptDTO, WorldDetailResponse, WorldListItem
+from schemas.world import (
+    CharacterDTO,
+    ScriptDTO,
+    WorldDetailResponse,
+    WorldListItem,
+    normalize_free_start_stages,
+)
 from services.world_image_fields import resolve_world_image_fields_from_model
 
 router = APIRouter(prefix="/api/worlds", tags=["worlds"])
@@ -95,12 +101,7 @@ async def get_world(
             hero_image=images["hero_image"],
             free_setting=world.free_setting,
             has_script_mode=bool(world.script_setting) or len(scripts) > 0,
-            free_start_stages=(
-                world.free_start_stages
-                if isinstance(world.free_start_stages, dict)
-                and world.free_start_stages.get("stages")
-                else None
-            ),
+            free_start_stages=normalize_free_start_stages(world.free_start_stages),
             characters=[
                 CharacterDTO(
                     id=str(character.id),
