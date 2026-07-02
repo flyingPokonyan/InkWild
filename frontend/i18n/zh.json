@@ -747,6 +747,8 @@
     "foundCount": "找到 <strong>{count}</strong> 个世界",
     "emptyTitle": "暂无匹配的世界",
     "emptyHint": "换个题材或搜索词试试。",
+    "libraryEmptyTitle": "世界库暂时为空",
+    "libraryEmptyHint": "稍后再来看看，或到创作工坊创建你的第一个世界。",
     "categoryAll": "全部",
     "hotExplore": "热门探索",
     "featuredWorlds": "精选世界",

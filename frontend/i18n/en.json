@@ -747,6 +747,8 @@
     "foundCount": "Found <strong>{count}</strong> worlds",
     "emptyTitle": "No matching worlds",
     "emptyHint": "Try a different genre or search term.",
+    "libraryEmptyTitle": "The world library is empty for now",
+    "libraryEmptyHint": "Check back soon, or create your first world in the workshop.",
     "categoryAll": "All",
     "hotExplore": "Popular",
     "featuredWorlds": "Featured worlds",

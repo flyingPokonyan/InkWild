@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 
 import { ProductNav } from "@/components/ProductNav";
+import { LoadingPulse } from "@/components/ui/LoadingPulse";
 import { useWorldList } from "@/lib/api/worlds";
 import { useGameHistory } from "@/lib/api/history";
 import { pickFeaturedWorlds } from "@/lib/featured-worlds";
@@ -23,7 +24,7 @@ export default function DiscoverPage() {
   const [activeCategory, setActiveCategory] = useState("全部");
 
   // ── Data ──
-  const { data: worldsData } = useWorldList();
+  const { data: worldsData, isLoading: worldsLoading } = useWorldList();
   const worlds = useMemo(() => worldsData ?? [], [worldsData]);
 
   const { data: historyData } = useGameHistory();
@@ -136,6 +137,52 @@ export default function DiscoverPage() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  // 首次加载（无缓存数据）：世界列表还没到时 spotlight/轮播全空，分类栏会整个
+  // 顶到页面最上方，看起来像卡死。此时不渲染正式布局，给整页加载态。
+  // 数据到了但库真为空（罕见）也别渲染塌缩布局，给引导空态。
+  if (worldsLoading || worlds.length === 0) {
+    return (
+      <main
+        className="lv-theme"
+        style={{ minHeight: "100dvh", background: "var(--lv-bg)", color: "var(--lv-ink)" }}
+      >
+        <ProductNav
+          active="discover"
+          variant="solid"
+          search={{
+            value: query,
+            onChange: handleDesktopSearchChange,
+            placeholder: t("searchPlaceholder"),
+          }}
+        />
+        <div
+          style={{
+            minHeight: "calc(100dvh - 68px)",
+            paddingTop: 68,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+          }}
+        >
+          {worldsLoading ? (
+            <LoadingPulse variant="block" />
+          ) : (
+            <>
+              <p className="lv-t-h3" style={{ margin: 0, color: "var(--lv-ink-2)" }}>
+                {t("libraryEmptyTitle")}
+              </p>
+              <p className="lv-t-meta" style={{ margin: 0, color: "var(--lv-ink-3)" }}>
+                {t("libraryEmptyHint")}
+              </p>
+            </>
+          )}
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className={`lv-theme product-discover-page ${!hasSpotlight ? "no-spotlight" : ""}`}>
