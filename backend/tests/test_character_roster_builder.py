@@ -3,8 +3,8 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock
 
-from schemas.research_pack import IPCanon, Passage
-from schemas.character_v2 import Character, CharacterRosterEntry
+from schemas.research_pack import IPCanon
+from schemas.character_v2 import CharacterRosterEntry
 from services.character_roster_builder import (
     build_character_roster,
     build_characters_in_batches,
@@ -58,11 +58,44 @@ async def test_roster_handles_llm_exception():
 
     async def boom(*, messages, tools, system, max_tokens):
         raise RuntimeError("LLM 5xx")
-        yield  # noqa: unreachable
+        if False:
+            yield {}
 
     fake.stream_with_tools = boom
     roster = await build_character_roster("x", "", "", IPCanon(), [], [], fake)
     assert roster == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.no_db
+async def test_roster_transient_exception_bubbles_for_outer_retry():
+    """Transport/provider failures must reach the stage retry wrapper."""
+    from services.world_creator_retry import with_transient_retry
+
+    class APIError(Exception):
+        pass
+
+    fake = MagicMock()
+    calls = {"n": 0}
+
+    async def flaky(*, messages, tools, system, max_tokens, reasoning=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise APIError("Console stream read failed: curl 92")
+        yield {
+            "type": "text_delta",
+            "text": '{"roster":[{"name":"哈利·波特","role_tag":"主角","is_image_target":true}]}',
+        }
+
+    fake.stream_with_tools = flaky
+    roster = await with_transient_retry(
+        lambda: build_character_roster("哈利波特", "", "", IPCanon(), [], [], fake),
+        max_attempts=2,
+        backoffs=(0,),
+    )
+
+    assert calls["n"] == 2
+    assert [r.name for r in roster] == ["哈利·波特"]
 
 
 # ---- build_characters_in_batches ----
@@ -208,7 +241,8 @@ async def test_batches_single_batch_failure_isolates():
                 '{"characters":[' + ",".join([f'{{"name":"N{j}","personality":"p"}}' for j in range(5)]) + ']}'}
         else:
             raise RuntimeError("batch 2 failed")
-            yield  # noqa: unreachable
+            if False:
+                yield {}
 
     fake.stream_with_tools = selective_fail
 

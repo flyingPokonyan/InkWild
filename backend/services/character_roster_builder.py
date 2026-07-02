@@ -19,6 +19,7 @@ import structlog
 from schemas.character_v2 import Character, CharacterPeerRelation, CharacterRosterEntry
 from schemas.ip_knowledge_pack import FidelityMode, IPKnowledgePack
 from schemas.research_pack import IPCanon, Passage
+from services.world_creator_retry import is_transient
 
 logger = structlog.get_logger()
 
@@ -375,7 +376,10 @@ async def build_character_roster(
         return entries
 
     except Exception as exc:  # noqa: BLE001
-        logger.warning("roster_build_failed", error=str(exc))
+        transient = is_transient(exc)
+        logger.warning("roster_build_failed", error=str(exc), transient=transient)
+        if transient:
+            raise
         return []
 
 
@@ -416,6 +420,10 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
 - schedule 与 initial_location 的值**必须是给定地点列表中已有的地点名**（地点列表为空时可留空字符串）。
   写"地点"不要写"活动"：❌"校场练兵"/"独酌弄墨"/"巡营"（这是在干什么）→ ✅"校场"/"书房"/"军营"（这是在哪）。
   人物在某地做什么，靠 personality/knowledge 体现，schedule 只填地点名。
+- **居所归属**：若「可用地点」某地点的描述点明它是某角色的居所 / 寝宫 / 府邸 / 住处
+  （如"X 的寝宫"/"X 的居所"/"X 的府邸"），则该角色的 initial_location 及 schedule 的
+  night、morning **必须**设为该地点——不要把这座宫的主人安排到别处过夜；其贴身仆从
+  （丫鬟 / 太监 / 侍卫等）的居所也应跟随主人。这样才不会出现"某某的寝宫里却没有某某"的矛盾。
 - initial_peer_relations 的 target 只能是本批或整个 roster 中已有的 NPC 名（不含玩家角色）
 - trust 范围 -10（极度敌对）到 10（生死相托）
 - 只输出 JSON，不含任何解释文字
@@ -438,6 +446,7 @@ def _build_batch_prompt(
     *,
     ip_pack: IPKnowledgePack | None = None,
     fidelity_mode: FidelityMode = "none",
+    location_descs: dict[str, str] | None = None,
 ) -> str:
     """为单批构建 user prompt。
 
@@ -450,7 +459,20 @@ def _build_batch_prompt(
         f"{f'　｜　派系：{e.faction}' if e.faction else ''}"
         for e in batch
     )
-    loc_str = "、".join(location_names) if location_names else "（无地点约束）"
+    # 有描述时逐行渲染「地点名：描述」，让详情阶段能读到地点的归属信息
+    # （如"长春宫：皇后X的寝宫"），配合 _BATCH_SYSTEM 的居所归属规则把主人锚定到其宫；
+    # 无描述则回退到裸地点名（旧行为 / 测试路径）。
+    if location_names:
+        if location_descs:
+            loc_block = "\n".join(
+                f"- {n}：{location_descs[n]}" if location_descs.get(n) else f"- {n}"
+                for n in location_names
+            )
+            loc_render = f"可用地点（含归属，主人须住在自己的宫内）：\n{loc_block}"
+        else:
+            loc_render = f"可用地点：{'、'.join(location_names)}"
+    else:
+        loc_render = "可用地点：（无地点约束）"
 
     canon_hint = ""
     if ip_canon is not None and ip_canon.canonical_names:
@@ -458,7 +480,7 @@ def _build_batch_prompt(
 
     prompt = (
         f"世界背景：{description}{canon_hint}\n\n"
-        f"可用地点：{loc_str}\n\n"
+        f"{loc_render}\n\n"
         f"本批需详写的人物（{len(batch)} 人）：\n{batch_list}\n\n"
     )
 
@@ -496,6 +518,7 @@ async def _process_batch(
     ip_pack: IPKnowledgePack | None = None,
     fidelity_mode: FidelityMode = "none",
     roster_norms: set[str] | None = None,
+    location_descs: dict[str, str] | None = None,
 ) -> list[Character]:
     """处理单批，失败时返回空 list（不传播异常，由 gather return_exceptions 捕获）。
 
@@ -506,6 +529,7 @@ async def _process_batch(
         user_content = _build_batch_prompt(
             batch, description, ip_canon, location_names,
             ip_pack=ip_pack, fidelity_mode=fidelity_mode,
+            location_descs=location_descs,
         )
 
         # 附加 passages 摘录（若有），限制字符数防止 context 过长
@@ -672,17 +696,25 @@ async def build_characters_in_batches(
     if not roster:
         return []
 
-    # 提取地点名列表
+    # 提取地点名列表 + 名→描述映射（描述里常点明居所归属，如"长春宫：皇后X的寝宫"，
+    # 详情阶段据此把主人锚定到自己的宫，避免"某某的寝宫里没有某某"的空宫矛盾）。
     location_names: list[str] = []
+    location_descs: dict[str, str] = {}
     for loc in locations:
         if isinstance(loc, str):
             location_names.append(loc)
         elif hasattr(loc, "name"):
             location_names.append(loc.name)
+            desc = getattr(loc, "description", "") or ""
+            if desc:
+                location_descs[loc.name] = desc
         elif isinstance(loc, dict):
             n = loc.get("name", "")
             if n:
                 location_names.append(n)
+                desc = loc.get("description", "") or ""
+                if desc:
+                    location_descs[n] = desc
 
     # 切批
     batches = [roster[i : i + batch_size] for i in range(0, len(roster), batch_size)]
@@ -695,6 +727,7 @@ async def build_characters_in_batches(
             _process_batch(
                 batch, description, ip_canon, location_names, passages, llm_router, sem,
                 ip_pack=ip_pack, fidelity_mode=fidelity_mode, roster_norms=roster_norms,
+                location_descs=location_descs,
             )
             for batch in batches
         ],
@@ -756,6 +789,7 @@ async def build_characters_in_batches(
                 _process_batch(
                     b, description, ip_canon, location_names, passages, llm_router, sem,
                     ip_pack=ip_pack, fidelity_mode=fidelity_mode, roster_norms=roster_norms,
+                    location_descs=location_descs,
                 )
                 for b in retry_batches
             ],

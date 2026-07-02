@@ -258,6 +258,37 @@ def test_batch_prompt_no_match_skips_grounding():
 
 
 # ---------------------------------------------------------------------------
+# Location ownership: descriptions are surfaced so the detail step anchors a
+# palace's declared owner to reside there (fixes "皇后的寝宫里却没有皇后").
+# ---------------------------------------------------------------------------
+
+
+def test_batch_prompt_renders_location_descriptions_when_provided():
+    from services.character_roster_builder import _BATCH_SYSTEM
+
+    batch = [CharacterRosterEntry(name="乌拉那拉·宜修", role_tag="皇后")]
+    prompt = _build_batch_prompt(
+        batch,
+        "清宫",
+        IPCanon(),
+        ["长春宫", "坤宁宫"],
+        location_descs={
+            "长春宫": "皇后乌拉那拉·宜修的寝宫，权谋总指挥部",
+            "坤宁宫": "皇后举行大典的礼仪主殿",
+        },
+    )
+    # Ownership info reaches the detail step, and the anchoring rule lives in system.
+    assert "长春宫：皇后乌拉那拉·宜修的寝宫" in prompt
+    assert "居所归属" in _BATCH_SYSTEM
+
+
+def test_batch_prompt_falls_back_to_bare_names_without_descs():
+    batch = [CharacterRosterEntry(name="甲", role_tag="路人")]
+    prompt = _build_batch_prompt(batch, "bg", IPCanon(), ["长春宫", "坤宁宫"])
+    assert "可用地点：长春宫、坤宁宫" in prompt
+
+
+# ---------------------------------------------------------------------------
 # Negative cue removal: world_base no longer renders "（无）" placeholders
 # (Source-level test — _generate_world_base no longer references those literals.)
 # ---------------------------------------------------------------------------
