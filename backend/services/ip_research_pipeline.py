@@ -26,11 +26,11 @@ from schemas.ip_knowledge_pack import (
     IPKnowledgePack, IPCharacter, IPPlace, IPFaction, IPObject, IPEvent, FidelityMode,
     IPTimelineEntry,
 )
-
-_TModel = TypeVar("_TModel", bound=BaseModel)
 from schemas.research_pack import Passage
 from services.ip_pack_extractors.grok_search import fetch_via_grok_search
 from services.ip_recognizer import IPRecognition
+
+_TModel = TypeVar("_TModel", bound=BaseModel)
 
 logger = structlog.get_logger()
 
@@ -187,6 +187,7 @@ def _safe_build_list(
                 ip_name=ip_name, field=field, reason="not_a_dict",
             )
             continue
+        item = _prep_source_passage_ids(item)
         try:
             out.append(cls(**item))
         except Exception as exc:  # noqa: BLE001
@@ -195,6 +196,30 @@ def _safe_build_list(
                 ip_name=ip_name, field=field, error=str(exc),
             )
     return out
+
+
+def _coerce_source_ids(value: Any) -> list[str]:
+    """Coerce LLM source_passage_ids drift (ints / scalar) into list[str]."""
+    if value is None:
+        return []
+    raw_items = value if isinstance(value, list) else [value]
+    out: list[str] = []
+    for raw in raw_items:
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        if s:
+            out.append(s)
+    return out
+
+
+def _prep_source_passage_ids(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy with source_passage_ids normalized for Pydantic models."""
+    if "source_passage_ids" not in item:
+        return item
+    copied = dict(item)
+    copied["source_passage_ids"] = _coerce_source_ids(copied.get("source_passage_ids"))
+    return copied
 
 
 def _coerce_str_list(items: Any) -> list[str]:

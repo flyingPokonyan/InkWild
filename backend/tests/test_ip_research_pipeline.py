@@ -5,7 +5,6 @@ import pytest
 from unittest.mock import AsyncMock
 
 from schemas.ip_knowledge_pack import IPCharacter, IPKnowledgePack
-from schemas.research_pack import Passage
 from services.ip_recognizer import IPRecognition
 from services.ip_research_pipeline import (
     build_ip_knowledge_pack,
@@ -204,6 +203,27 @@ def test_prep_char_dicts_fills_missing_must_have():
     from services.ip_research_pipeline import _prep_char_dicts
     out = _prep_char_dicts([{"name": "温实初", "role_in_story": "挚友"}])
     assert out[0]["must_have"] is False  # 漏 must_have 不再被整条丢掉
+
+
+def test_safe_build_list_coerces_numeric_source_passage_ids():
+    from services.ip_research_pipeline import _safe_build_list
+
+    chars = _safe_build_list(
+        IPCharacter,
+        [{
+            "name": "Harry Potter",
+            "role_in_story": "主角",
+            "relation_to_protagonist": "本人",
+            "traits": [],
+            "must_have": True,
+            "source_passage_ids": [0, 1, "p_grok_abc"],
+        }],
+        ip_name="哈利·波特",
+        field="characters",
+    )
+
+    assert len(chars) == 1
+    assert chars[0].source_passage_ids == ["0", "1", "p_grok_abc"]
 
 
 @pytest.mark.asyncio
