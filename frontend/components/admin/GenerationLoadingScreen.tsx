@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * 创作工坊 AI 生成长任务（30s–2min）—— 世界生成 / 剧本生成 / 重新生成 共用。
+ * 创作工坊 AI 生成长任务（原创世界数分钟 · IP 复刻世界约 10–20min，主要耗在 ip_research
+ *   与 images 两步）—— 世界生成 / 剧本生成 / 重新生成 共用。
  *
  * 视觉：黑底 + 中央径向呼吸光 + edge vignette；3 行文字 + 8px 暖金脉冲圆 + 1px 真进度条。
  * 数据：完全走 buildAdminLoadingSnapshot + computeWeightedProgress（真实 backend SSE phase 流）。
@@ -15,12 +16,16 @@
  *   · 按钮 "返回" / "重试"（不写"返回调整 / 再试一次"）
  */
 
-import type { ReactNode } from "react";
+import { useMemo, useRef, type ReactNode } from "react";
 
 import { AmbientAura } from "@/components/choice/AmbientAura";
 import { LoadingPulse } from "@/components/ui/LoadingPulse";
 import type { AdminPhaseEntry } from "@/lib/admin-progress-state";
-import { buildAdminLoadingSnapshot, computeWeightedProgress } from "@/lib/admin-progress-view";
+import {
+  buildAdminLoadingSnapshot,
+  computeWeightedProgress,
+  EXPECTED_PHASE_SECONDS,
+} from "@/lib/admin-progress-view";
 import {
   formatStageLine,
   STAGE_LIST,
@@ -68,8 +73,27 @@ export function GenerationLoadingScreen({
   const snapshot = buildAdminLoadingSnapshot(phases);
   const current = snapshot.current;
 
+  // 阶段内时间插值：记录每个 phase 首次出现时的 elapsed，让长阶段（ip_research ~4min /
+  // images ~5min）里进度条随时间平缓爬升，而不是几十秒卡死到里程碑才猛跳。
+  const phaseStartRef = useRef<Record<string, number>>({});
+  for (const p of phases) {
+    if (phaseStartRef.current[p.phase] === undefined) phaseStartRef.current[p.phase] = elapsed;
+  }
+  const activePhase = useMemo(
+    () => [...phases].reverse().find((p) => p.status === "running")?.phase ?? null,
+    [phases],
+  );
+  const phaseFloors = useMemo(() => {
+    if (!activePhase) return undefined;
+    const expected = EXPECTED_PHASE_SECONDS[activePhase];
+    if (!expected) return undefined;
+    const inPhase = Math.max(0, elapsed - (phaseStartRef.current[activePhase] ?? elapsed));
+    // 缓到 0.9 封顶，真正的 completed 里程碑才推到 1（floor 与里程碑取 max，不回退）
+    return { [activePhase]: Math.min(0.9, inPhase / expected) };
+  }, [activePhase, elapsed]);
+
   const isDone = phases.length > 0 && phases.every((p) => p.status === "done" || p.status === "warning");
-  const progressPct = isDone ? 100 : computeWeightedProgress(phases);
+  const progressPct = isDone ? 100 : computeWeightedProgress(phases, phaseFloors ? { phaseFloors } : undefined);
 
   const contextLabel = subjectLabel ? `${operationLabel} · ${subjectLabel}` : operationLabel;
 

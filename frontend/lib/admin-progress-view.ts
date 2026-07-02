@@ -27,31 +27,46 @@ const PHASE_LABELS: Record<string, string> = {
   shared_events: "共享事件",
   relations_pack: "角色关系",
   events_data: "事件数据",
+  free_start_stages: "人生阶段",
   visual_brief: "视觉构思",
   // v2 script 新增
   script_visual_brief: "剧本视觉",
   script_images: "剧本配图",
 };
 
-// 世界生成阶段权重（v2 _STAGE_INDEX 顺序）。ip_research 仅 IP/复刻世界出现（原创即时跳过），
-// 它是最长的单步阶段之一，给足权重让进度条在那 3-4 分钟里真往前走而不是卡死。
+// 世界生成阶段权重（v2 _STAGE_INDEX 顺序）。**按真实耗时标定**（甄嬛传 IP 世界实测，见
+// EXPECTED_PHASE_SECONDS）：ip_research(~4.4min) + images(~4.6min) 合计占全程 ~82%，其余
+// 十来个阶段大多几秒到几十秒——所以这两步给绝对大头，别的给小头，进度条才不会"飞过廉价阶段、
+// 卡死在这两步"。ip_research 仅 IP/复刻世界出现（原创跳过，见 computeWeightedProgress 里
+// 的动态 totalWeight 剔除）。阶段内的长时间停顿由时间插值（phaseFloors）平滑，见组件。
 const WORLD_PHASE_WEIGHTS: Record<string, number> = {
   boot:             2,
-  ip_research:     10,
-  research_pack:    7,
-  world_base:       7,
-  lore_dimensions:  5,
-  character_roster: 5,
-  lore_pack:        9,
-  characters:      14,
-  shared_events:    7,
-  relations_pack:   2,
-  events_data:      9,
-  playable:         4,
-  critic:           8,
-  visual_brief:     4,
-  images:          14,
-  validating:       3,
+  ip_research:     40,
+  research_pack:    6,
+  world_base:       2,
+  lore_dimensions:  2,
+  character_roster: 2,
+  lore_pack:        4,
+  characters:       7,
+  shared_events:    3,
+  relations_pack:   1,
+  events_data:      3,
+  playable:         2,
+  free_start_stages: 2,
+  critic:           3,
+  visual_brief:     1,
+  images:          40,
+  validating:       1,
+};
+
+// 各阶段实测典型耗时（秒，世界生成）。仅用于"阶段内时间插值"——在长阶段里让进度条随时间
+// 平缓爬升，不再几十秒纹丝不动到里程碑猛跳。只列值得插值的较长阶段，其余太短无需插值。
+export const EXPECTED_PHASE_SECONDS: Record<string, number> = {
+  ip_research:  260,
+  images:       280,
+  characters:    45,
+  research_pack: 40,
+  lore_pack:     25,
 };
 
 // 剧本生成 8 阶段权重（v2 _SCRIPT_STAGE_INDEX 顺序），总和 100。
@@ -80,6 +95,7 @@ const WORLD_PHASE_ORDER = [
   "relations_pack",
   "events_data",
   "playable",
+  "free_start_stages",
   "critic",
   "visual_brief",
   "images",
@@ -177,6 +193,12 @@ const PHASE_CODE_PROGRESS: Record<string, Record<string, number>> = {
     started: 0.5,
     completed: 1,
   },
+  free_start_stages: {
+    started: 0.3,
+    pulse: 0.5,
+    completed: 1,
+    skipped: 1,
+  },
   events_data: {
     started: 0.2,
     subtask_completed: 0.65,
@@ -262,18 +284,35 @@ function isScriptPhase(phases: AdminPhaseEntry[]): boolean {
  * 根据当前 phases 计算加权进度百分比 (0–99)。
  *
  * 算法：
- * - 对每个已完成的 phase 累加其权重（done / warning）
- * - 对当前正在运行的 phase，按「该 phase 内部 tick 占 1/3」给半程估算
- * - 上限夹在 max_before_complete (99) 以避免 loading 消失前就到 100%
+ * - 对每个 phase 取其内部已达里程碑对应的 fraction（PHASE_CODE_PROGRESS，max 单调）
+ * - 权重按真实耗时标定（WORLD_PHASE_WEIGHTS）
+ * - `phaseFloors`：调用方给某 phase 设一个下限 fraction（阶段内时间插值用），与里程碑取 max
+ * - 原创世界跳过 ip_research：一旦进入 research_pack/world_base 而 ip_research 从未出现，
+ *   就把它从 totalWeight 里剔除，否则那 40 分权重会把进度条永久压到 ~60% 封顶
+ * - 上限夹在 99 以避免 loading 消失前就到 100%
  */
-export function computeWeightedProgress(phases: AdminPhaseEntry[]): number {
+export function computeWeightedProgress(
+  phases: AdminPhaseEntry[],
+  opts?: { phaseFloors?: Record<string, number> },
+): number {
   if (phases.length === 0) return 2;
 
   const isScript = isScriptPhase(phases);
   const weights = isScript ? SCRIPT_PHASE_WEIGHTS : WORLD_PHASE_WEIGHTS;
   const order = isScript ? SCRIPT_PHASE_ORDER : WORLD_PHASE_ORDER;
 
-  const totalWeight = order.reduce((sum, p) => sum + (weights[p] ?? 0), 0);
+  const present = new Set(phases.map((p) => p.phase));
+  // 原创世界：ip_research 在 research_pack/world_base 之前是严格顺序步（非并行），
+  // 所以"已进入 research_pack/world_base 但 ip_research 从未出现" = 确定跳过 → 剔除权重。
+  const ipResearchSkipped =
+    !isScript &&
+    !present.has("ip_research") &&
+    (present.has("research_pack") || present.has("world_base"));
+
+  const totalWeight = order.reduce((sum, p) => {
+    if (p === "ip_research" && ipResearchSkipped) return sum;
+    return sum + (weights[p] ?? 0);
+  }, 0);
   if (totalWeight === 0) return 2;
 
   const phaseProgress: Record<string, number> = {};
@@ -291,7 +330,16 @@ export function computeWeightedProgress(phases: AdminPhaseEntry[]): number {
     phaseProgress[entry.phase] = Math.min(1, nextProgress);
   }
 
+  // 阶段内时间插值下限：只作用于仍在跑的 phase（里程碑之间的长停顿靠它爬升）。
+  const floors = opts?.phaseFloors;
+  if (floors) {
+    for (const [phase, floor] of Object.entries(floors)) {
+      phaseProgress[phase] = Math.min(1, Math.max(phaseProgress[phase] ?? 0, floor));
+    }
+  }
+
   const weightedProgress = order.reduce((sum, phase) => {
+    if (phase === "ip_research" && ipResearchSkipped) return sum;
     return sum + (weights[phase] ?? 0) * (phaseProgress[phase] ?? 0);
   }, 0);
 
