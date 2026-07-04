@@ -10,6 +10,7 @@ import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { CurlHover } from "@/components/ui/CurlHover";
 import { Modal } from "@/components/ui/Modal";
+import { ModelChip, ModelIcon } from "@/components/ui/ModelChip";
 import { ProviderChip } from "@/components/ui/ProviderChip";
 import { Segmented } from "@/components/ui/Segmented";
 import { Select } from "@/components/ui/Select";
@@ -460,10 +461,7 @@ function ModelsTab({
             return (
               <tr key={m.id} data-disabled={!m.is_enabled || undefined}>
                 <td>
-                  <div style={{ fontWeight: 500 }}>{m.display_name}</div>
-                  <div className="mono dim" style={{ fontSize: 11, marginTop: 2 }}>
-                    {m.model_id}
-                  </div>
+                  <ModelChip modelId={m.model_id} displayName={m.display_name} />
                 </td>
                 <td><ProviderChip provider={m.provider} /></td>
                 <td>
@@ -614,6 +612,7 @@ function SlotsTab({ data }: { data: ModelDashboardResponse }) {
           .map((m) => ({
             value: m.id,
             label: m.display_name,
+            icon: <ModelIcon modelId={m.model_id} displayName={m.display_name} />,
             meta:
               m.model_kind === "image"
                 ? fmtPricePerImage(m.image_price_cents_per_image)
@@ -709,6 +708,7 @@ function SlotsTab({ data }: { data: ModelDashboardResponse }) {
                       bound ? (
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
                           <ProviderChip provider={bound.provider} withName={false} />
+                          <ModelIcon modelId={bound.model_id} displayName={bound.display_name} />
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {bound.display_name}
                           </span>

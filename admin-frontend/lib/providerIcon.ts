@@ -4,11 +4,17 @@
  * 没匹配上的 provider 在 UI 上回退到首字母 chip。
  */
 
-// 关键词 → icon 文件名（注意顺序：更具体的关键词先于通用的）
-const ICON_RULES: Array<[RegExp, string]> = [
+// provider/site 关键词 → icon 文件名（注意顺序：更具体的关键词先于通用的）
+const PROVIDER_SITE_ICON_RULES: Array<[RegExp, string]> = [
+  [/new[-\s]?api|newapi\.pokonyan\.com/i, "newapi.png"],
   [/opencode/i, "opencode.png"],
   [/jiuuij|joverna/i, "jiuuij.png"],
   [/gptimage\.pokonyan\.com|gptimage/i, "gptimage.ico"],
+];
+
+// model/vendor 关键词 → icon 文件名。Model 行用这一组，避免把 NewAPI 这类网关
+// 错当成模型品牌；Provider 行则先匹配网站图标，再退到这里。
+const MODEL_ICON_RULES: Array<[RegExp, string]> = [
   [/deepseek/i, "deepseek"],
   [/claude|anthropic/i, "claude"],
   [/(^|[^a-z])(gpt|openai|chatgpt|o\d|gpt-?image)/i, "openai"],
@@ -29,6 +35,8 @@ const ICON_RULES: Array<[RegExp, string]> = [
   [/google/i, "google"],
 ];
 
+const PROVIDER_ICON_RULES = [...PROVIDER_SITE_ICON_RULES, ...MODEL_ICON_RULES];
+
 // provider_type 兜底（用户 provider 名字可能怪，但 type 是结构化的）
 const TYPE_FALLBACK: Record<string, string> = {
   xai: "grok",
@@ -41,14 +49,27 @@ export function resolveProviderIcon(
   name: string | null | undefined,
   providerType?: string | null,
 ): string | null {
-  const haystack = `${name || ""} ${providerType || ""}`;
-  for (const [pattern, file] of ICON_RULES) {
+  const haystack = name || "";
+  for (const [pattern, file] of PROVIDER_ICON_RULES) {
     if (pattern.test(haystack)) {
       return `/providers/${file.includes(".") ? file : `${file}.svg`}`;
     }
   }
   if (providerType && TYPE_FALLBACK[providerType]) {
     return `/providers/${TYPE_FALLBACK[providerType]}.svg`;
+  }
+  return null;
+}
+
+export function resolveModelIcon(
+  modelId: string | null | undefined,
+  displayName?: string | null,
+): string | null {
+  const haystack = `${modelId || ""} ${displayName || ""}`;
+  for (const [pattern, file] of MODEL_ICON_RULES) {
+    if (pattern.test(haystack)) {
+      return `/providers/${file.includes(".") ? file : `${file}.svg`}`;
+    }
   }
   return null;
 }

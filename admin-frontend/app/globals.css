@@ -675,6 +675,34 @@ input, select, textarea { font-family: inherit; font-size: inherit; color: inher
   color: var(--fg);
 }
 .prov-logo img { display: block; }
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.model-logo {
+  width: 22px;
+  height: 22px;
+}
+.model-copy {
+  display: inline-flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.model-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
 
 /* Notice / alert */
 .notice {

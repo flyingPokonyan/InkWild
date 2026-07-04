@@ -9,6 +9,7 @@ import { BreakdownBars } from "@/components/ui/BreakdownBars";
 import { Btn } from "@/components/ui/Btn";
 import { Card } from "@/components/ui/Card";
 import { KpiCard } from "@/components/ui/KpiCard";
+import { ModelChip } from "@/components/ui/ModelChip";
 import { Segmented } from "@/components/ui/Segmented";
 import { SpendBarChart } from "@/components/ui/SpendBarChart";
 import { apiFetch } from "@/lib/api";
@@ -294,10 +295,7 @@ function ModelBreakdownTable({
         {data.items.map((item) => (
           <tr key={`${item.provider}__${item.model_id}`}>
             <td>
-              <div style={{ fontWeight: 500 }}>{item.display_name}</div>
-              <div className="mono dim" style={{ fontSize: 11, marginTop: 2 }}>
-                {item.model_id}
-              </div>
+              <ModelChip modelId={item.model_id} displayName={item.display_name} />
             </td>
             <td className="dim">{item.provider}</td>
             <td className="num tabular">{(item.input_tokens / 1_000_000).toFixed(2)}</td>
