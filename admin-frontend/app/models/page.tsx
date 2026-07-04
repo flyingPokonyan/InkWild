@@ -463,7 +463,7 @@ function ModelsTab({
                 <td>
                   <ModelChip modelId={m.model_id} displayName={m.display_name} />
                 </td>
-                <td><ProviderChip provider={m.provider} /></td>
+                <td className="dim">{m.provider?.name || "—"}</td>
                 <td>
                   <Badge tone={m.model_kind === "text" ? "default" : "info"}>
                     {KIND_LABEL[m.model_kind]}
@@ -707,7 +707,6 @@ function SlotsTab({ data }: { data: ModelDashboardResponse }) {
                     renderValue={() =>
                       bound ? (
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
-                          <ProviderChip provider={bound.provider} withName={false} />
                           <ModelIcon modelId={bound.model_id} displayName={bound.display_name} />
                           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {bound.display_name}
