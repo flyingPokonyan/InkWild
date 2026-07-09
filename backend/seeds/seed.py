@@ -39,7 +39,7 @@ def _load_json(filename: str):
     return json.loads((SEED_DIR / filename).read_text(encoding="utf-8"))
 
 
-async def ensure_dev_user(session) -> str:
+async def ensure_dev_user(session, *, is_admin: bool = True) -> str:
     normalized_email = settings.dev_user_email.strip().lower()
     identity = (
         await session.execute(
@@ -55,13 +55,14 @@ async def ensure_dev_user(session) -> str:
         if user is not None:
             user.status = "active"
             user.nickname = user.nickname or "Pokonyan"
+            user.is_admin = user.is_admin or is_admin
         identity.email = normalized_email
         identity.credential_hash = settings.dev_user_password_hash
         identity.verified_at = identity.verified_at or utcnow()
         await session.flush()
         return str(user.id if user is not None else identity.user_id)
 
-    user = User(status="active", nickname="Pokonyan")
+    user = User(status="active", nickname="Pokonyan", is_admin=is_admin)
     session.add(user)
     await session.flush()
     session.add(
@@ -79,6 +80,20 @@ async def ensure_dev_user(session) -> str:
     return str(user.id)
 
 
+async def ensure_demo_owner(session) -> str:
+    admin_id = (
+        await session.execute(
+            select(User.id)
+            .where(User.is_admin.is_(True), User.status == "active")
+            .order_by(User.created_at)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if admin_id:
+        return str(admin_id)
+    return await ensure_dev_user(session, is_admin=True)
+
+
 async def seed_database(
     db_engine: AsyncEngine = engine,
     session_factory: async_sessionmaker = async_session,
@@ -88,7 +103,9 @@ async def seed_database(
             await connection.execute(text(f"DELETE FROM {table}"))
 
     async with session_factory() as session:
+        owner_id = await ensure_demo_owner(session)
         world_data = _load_json("world.json")
+        world_data["created_by_user_id"] = owner_id
         world = World(**world_data)
         session.add(world)
         await session.flush()
@@ -112,7 +129,6 @@ async def seed_database(
             session.add(Ending(world_id=world.id, **ending_data))
             await session.flush()
 
-        await ensure_dev_user(session)
         await session.commit()
         return str(world.id)
 

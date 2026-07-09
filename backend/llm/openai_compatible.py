@@ -232,13 +232,15 @@ class OpenAICompatibleImageProvider(ImageGenerator):
         if quality is None:
             from config import settings as _settings
             quality = getattr(_settings, "image_generation_quality", "high")
-        response = await self.client.images.generate(
-            model=self.model,
-            prompt=prompt,
-            size=_size_for_aspect_ratio(aspect_ratio),
-            quality=quality,
-            extra_body={"aspect_ratio": aspect_ratio, "resolution": resolution},
-        )
+        request = {
+            "model": self.model,
+            "prompt": prompt,
+            "size": _size_for_aspect_ratio(aspect_ratio),
+            "quality": quality,
+        }
+        if not self.model.startswith("gpt-image"):
+            request["extra_body"] = {"aspect_ratio": aspect_ratio, "resolution": resolution}
+        response = await self.client.images.generate(**request)
         data = response.data[0] if getattr(response, "data", None) else None
         if not data:
             return ImageResult(model=self.model)

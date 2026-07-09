@@ -53,6 +53,8 @@ backend/research/
 # Generated images are stored in OSS; keep only the directory placeholder.
 backend/static/images/*
 !backend/static/images/.gitkeep
+!backend/static/images/seeds/
+!backend/static/images/seeds/**
 /img.png
 
 # One-off production SQL patches may contain provider keys or live data.

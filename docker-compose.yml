@@ -36,6 +36,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/inkwild
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./backend/static/images:/app/static/images
     # 生产默认：迁移 + uvicorn（不带 --reload）。
     # 本地 dev 通过 docker-compose.dev.yml 覆盖。
     command: sh -c "pip install -q beautifulsoup4 lxml && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
