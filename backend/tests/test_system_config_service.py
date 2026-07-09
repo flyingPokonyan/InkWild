@@ -75,3 +75,29 @@ async def test_capped_without_batch_start_blocks(db):
     with pytest.raises(AppError) as ei:
         await svc.ensure_signup_allowed(db)
     assert ei.value.code == 40310
+
+
+async def test_runtime_config_updates_and_applies(db, monkeypatch):
+    from config import settings
+
+    monkeypatch.setattr(settings, "llm_global_concurrency", 1000)
+    monkeypatch.setattr(settings, "image_generation_concurrency", 6)
+
+    cfg = await svc.update_runtime_config(
+        db,
+        admin_id="a",
+        values={
+            "llm_global_concurrency": 12,
+            "image_generation_concurrency": 4,
+            "image_generation_quality": "AUTO",
+        },
+    )
+    await db.commit()
+
+    svc.apply_runtime_config(cfg)
+    status = await svc.runtime_config_status(db)
+    assert status["llm_global_concurrency"] == 12
+    assert status["image_generation_concurrency"] == 4
+    assert status["image_generation_quality"] == "auto"
+    assert settings.llm_global_concurrency == 12
+    assert settings.image_generation_concurrency == 4

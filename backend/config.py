@@ -179,6 +179,9 @@ class Settings(BaseSettings):
     # burst; calls above the cap queue rather than fail. 8 fits a single
     # mid-tier DeepSeek/xAI quota; bump in env if running a larger pool.
     llm_global_concurrency: int = 1000
+    # 创作工坊同时 active 的任务数（按用户/admin 维度）。DB-backed admin 配置会在
+    # 启动时覆盖这个 env 默认值。
+    generation_task_active_limit_per_user: int = 10
     # 单个 API key 被 429/限流命中后冷却多少秒再被轮询选中（见 llm/key_pool.py）。
     key_cooldown_seconds: float = 45.0
     # Research pack capacity limits — constraint on Tavily search results integration.
@@ -191,10 +194,18 @@ class Settings(BaseSettings):
     # Image generation quality — gpt-image-2 / openai-compatible providers
     # 接受 "low" | "medium" | "high" | "auto"。生产推荐 "high"，预览/测试可改 "medium"。
     image_generation_quality: str = "high"
+    # 单个世界/剧本生成任务内部的图片批量并发（原硬编码 6）。
+    image_generation_concurrency: int = 6
+    # 全站图片并发上限；0 = 不额外限流，仅受每任务 image_generation_concurrency 约束。
+    image_generation_global_concurrency: int = 0
     # Hard timeout for a single image generation attempt. The workshop image
     # ladder retries timeout/unknown failures above this layer, so keep one
     # attempt bounded enough that a stuck image cannot hold the whole batch.
     image_generation_timeout_seconds: float = 100.0
+    # 创作工坊文本子阶段内部并发。LLM router 的全局并发仍是最终安全阀。
+    lore_pack_concurrency: int = 4
+    character_batch_concurrency: int = 4
+    events_data_concurrency: int = 3
     # Workshop daily creation quotas — set to 0 to disable limit check (unlimited for admins via can_create bypass).
     workshop_world_generations_per_day: int = 2
     workshop_script_generations_per_day: int = 3

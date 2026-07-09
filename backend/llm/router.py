@@ -69,14 +69,17 @@ logger = structlog.get_logger()
 # event loop, not module-load time. Both stream_with_tools and stream_json
 # acquire this; the semaphore is released when the stream generator exits.
 _global_concurrency_sem: asyncio.Semaphore | None = None
+_global_concurrency_cap: int | None = None
 
 
 async def _acquire_global_concurrency_slot() -> asyncio.Semaphore:
-    global _global_concurrency_sem
-    if _global_concurrency_sem is None:
-        from config import settings
-        cap = max(1, int(getattr(settings, "llm_global_concurrency", 8)))
+    global _global_concurrency_cap, _global_concurrency_sem
+    from config import settings
+
+    cap = max(1, int(getattr(settings, "llm_global_concurrency", 8)))
+    if _global_concurrency_sem is None or _global_concurrency_cap != cap:
         _global_concurrency_sem = asyncio.Semaphore(cap)
+        _global_concurrency_cap = cap
     sem = _global_concurrency_sem
     await sem.acquire()
     return sem

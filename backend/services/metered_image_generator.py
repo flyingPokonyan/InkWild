@@ -9,12 +9,32 @@ metadata from the image provider itself.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from dataclasses import replace
 
 from llm.base import ImageGenerator, ImageResult
 from llm.usage_context import current_usage_accumulator, current_usage_context
 from services.usage_recorder import fire_and_forget_image_usage
+
+_image_global_concurrency_sem: asyncio.Semaphore | None = None
+_image_global_concurrency_cap: int | None = None
+
+
+async def _acquire_image_global_slot() -> asyncio.Semaphore | None:
+    """Optional process-wide image cap. 0 disables the extra global limiter."""
+    global _image_global_concurrency_cap, _image_global_concurrency_sem
+    from config import settings
+
+    cap = max(0, int(getattr(settings, "image_generation_global_concurrency", 0)))
+    if cap <= 0:
+        return None
+    if _image_global_concurrency_sem is None or _image_global_concurrency_cap != cap:
+        _image_global_concurrency_sem = asyncio.Semaphore(cap)
+        _image_global_concurrency_cap = cap
+    sem = _image_global_concurrency_sem
+    await sem.acquire()
+    return sem
 
 
 class MeteredImageGenerator(ImageGenerator):
@@ -41,9 +61,14 @@ class MeteredImageGenerator(ImageGenerator):
         aspect_ratio: str = "1:1",
         resolution: str = "1k",
     ) -> ImageResult:
-        result = await self._inner.generate_image(
-            prompt, aspect_ratio=aspect_ratio, resolution=resolution
-        )
+        sem = await _acquire_image_global_slot()
+        try:
+            result = await self._inner.generate_image(
+                prompt, aspect_ratio=aspect_ratio, resolution=resolution
+            )
+        finally:
+            if sem is not None:
+                sem.release()
         ctx = current_usage_context()
         if ctx is not None:
             # Image rows always bucket into ``image_gen`` regardless of

@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 
 TERMINAL_TASK_STATUSES = {"succeeded", "failed", "cancelled"}
 ACTIVE_GENERATION_TASK_STATUSES = ("pending", "running")
-MAX_ACTIVE_TASKS_PER_USER = 10  # TEMP: bumped from 2 for multi-compare parallel batch (2026-05-24)
+MAX_ACTIVE_TASKS_PER_USER = 10  # env/admin default; runtime reads settings below.
 # Backward-compat alias kept temporarily to avoid breaking any direct imports
 MAX_ACTIVE_GENERATION_TASKS_PER_ADMIN = MAX_ACTIVE_TASKS_PER_USER
 GENERATION_TASK_LIMIT_RETRY_AFTER_SECONDS = 30
@@ -40,11 +40,17 @@ PHASE_B = "phase_b"
 
 
 class GenerationTaskLimitExceeded(Exception):
-    def __init__(self, *, active_count: int):
+    def __init__(self, *, active_count: int, limit: int):
         super().__init__("generation task limit exceeded")
         self.active_count = active_count
-        self.limit = MAX_ACTIVE_TASKS_PER_USER
+        self.limit = limit
         self.retry_after_seconds = GENERATION_TASK_LIMIT_RETRY_AFTER_SECONDS
+
+
+def _active_task_limit_per_user() -> int:
+    from config import settings
+
+    return max(1, int(getattr(settings, "generation_task_active_limit_per_user", MAX_ACTIVE_TASKS_PER_USER)))
 
 
 def _can_wrap_v2(base_agent: Any) -> bool:
@@ -285,8 +291,9 @@ class GenerationTaskService:
                 )
             )
         ).scalar_one()
-        if active_count >= MAX_ACTIVE_TASKS_PER_USER:
-            raise GenerationTaskLimitExceeded(active_count=active_count)
+        limit = _active_task_limit_per_user()
+        if active_count >= limit:
+            raise GenerationTaskLimitExceeded(active_count=active_count, limit=limit)
 
     async def _reap_stale_tasks(self, session: AsyncSession, *, user_id: str) -> int:
         """Mark zombie tasks as failed. Returns count of reaped tasks.

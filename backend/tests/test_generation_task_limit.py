@@ -3,6 +3,7 @@ import uuid
 import pytest
 
 from api import admin as admin_api
+from config import settings
 from models.generation_task import GenerationTask
 from models.user import User
 from services.generation_task_service import GenerationTaskLimitExceeded, GenerationTaskService
@@ -33,7 +34,10 @@ def _service(test_session_factory) -> GenerationTaskService:
 
 
 @pytest.mark.asyncio
-async def test_generation_task_limit_counts_active_tasks_for_current_admin(db, test_session_factory):
+async def test_generation_task_limit_counts_active_tasks_for_current_admin(
+    db, test_session_factory, monkeypatch
+):
+    monkeypatch.setattr(settings, "generation_task_active_limit_per_user", 2)
     admin = User(nickname="admin", is_admin=True)
     other_admin = User(nickname="other", is_admin=True)
     db.add_all([admin, other_admin])
@@ -58,7 +62,10 @@ async def test_generation_task_limit_counts_active_tasks_for_current_admin(db, t
 
 
 @pytest.mark.asyncio
-async def test_generation_task_limit_allows_less_than_two_active_tasks(db, test_session_factory):
+async def test_generation_task_limit_allows_less_than_configured_active_tasks(
+    db, test_session_factory, monkeypatch
+):
+    monkeypatch.setattr(settings, "generation_task_active_limit_per_user", 2)
     admin = User(nickname="admin", is_admin=True)
     db.add(admin)
     await db.flush()

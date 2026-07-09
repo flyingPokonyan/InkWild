@@ -35,6 +35,7 @@ from database import async_session
 from middleware.error_handler import ErrorHandlerMiddleware
 from middleware.logging import LoggingMiddleware
 from sentry_config import init_sentry
+from services import system_config_service
 from services.model_management import ensure_default_model_management_state
 
 logger = logging.getLogger(__name__)
@@ -64,9 +65,11 @@ async def _credit_sweep_loop() -> None:
 async def lifespan(_: FastAPI):
     try:
         async with async_session() as session:
+            await system_config_service.load_runtime_config(session)
             await ensure_default_model_management_state(session)
+            await session.commit()
     except Exception:  # noqa: BLE001
-        logger.warning("model_management_bootstrap_failed", exc_info=True)
+        logger.warning("app_bootstrap_failed", exc_info=True)
     sweep_task = asyncio.create_task(_credit_sweep_loop())
     try:
         yield

@@ -104,6 +104,26 @@ def _image_attempt_timeout_s() -> float:
     return max(float(getattr(settings, "image_generation_timeout_seconds", 100.0)), 0.001)
 
 
+def _positive_int_setting(name: str, default: int) -> int:
+    return max(1, int(getattr(settings, name, default)))
+
+
+def _image_generation_concurrency() -> int:
+    return _positive_int_setting("image_generation_concurrency", 6)
+
+
+def _lore_pack_concurrency() -> int:
+    return _positive_int_setting("lore_pack_concurrency", 4)
+
+
+def _character_batch_concurrency() -> int:
+    return _positive_int_setting("character_batch_concurrency", 4)
+
+
+def _events_data_concurrency() -> int:
+    return _positive_int_setting("events_data_concurrency", 3)
+
+
 def _image_retry_deadline_s(max_attempts: int = _IMAGE_GENERATION_MAX_ATTEMPTS) -> float:
     attempts = max(max_attempts, 1)
     backoff_total = sum(_IMAGE_RETRY_BACKOFFS[: max(attempts - 1, 0)])
@@ -1726,7 +1746,7 @@ class WorldCreatorAgentV2:
                     ip_canon=ip_canon,
                     passages=research_pack.passages,
                     llm_router=self.llm,
-                    concurrency=4,
+                    concurrency=_lore_pack_concurrency(),
                 ),
                 max_attempts=3,
                 on_retry=self._make_retry_logger("lore_pack"),
@@ -1802,7 +1822,7 @@ class WorldCreatorAgentV2:
                     passages=research_pack.passages,
                     llm_router=self.llm,
                     batch_size=6,
-                    concurrency=4,
+                    concurrency=_character_batch_concurrency(),
                     ip_pack=self._last_ip_pack,
                     fidelity_mode=self._fidelity_mode,
                 ),
@@ -1981,7 +2001,7 @@ class WorldCreatorAgentV2:
                     llm_router=self.llm,
                     target_count=target_count,
                     batch_size=5,
-                    concurrency=3,
+                    concurrency=_events_data_concurrency(),
                 ),
                 max_attempts=3,
                 on_retry=self._make_retry_logger("events_data"),
@@ -2678,7 +2698,7 @@ class WorldCreatorAgentV2:
             portrait_tasks.append((f"npc:{char.name}", [prompt], "2:3", "characters"))
 
         image_storage = get_image_storage()
-        semaphore = asyncio.Semaphore(6)
+        semaphore = asyncio.Semaphore(_image_generation_concurrency())
 
         async def gen_image(key, prompt_tiers, aspect_ratio, category):
             if not prompt_tiers:

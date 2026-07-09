@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dependencies import get_current_admin_user, get_db
 from models.user import User
-from schemas.system_config import SignupConfigUpdateIn, SignupStatusOut
+from schemas.system_config import (
+    RuntimeConfigOut,
+    RuntimeConfigUpdateIn,
+    SignupConfigUpdateIn,
+    SignupStatusOut,
+)
 from services import system_config_service as svc
 from services.audit_service import record_admin_action
 
@@ -64,3 +69,41 @@ async def update_signup_config(
     await db.commit()
     status = await svc.signup_status(db)
     return _ok(SignupStatusOut.model_validate(status).model_dump(mode="json"))
+
+
+@router.get("/system/runtime")
+async def get_runtime_config(
+    admin: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    status = await svc.runtime_config_status(db)
+    return _ok(RuntimeConfigOut.model_validate(status).model_dump(mode="json"))
+
+
+@router.put("/system/runtime")
+async def update_runtime_config(
+    payload: RuntimeConfigUpdateIn,
+    request: Request,
+    admin: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    values = payload.model_dump(exclude_none=True)
+    cfg = await svc.update_runtime_config(
+        db,
+        admin_id=admin.id,
+        values=values,
+    )
+    await record_admin_action(
+        db,
+        admin_user=admin,
+        action="system.runtime.update",
+        resource_type="system_config",
+        resource_id="runtime",
+        payload=values,
+        ip_address=_client_ip(request),
+        user_agent=_ua(request),
+    )
+    await db.commit()
+    svc.apply_runtime_config(cfg)
+    status = await svc.runtime_config_status(db)
+    return _ok(RuntimeConfigOut.model_validate(status).model_dump(mode="json"))

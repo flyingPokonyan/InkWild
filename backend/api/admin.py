@@ -65,7 +65,7 @@ def _generation_task_limit_error(exc: GenerationTaskLimitExceeded) -> HTTPExcept
         status_code=429,
         detail={
             "code": "GENERATION_TASK_LIMIT_EXCEEDED",
-            "message": "当前管理员已有 2 个生成任务在运行，请稍后再试",
+            "message": f"当前管理员已有 {exc.active_count} 个生成任务在运行（上限 {exc.limit}），请稍后再试",
             "limit": exc.limit,
             "active_count": exc.active_count,
         },
