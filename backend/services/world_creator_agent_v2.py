@@ -1007,7 +1007,7 @@ class WorldCreatorAgentV2:
             yield ev
 
         # ---- Stage I: images (1 hero @21:9 + N portraits @2:3 + server-cropped 3:2 cover) ----
-        async for ev in self._run_images(working_payload, characters):
+        async for ev in self._run_images(working_payload, characters, all_warnings):
             yield ev
 
         # ---- Stage J: validating ----
@@ -2679,6 +2679,7 @@ class WorldCreatorAgentV2:
         self,
         payload: dict,
         characters: list[Character],
+        all_warnings: list[str] | None = None,
     ) -> AsyncIterator[dict]:
         """Stage I: 真实图片生成（hero 21:9 + is_image_target NPC 2:3 头像 + 服务端裁剪 3:2 cover）。
 
@@ -2863,6 +2864,25 @@ class WorldCreatorAgentV2:
         }
 
         placeholder_count = sum(1 for k, (u, _) in results.items() if u == IMAGE_PLACEHOLDER_URL)
+        # Surface failed images as quality warnings — otherwise validating
+        # reports "一切正常" while avatars silently sit on placeholders and
+        # nobody knows which ones need a manual regen in the draft editor.
+        if all_warnings is not None:
+            failed_labels = []
+            if hero_url == IMAGE_PLACEHOLDER_URL:
+                failed_labels.append("Hero 主图")
+            if cover_url == IMAGE_PLACEHOLDER_URL:
+                failed_labels.append("列表封面")
+            failed_labels.extend(
+                f"{c.name} 头像"
+                for c in target_chars
+                if results.get(f"npc:{c.name}", (IMAGE_PLACEHOLDER_URL, None))[0]
+                == IMAGE_PLACEHOLDER_URL
+            )
+            all_warnings.extend(
+                f"[image_placeholder] 「{label}」多次生成失败，已用占位图，可在草稿编辑器单独重绘"
+                for label in failed_labels
+            )
         hero_real = 1 if hero_url != IMAGE_PLACEHOLDER_URL else 0
         cover_real = 1 if cover_url != IMAGE_PLACEHOLDER_URL else 0
         avatar_real = sum(
@@ -3545,6 +3565,10 @@ class WorldCreatorAgentV2:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("script_cover_failed", error=str(exc))
+            if script_cover_url == IMAGE_PLACEHOLDER_URL:
+                all_warnings.append(
+                    "[image_placeholder] 「剧本封面」多次生成失败，已用占位图，可在草稿编辑器单独重绘"
+                )
 
             # Ending cards — one per ending. Failures leave the URL NULL so
             # the front-end falls back to text-only ending display (Q6 decision).
