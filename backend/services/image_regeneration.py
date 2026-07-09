@@ -70,6 +70,8 @@ def _world_data_from_payload(payload: dict) -> dict:
         "era": (payload.get("era") or "").strip(),
         "description": (payload.get("description") or "").strip(),
         "research_summary": research_summary,
+        "visual_style": payload.get("visual_style") if isinstance(payload.get("visual_style"), dict) else None,
+        "lore_pack": payload.get("lore_pack") if isinstance(payload.get("lore_pack"), dict) else None,
     }
 
 
@@ -186,6 +188,8 @@ async def build_script_draft_image_prompt(
         "genre": (getattr(world, "genre", "") or "").strip(),
         "era": (getattr(world, "era", "") or "").strip(),
         "description": (world.description or "").strip(),
+        "lore_pack": world.lore_pack if isinstance(world.lore_pack, dict) else None,
+        "visual_style": (world.lore_pack or {}).get("visual_style") if isinstance(world.lore_pack, dict) else None,
     }
     pack = (
         (
@@ -347,6 +351,8 @@ async def regenerate_script_draft_image(
         "genre": (getattr(world, "genre", "") or "").strip(),
         "era": (getattr(world, "era", "") or "").strip(),
         "description": (world.description or "").strip(),
+        "lore_pack": world.lore_pack if isinstance(world.lore_pack, dict) else None,
+        "visual_style": (world.lore_pack or {}).get("visual_style") if isinstance(world.lore_pack, dict) else None,
     }
     # The parent world is published, so its IP pack (if any) lives under world_id.
     pack = (

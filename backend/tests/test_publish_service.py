@@ -231,6 +231,12 @@ async def test_publish_world_draft_writes_v2_jsonb_fields(db, sample_user):
     payload["events_data"] = [{"id": "evt_1", "summary": "test event"}]
     payload["shared_events"] = [{"id": "se_1", "title": "shared event"}]
     payload["lore_pack"] = {"timeline": [{"year": 2020, "note": "x"}]}
+    payload["visual_style"] = {
+        "version": 1,
+        "genre_category": "古风宫廷",
+        "culture": "中式古典",
+        "art_style": "古籍绣像",
+    }
     draft = WorldDraft(payload=payload, created_by_user_id=sample_user.id)
     db.add(draft)
     await db.commit()
@@ -240,7 +246,15 @@ async def test_publish_world_draft_writes_v2_jsonb_fields(db, sample_user):
 
     assert world.events_data == [{"id": "evt_1", "summary": "test event"}]
     assert world.shared_events == [{"id": "se_1", "title": "shared event"}]
-    assert world.lore_pack == {"timeline": [{"year": 2020, "note": "x"}]}
+    assert world.lore_pack == {
+        "timeline": [{"year": 2020, "note": "x"}],
+        "visual_style": {
+            "version": 1,
+            "genre_category": "古风宫廷",
+            "culture": "中式古典",
+            "art_style": "古籍绣像",
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -726,6 +740,21 @@ def test_normalize_world_payload_preserves_voice_style():
     assert by_name["苏无名"]["voice_style"] == "VS-A"
     assert by_name["卢凌风"]["voice_style"] == "VS-B"
     assert by_name["苏无名"]["avatar"] == "http://oss/su.png"  # avatar 注入未受影响
+
+
+@pytest.mark.no_db
+def test_normalize_world_payload_preserves_visual_style():
+    payload = {
+        "name": "甄嬛传",
+        "visual_style": {
+            "version": 1,
+            "genre_category": "古风宫廷",
+            "culture": "中式古典",
+            "art_style": "古籍绣像",
+        },
+    }
+    out = normalize_world_payload(payload)
+    assert out["visual_style"]["art_style"] == "古籍绣像"
 
 
 @pytest.mark.no_db

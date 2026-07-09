@@ -8,6 +8,7 @@ from services.cover_brief import (
     ART_STYLE_FALLBACK,
     GENRE_STYLE_POOL,
     STYLE_DESC,
+    filtered_style_pool,
     CharacterCoverBrief,
     CoverBrief,
     EndingCoverBrief,
@@ -19,6 +20,7 @@ from services.cover_brief import (
     derive_character_reference_anchor,
     pick_art_style,
     resolve_style_desc,
+    style_allowed_for_culture,
 )
 
 
@@ -74,6 +76,42 @@ def test_pick_spreads_same_genre():
 def test_pick_unknown_category_uses_other_pool():
     assert pick_art_style("不存在的大类", "某世界") in GENRE_STYLE_POOL["其他"]
     assert pick_art_style("", "某世界") in GENRE_STYLE_POOL["其他"]
+
+
+def test_zhenhuan_hash_lands_on_chinese_xiuxiang():
+    """Regression for the palace-world western-engraving mismatch."""
+    assert pick_art_style("古风宫廷", "甄嬛传", culture="中式古典") == "古籍绣像"
+
+
+def test_culture_filter_removes_western_styles_for_chinese_mystery():
+    pool = filtered_style_pool("悬疑推理", "中式古典")
+    assert "古籍绣像" in pool
+    assert "铜版木刻" not in pool
+    assert "新艺术装饰" not in pool
+    assert "浮世绘" not in pool
+
+
+def test_style_allowed_for_culture_keeps_neutral_styles():
+    assert style_allowed_for_culture("钢笔线描", "中式古典")
+    assert style_allowed_for_culture("水彩淡彩", "西方古典")
+    assert not style_allowed_for_culture("浮世绘", "中式古典")
+    assert not style_allowed_for_culture("工笔重彩", "现代中性")
+
+
+def test_weighted_pick_cannot_bypass_culture_filter():
+    style = pick_art_style(
+        "古风宫廷",
+        "中式宫斗测试",
+        culture="中式古典",
+        style_scores=[
+            {"style": "浮世绘", "score": 1.0},
+            {"style": "铜版木刻", "score": 0.99},
+            {"style": "古籍绣像", "score": 0.9},
+        ],
+    )
+    assert style != "浮世绘"
+    assert style != "铜版木刻"
+    assert style in filtered_style_pool("古风宫廷", "中式古典")
 
 
 # --- resolve_style_desc fallback ---

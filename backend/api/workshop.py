@@ -12,7 +12,9 @@ import asyncio
 import base64
 import json
 import re
+from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -50,7 +52,7 @@ from services.image_regeneration import (
     regenerate_script_draft_image,
     regenerate_world_draft_image,
 )
-from services.image_storage import get_image_storage, make_image_key
+from services.image_storage import IMAGE_PLACEHOLDER_URL, get_image_storage, make_image_key
 from services.quota_service import QuotaExceeded, consume_world_generation_quota, consume_script_generation_quota
 from services.publish_service import (
     normalize_world_payload as _normalize_world_payload,
@@ -92,6 +94,49 @@ def _ownership_filter(query, model_cls, user: User):
     if user.is_admin:
         return query
     return query.where(model_cls.created_by_user_id == user.id)
+
+
+def _prefer_draft_image(draft_image: str, current_image: str) -> str:
+    draft_image = (draft_image or "").strip()
+    if not draft_image or draft_image == IMAGE_PLACEHOLDER_URL:
+        return current_image
+    return draft_image
+
+
+def _existing_workshop_image_url(url: str) -> str:
+    url = (url or "").strip()
+    if not url or url == IMAGE_PLACEHOLDER_URL:
+        return ""
+    static_prefix = "/static/images/"
+    if url.startswith(static_prefix):
+        relative_path = unquote(url[len(static_prefix):]).lstrip("/")
+        if not (Path(settings.image_storage_dir) / relative_path).is_file():
+            return ""
+    return url
+
+
+def _normalize_workshop_image_fields(images: dict[str, str]) -> dict[str, str]:
+    cover = _existing_workshop_image_url(images["cover_image"])
+    hero = _existing_workshop_image_url(images["hero_image"])
+    if not cover:
+        cover = hero
+    if not hero:
+        hero = cover
+    return {"cover_image": cover, "hero_image": hero}
+
+
+def _world_payload_for_response(payload: dict | None) -> dict:
+    data = dict(payload or {})
+    images = _normalize_workshop_image_fields(resolve_world_image_fields_from_mapping(data))
+    data["cover_image"] = images["cover_image"]
+    data["hero_image"] = images["hero_image"]
+    return data
+
+
+def _script_payload_for_response(payload: dict | None) -> dict:
+    data = dict(payload or {})
+    data["cover_image"] = _existing_workshop_image_url(data.get("cover_image", ""))
+    return data
 
 
 def _assert_owner(obj, user: User, label: str = "resource") -> None:
@@ -261,7 +306,7 @@ def _world_draft_detail(
     return {
         "id": str(draft.id),
         "world_id": str(draft.world_id) if draft.world_id else None,
-        "payload": draft.payload,
+        "payload": _world_payload_for_response(draft.payload),
         "updated_at": serialize_utc_datetime(draft.updated_at),
         "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
@@ -295,7 +340,7 @@ def _script_draft_detail(
         "id": str(draft.id),
         "world_id": str(draft.world_id),
         "script_id": str(draft.script_id) if draft.script_id else None,
-        "payload": draft.payload,
+        "payload": _script_payload_for_response(draft.payload),
         # 该剧本所属世界的全部可玩角色，编辑器据此渲染可玩角色多选清单。
         "world_playable_characters": world_playable_characters or [],
         "updated_at": serialize_utc_datetime(draft.updated_at),
@@ -920,6 +965,14 @@ async def list_workshop_worlds(
     published_items = []
     for world in worlds:
         images = resolve_world_image_fields_from_model(world)
+        draft = draft_by_world_id.get(world.id)
+        if draft:
+            draft_images = resolve_world_image_fields_from_mapping(draft.payload)
+            images = {
+                "cover_image": _prefer_draft_image(draft_images["cover_image"], images["cover_image"]),
+                "hero_image": _prefer_draft_image(draft_images["hero_image"], images["hero_image"]),
+            }
+        images = _normalize_workshop_image_fields(images)
         published_items.append({
             "id": str(world.id),
             "name": world.name,
@@ -931,13 +984,13 @@ async def list_workshop_worlds(
             "status": world.status,
             # owner-only actions (publish / withdraw / edit) are gated on this
             "is_owner": str(world.created_by_user_id) == str(user.id),
-            "has_draft": world.id in draft_by_world_id,
-            "draft_id": str(draft_by_world_id[world.id].id) if world.id in draft_by_world_id else None,
+            "has_draft": draft is not None,
+            "draft_id": str(draft.id) if draft else None,
             "review_status": (
-                draft_by_world_id[world.id].review_status if world.id in draft_by_world_id else "editing"
+                draft.review_status if draft else "editing"
             ),
             "review_note": (
-                draft_by_world_id[world.id].review_note if world.id in draft_by_world_id else None
+                draft.review_note if draft else None
             ),
             "script_count": script_count_by_world.get(world.id, 0),
         })
@@ -945,6 +998,7 @@ async def list_workshop_worlds(
     draft_items = []
     for draft in new_drafts:
         images = resolve_world_image_fields_from_mapping(draft.payload)
+        images = _normalize_workshop_image_fields(images)
         latest_task = latest_task_by_draft.get(str(draft.id))
         draft_items.append({
             "id": str(draft.id),

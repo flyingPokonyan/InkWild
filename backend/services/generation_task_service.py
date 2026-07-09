@@ -1022,6 +1022,7 @@ class GenerationTaskService:
             "existing_scripts": [_script_reference_summary_from_model(script) for script in existing_scripts],
             # v2 fields — may be None for older worlds; create_script handles None gracefully
             "lore_pack": world.lore_pack,
+            "visual_style": (world.lore_pack or {}).get("visual_style") if isinstance(world.lore_pack, dict) else None,
             "shared_events": world.shared_events,
             "research_pack": None,  # v1 worlds don't store research_pack; script v2 re-runs research
         }

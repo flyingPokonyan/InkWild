@@ -716,6 +716,111 @@ def _apply_patches(stack, patches):
         stack.enter_context(p)
 
 
+class _SequencedTextLLM:
+    def __init__(self, outputs: list[dict]):
+        self.outputs = [json.dumps(output, ensure_ascii=False) for output in outputs]
+
+    async def stream_with_tools(self, **_kwargs):
+        if not self.outputs:
+            raise AssertionError("LLM called more times than expected")
+        yield {"type": "text_delta", "text": self.outputs.pop(0)}
+
+
+def _stage_payload(label: str) -> dict:
+    return {
+        "has_arc": True,
+        "stages": [
+            {
+                "milestone": f"{label}一段",
+                "subtitle": "入局",
+                "tagline": "从这里开始",
+                "start_location": "靖安司",
+                "opening_framing": "你已经入局。",
+                "known_relations": [],
+            },
+            {
+                "milestone": f"{label}二段",
+                "subtitle": "推进",
+                "tagline": "局势升级",
+                "start_location": "靖安司",
+                "opening_framing": "局势已经升级。",
+                "known_relations": [],
+            },
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_free_start_stages_prioritizes_primary_playable_characters():
+    """Regression: top playable protagonists must be attempted before LLM-selected arc fillers."""
+    from schemas.character_v2 import Character
+
+    fake_llm = _SequencedTextLLM([
+        {"arc_characters": ["元载", "龙波"]},
+        _stage_payload("张小敬"),
+        _stage_payload("李必"),
+        _stage_payload("徐宾"),
+    ])
+    agent = WorldCreatorAgentV2(llm=fake_llm, image_gen=None, broker=None)
+    characters = [
+        Character(name="张小敬", role_tag="主角", personality="死囚入局", initial_location="靖安司"),
+        Character(name="李必", role_tag="主角", personality="靖安司少令", initial_location="靖安司"),
+        Character(name="徐宾", role_tag="核心", personality="算学档案", initial_location="靖安司"),
+        Character(name="元载", role_tag="权臣", personality="官场上行", initial_location="大理寺"),
+        Character(name="龙波", role_tag="反派", personality="复仇", initial_location="怀远坊"),
+    ]
+    playable = [
+        {"name": "张小敬", "role_tag": "戴罪追凶", "description": "死囚入局"},
+        {"name": "李必", "role_tag": "靖安司少令", "description": "坐镇靖安司"},
+        {"name": "徐宾", "role_tag": "算学档案", "description": "档案枢纽"},
+        {"name": "元载", "role_tag": "大理寺官员", "description": "官场上行"},
+        {"name": "龙波", "role_tag": "狼卫首领", "description": "复仇"},
+    ]
+
+    events = []
+    async for event in agent._run_free_start_stages(
+        "长安十二时辰", "历史悬疑", "唐朝", characters, playable,
+        [{"name": "靖安司"}, {"name": "大理寺"}, {"name": "怀远坊"}],
+    ):
+        events.append(event)
+
+    assert agent._last_free_start_stages is not None
+    names = [entry["character_name"] for entry in agent._last_free_start_stages["characters"]]
+    assert names == ["张小敬", "李必", "徐宾"]
+    assert "元载" not in names
+    assert "龙波" not in names
+    assert not [e for e in events if e.get("type") == "warning"]
+
+
+@pytest.mark.asyncio
+async def test_free_start_stages_warns_when_primary_character_missing():
+    from schemas.character_v2 import Character
+
+    fake_llm = _SequencedTextLLM([
+        {"arc_characters": []},
+        {"has_arc": False, "stages": []},
+        {"has_arc": False, "stages": []},
+    ])
+    agent = WorldCreatorAgentV2(llm=fake_llm, image_gen=None, broker=None)
+    characters = [
+        Character(name="张小敬", role_tag="主角", personality="死囚入局", initial_location="靖安司"),
+    ]
+    playable = [{"name": "张小敬", "role_tag": "戴罪追凶", "description": "死囚入局"}]
+
+    events = []
+    async for event in agent._run_free_start_stages(
+        "长安十二时辰", "历史悬疑", "唐朝", characters, playable, [{"name": "靖安司"}],
+    ):
+        events.append(event)
+
+    warnings = [
+        e for e in events
+        if e.get("type") == "warning" and e.get("code") == "primary_character_missing"
+    ]
+    assert warnings
+    assert warnings[0]["meta"]["missing_primary"] == ["张小敬"]
+
+
 @pytest.mark.asyncio
 async def test_images_stage_skips_when_no_image_gen():
     """image_gen=None → 所有图片用 placeholder，不调外部服务，流程不中断。"""

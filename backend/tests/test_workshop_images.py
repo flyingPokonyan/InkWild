@@ -119,7 +119,7 @@ async def test_regenerate_world_image_rejects_non_owner(client, db):
 async def test_regenerate_world_image_happy_path(client, db, monkeypatch):
     import api.workshop as workshop
 
-    async def _fake_regen(db_, draft_, *, target, hint, llm_router, image_gen):
+    async def _fake_regen(db_, draft_, *, target, hint, prompt, llm_router, image_gen):
         assert target == "cover"
         return "https://oss.test/worlds/cover/new.png"
 
@@ -153,7 +153,7 @@ async def test_regenerate_world_image_happy_path(client, db, monkeypatch):
 async def test_regenerate_world_avatar_persists_character_and_image_map(client, db, monkeypatch):
     import api.workshop as workshop
 
-    async def _fake_regen(db_, draft_, *, target, hint, llm_router, image_gen):
+    async def _fake_regen(db_, draft_, *, target, hint, prompt, llm_router, image_gen):
         assert target == "avatar:琼恩·雪诺"
         return "https://oss.test/characters/jon.png"
 
@@ -196,7 +196,7 @@ async def test_regenerate_world_avatar_persists_character_and_image_map(client, 
 async def test_regenerate_script_cover_persists_payload(client, db, monkeypatch):
     import api.workshop as workshop
 
-    async def _fake_regen(db_, draft_, *, hint, llm_router, image_gen):
+    async def _fake_regen(db_, draft_, *, hint, prompt, llm_router, image_gen):
         return "https://oss.test/scripts/cover/new.png"
 
     async def _fake_router(db_, slot):

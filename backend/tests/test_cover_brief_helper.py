@@ -228,6 +228,40 @@ async def test_world_cover_brief_handles_malformed_json():
     assert world_brief.world_name_english == ""
 
 
+@pytest.mark.asyncio
+async def test_world_cover_brief_reuses_persisted_visual_style():
+    llm = _FakeLLM("""{
+        "world_name_english": "Palace",
+        "genre_category": "古风宫廷",
+        "culture": "现代中性",
+        "style_scores": [
+            {"style": "水彩淡彩", "score": 0.95},
+            {"style": "古籍绣像", "score": 0.1}
+        ],
+        "characters": {}
+    }""")
+    world_brief, _ = await derive_world_cover_brief(
+        world_data={
+            "name": "甄嬛传",
+            "genre": "古装宫廷权谋",
+            "era": "清代",
+            "visual_style": {
+                "version": 1,
+                "genre_category": "古风宫廷",
+                "culture": "中式古典",
+                "art_style": "古籍绣像",
+            },
+        },
+        characters=[],
+        recognition=None,
+        ip_pack=None,
+        llm=llm,
+    )
+    assert world_brief.art_style == "古籍绣像"
+    assert world_brief.culture == "中式古典"
+    assert world_brief.genre_category == "古风宫廷"
+
+
 # ---------------------------------------------------------------------------
 # derive_script_cover_helpers
 # ---------------------------------------------------------------------------

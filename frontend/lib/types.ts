@@ -270,6 +270,18 @@ export interface WorldCharacterDraft {
   avatar?: string | null;
 }
 
+export interface VisualStyleDraft {
+  version?: number;
+  genre_category?: string;
+  culture?: string;
+  art_style?: string;
+  style_scores?: Array<{
+    style: string;
+    score: number;
+    reason?: string;
+  }>;
+}
+
 export interface WorldDraftPayload {
   name: string;
   description: string;
@@ -283,6 +295,7 @@ export interface WorldDraftPayload {
   world_characters: WorldCharacterDraft[];
   cover_image?: string | null;
   hero_image?: string | null;
+  visual_style?: VisualStyleDraft | null;
 }
 
 export interface GenerateProgressEvent {

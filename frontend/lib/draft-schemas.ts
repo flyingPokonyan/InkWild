@@ -53,6 +53,22 @@ const worldCharacterSchema: z.ZodType<WorldCharacterDraft> = z.object({
   avatar: z.string().nullable().optional(),
 });
 
+const visualStyleSchema = z.object({
+  version: z.number().int().optional(),
+  genre_category: z.string().optional(),
+  culture: z.string().optional(),
+  art_style: z.string().optional(),
+  style_scores: z
+    .array(
+      z.object({
+        style: z.string(),
+        score: z.number(),
+        reason: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
+
 export const worldDraftSchema: z.ZodType<WorldDraftPayload> = z.object({
   name: z.string(),
   description: z.string(),
@@ -66,6 +82,7 @@ export const worldDraftSchema: z.ZodType<WorldDraftPayload> = z.object({
   world_characters: z.array(worldCharacterSchema),
   cover_image: z.string().nullable().optional(),
   hero_image: z.string().nullable().optional(),
+  visual_style: visualStyleSchema.nullable().optional(),
 });
 
 const eventSchema: z.ZodType<EventDraft> = z.object({

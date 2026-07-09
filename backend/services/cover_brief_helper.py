@@ -21,13 +21,17 @@ import structlog
 
 from schemas.ip_knowledge_pack import IPKnowledgePack
 from services.cover_brief import (
+    CULTURE_CATEGORIES,
     GENRE_STYLE_POOL,
     IP_NAME_CONFIDENCE_FLOOR,
+    STYLE_DESC,
     CharacterCoverBrief,
     CoverBrief,
     EndingCoverBrief,
     derive_character_reference_anchor,
+    persisted_visual_style_from_world_data,
     pick_art_style,
+    style_allowed_for_culture,
 )
 from services.ip_recognizer import IPRecognition
 
@@ -43,6 +47,10 @@ _WORLD_HELPER_SYSTEM = """你是 InkWild 的美术指导，给一个虚构故事
 {
   "world_name_english": "世界名的英文/罗马字翻译（官方有英文名则用官方；否则拼音或意译，~3-6 词）",
   "genre_category": "从给定题材大类里选一个最贴切的（只填大类名）",
+  "culture": "文化语系，只能填：中式古典 / 中式近现代 / 日式和风 / 西方古典 / 现代中性",
+  "style_scores": [
+    {"style": "从画法白名单里选", "score": 0.0-1.0, "reason": "一句话说明为什么适合"}
+  ],
   "cover_focus": "一句话：这个世界最独特、最勾人的主题与情绪钩子（给方向，不规定构图）",
   "characters": {
     "<原中文名>": {
@@ -56,9 +64,22 @@ _WORLD_HELPER_SYSTEM = """你是 InkWild 的美术指导，给一个虚构故事
 }
 
 genre_category 规则（用于决定封面画法，要选准）：
-- 只能从这些大类里精确选一个填入：古风宫廷、武侠仙侠、赛博科幻、末世废土、悬疑推理、民国谍战、现代都市、校园日常、奇幻童话、恐怖诡秘、其他。
+- 只能从这些大类里精确选一个填入：古风宫廷权谋、古风宫廷、古风言情、中式古代悬疑、武侠仙侠、民国谍战、近现代中国悬疑、西方古典悬疑、西方奇幻哥特、东瀛和风、恐怖灵异、赛博科幻、硬科幻、末世废土、悬疑推理、现代都市、校园日常、奇幻童话、恐怖诡秘、其他。
 - 按世界的 name / genre / description / research_summary / IP 综合判断它最贴近哪个大类；拿不准就选最接近的，实在无法归类才用「其他」。
 - 注意只判「题材大类」，不要判画法——具体画法由系统按大类自动分配。
+
+culture 规则（硬分类，关键）：
+- 中式古典：唐宋明清、架空中式古代、宫廷、江湖、仙侠、古代公案。
+- 中式近现代：民国、旧上海、东北/县城近现代中国、工业城市、近代谍战。
+- 日式和风：平安/江户/镰仓/大正日本、武士、忍者、阴阳师、和风妖怪。
+- 西方古典：欧洲古典、维多利亚、哥特、中世纪、西方古典侦探/奇幻。
+- 现代中性：现代都市、校园、硬科幻、赛博、末世、泛未来或文化语系不明确。
+
+style_scores 规则（美术排序，不是最终拍板）：
+- 只能从这些画法白名单中选：水墨写意、青绿山水、工笔重彩、古籍绣像、民国画报、铜版木刻、水彩淡彩、扁平极简、丝网波普、浮世绘、复古绘本、钢笔线描、新艺术装饰、蜡笔色粉、拼贴构成、黑白漫画、档案拼贴。
+- 给 3-6 个候选，score 0.0-1.0；越适合这个世界越高。
+- 文化语系错配的不要给高分：中式古典需要版画张力时优先「古籍绣像」，不是欧洲铜版或浮世绘；西方古典悬疑才优先「铜版木刻 / 新艺术装饰」；日式和风优先「浮世绘」。
+- 可以大胆推荐强风格，但不要推荐白名单外的词。
 
 cover_focus 规则（给封面定方向，关键）：
 - 读懂这个世界后，提炼它最独特、最勾人的「主题 + 情绪钩子」——核心冲突 / 气质 / 最抓人的那个点，让人想点进去玩。
@@ -237,13 +258,34 @@ async def derive_world_cover_brief(
     raw = raw or {}
     world_name_english = (raw.get("world_name_english") or "").strip()
     mood = (raw.get("mood") or "").strip()  # V3 field, retained but not injected
-    # art_style: the LLM classifies the world into a genre_category; the code
-    # then deterministically picks a 画法 from that category's pool by hashing
-    # the world name (spreads same-genre worlds across styles — see pick_art_style).
     genre_category = (raw.get("genre_category") or "").strip()
     if genre_category and genre_category not in GENRE_STYLE_POOL:
         logger.warning("cover_brief_genre_unknown", picked=genre_category, world=world_name)
-    art_style = pick_art_style(genre_category, world_name)
+    culture = (raw.get("culture") or "").strip()
+    if culture and culture not in CULTURE_CATEGORIES:
+        logger.warning("cover_brief_culture_unknown", picked=culture, world=world_name)
+        culture = ""
+
+    style_scores = _sanitize_style_scores(raw.get("style_scores"), culture)
+
+    # Persisted visual_style wins: once a world family has an art_style, regen /
+    # script covers should not drift because the helper classification changed.
+    persisted_visual_style = persisted_visual_style_from_world_data(world_data)
+    persisted_art_style = (persisted_visual_style.get("art_style") or "").strip()
+    persisted_culture = (persisted_visual_style.get("culture") or "").strip()
+    if persisted_art_style and style_allowed_for_culture(
+        persisted_art_style, persisted_culture or culture
+    ):
+        art_style = persisted_art_style
+        culture = persisted_culture or culture
+        genre_category = (persisted_visual_style.get("genre_category") or "").strip() or genre_category
+    else:
+        art_style = pick_art_style(
+            genre_category,
+            world_name,
+            culture=culture,
+            style_scores=style_scores,
+        )
     # cover_focus: the LLM-constructed 画面核心 (what to draw). Frees "画什么"
     # from the default single-人物 sameness. Empty → builders free-compose.
     cover_focus = (raw.get("cover_focus") or "").strip()
@@ -256,7 +298,10 @@ async def derive_world_cover_brief(
         world_name=world_name,
         world_name_english=world_name_english,
         genre_tag=_genre_tag(genre, era),
+        culture=culture,
+        genre_category=genre_category,
         art_style=art_style,
+        style_scores=style_scores,
         cover_focus=cover_focus,
         mood=mood,
         ip_name=ip_name,
@@ -281,6 +326,36 @@ async def derive_world_cover_brief(
         )
 
     return world_brief, char_briefs
+
+
+def _sanitize_style_scores(raw_scores: Any, culture: str) -> list[dict[str, Any]]:
+    """Whitelist/culture-filter helper LLM style scores for CoverBrief storage."""
+    if not isinstance(raw_scores, list):
+        return []
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw_scores:
+        if not isinstance(item, dict):
+            continue
+        style = (item.get("style") or "").strip()
+        if not style or style in seen or style not in STYLE_DESC:
+            continue
+        if culture and not style_allowed_for_culture(style, culture):
+            continue
+        try:
+            score = float(item.get("score", 0))
+        except (TypeError, ValueError):
+            continue
+        if score <= 0:
+            continue
+        entry: dict[str, Any] = {"style": style, "score": max(0.0, min(score, 1.0))}
+        reason = (item.get("reason") or "").strip()
+        if reason:
+            entry["reason"] = reason[:80]
+        out.append(entry)
+        seen.add(style)
+    out.sort(key=lambda item: item["score"], reverse=True)
+    return out[:6]
 
 
 def _genre_tag(genre: str, era: str) -> str:

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -86,6 +87,29 @@ function getGenreCoverClass(genre?: string | null, name?: string | null): string
   const hash = n.length % 7;
   const classes = ["cover-fog", "cover-amber", "cover-jade", "cover-deepblue", "cover-noir", "cover-rust", "cover-mist"];
   return classes[hash];
+}
+
+function WorkshopCoverImage({ url }: { url?: string | null }) {
+  const src = ossThumb(url, 520);
+  const [isVisible, setIsVisible] = useState(Boolean(src));
+
+  useEffect(() => {
+    setIsVisible(Boolean(src));
+  }, [src]);
+
+  if (!src || !isVisible) return null;
+
+  return (
+    <Image
+      className="world-cover-img"
+      src={src}
+      alt=""
+      fill
+      sizes="520px"
+      unoptimized
+      onError={() => setIsVisible(false)}
+    />
+  );
 }
 
 export default function WorkshopDemoPage() {
@@ -1020,6 +1044,7 @@ export default function WorkshopDemoPage() {
           font: inherit;
           padding: 0;
           position: relative;
+          min-width: 0;
           transition: transform 350ms cubic-bezier(0.16, 1, 0.3, 1);
         }
         .world-card:hover {
@@ -1050,7 +1075,17 @@ export default function WorkshopDemoPage() {
           background-size: cover;
           background-position: center;
         }
-        .world-card:hover .world-cover-bg {
+        .world-cover-img {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          z-index: 2;
+          transition: transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .world-card:hover .world-cover-bg,
+        .world-card:hover .world-cover-img {
           transform: scale(1.04);
         }
 
@@ -1060,6 +1095,7 @@ export default function WorkshopDemoPage() {
           inset: 50% 0 0 0;
           background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.35));
           pointer-events: none;
+          z-index: 3;
         }
 
         /* Specific cover gradients */
@@ -1110,7 +1146,7 @@ export default function WorkshopDemoPage() {
           -webkit-backdrop-filter: blur(8px);
           border: 1px solid rgba(255, 255, 255, 0.08);
           color: var(--lv-ink-2);
-          z-index: 2;
+          z-index: 4;
           display: inline-flex;
           align-items: center;
           gap: 5px;
@@ -1206,6 +1242,10 @@ export default function WorkshopDemoPage() {
           font-weight: 500;
           font-size: 18px;
           margin: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          min-width: 0;
           transition: color 200ms ease;
         }
         .world-card:hover .world-title {
@@ -1216,8 +1256,20 @@ export default function WorkshopDemoPage() {
           display: flex;
           gap: 5px;
           align-items: center;
-          flex-wrap: wrap;
+          flex-wrap: nowrap;
           font-size: 12px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          min-width: 0;
+        }
+        .world-meta > span:not(.world-meta-sep) {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .world-meta > span:last-child:not(.world-meta-sep) {
+          flex: 1 1 auto;
         }
         .world-meta-sep {
           color: var(--lv-ink-5);
@@ -1562,12 +1614,7 @@ function WorldDraftCard({
         <div className={`world-cover-bg ${getGenreCoverClass((draft as { genre?: string | null }).genre, draft.name)}`} />
 
         {/* Cover image if the draft already has one (之前从不展示草稿封面，封面被埋没) */}
-        {!isGenerating && draft.cover_image && (
-          <div
-            className="world-cover-bg"
-            style={{ backgroundImage: `url(${ossThumb(draft.cover_image, 520)})` }}
-          />
-        )}
+        {!isGenerating && <WorkshopCoverImage url={draft.cover_image} />}
 
         {/* Central visual indicator —— 仅在没有封面（或生成中）时显示占位 */}
         {(isGenerating || !draft.cover_image) && (
@@ -1678,12 +1725,7 @@ function WorldPublishedCard({
         <div className={`world-cover-bg ${getGenreCoverClass(world.genre, world.name)}`} />
 
         {/* Cover image if loaded */}
-        {world.cover_image && (
-          <div
-            className="world-cover-bg"
-            style={{ backgroundImage: `url(${ossThumb(world.cover_image, 520)})` }}
-          />
-        )}
+        <WorkshopCoverImage url={world.cover_image} />
 
         {/* Lifecycle status badge */}
         <span className="cover-status" style={{ color: badge.color, borderColor: "rgba(223, 194, 144, 0.2)" }}>
@@ -1709,8 +1751,6 @@ function WorldPublishedCard({
         <h3 className="lv-t-h3 world-title">{world.name}</h3>
         <div className="world-meta lv-t-meta">
           <span>{world.genre || "未分类"}</span>
-          <span className="world-meta-sep">·</span>
-          <span>{world.era || "未知时代"}</span>
         </div>
 
         {isOwner && world.review_status === "rejected" && world.review_note && (
@@ -1941,12 +1981,7 @@ function ScriptPublishedCard({
         </div>
 
         {/* Cover image if loaded */}
-        {(script as { cover_image?: string | null }).cover_image && (
-          <div 
-            className="world-cover-bg" 
-            style={{ backgroundImage: `url(${ossThumb((script as { cover_image?: string | null }).cover_image, 520)})`, zIndex: 2 }}
-          />
-        )}
+        <WorkshopCoverImage url={(script as { cover_image?: string | null }).cover_image} />
 
         {/* Lifecycle status badge */}
         <span className="cover-status" style={{ color: badge.color, borderColor: "rgba(223, 194, 144, 0.2)", zIndex: 4 }}>
@@ -2506,7 +2541,7 @@ function MobileWorkshopView({
                       isOwner={w.is_owner}
                       kind="world"
                       title={w.name}
-                      desc={w.description}
+                      desc={w.genre || "世界"}
                       updatedAt={null}
                       bottomMeta={`${w.script_count} 剧本`}
                       busy={busyTarget === w.id}
@@ -2658,14 +2693,14 @@ function MobileWorkCard({
       }}
     >
       <div
-        className={cover ? undefined : getGenreCoverClass(null, title)}
+        className={getGenreCoverClass(null, title)}
         style={{
           position: "relative",
-          backgroundImage: cover ? `url(${ossThumb(cover, 520)})` : undefined,
           backgroundSize: "cover",
           backgroundPosition: "center",
         }}
       >
+        <WorkshopCoverImage url={cover} />
         <div
           style={{
             position: "absolute",
@@ -2683,6 +2718,7 @@ function MobileWorkCard({
             fontSize: 10,
             letterSpacing: "0.02em",
             color: statusColor,
+            zIndex: 4,
           }}
         >
           {statusLabel}
@@ -2841,18 +2877,18 @@ function MobileWorkGridTile({
       style={{ minWidth: 0, cursor: busy ? "wait" : "pointer", opacity: busy ? 0.6 : 1 }}
     >
       <div
-        className={cover ? undefined : getGenreCoverClass(null, title)}
+        className={getGenreCoverClass(null, title)}
         style={{
           position: "relative",
           aspectRatio: "16 / 10",
           borderRadius: 12,
           overflow: "hidden",
           border: "1px solid rgba(255,255,255,0.08)",
-          backgroundImage: cover ? `url(${ossThumb(cover, 520)})` : undefined,
           backgroundSize: "cover",
           backgroundPosition: "center",
         }}
       >
+        <WorkshopCoverImage url={cover} />
         <div
           style={{
             position: "absolute",
@@ -2870,6 +2906,7 @@ function MobileWorkGridTile({
             fontSize: 10,
             letterSpacing: "0.02em",
             color: statusColor,
+            zIndex: 4,
           }}
         >
           {statusLabel}

@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import select
 
+from models.user import User
 from models.world import Ending, Event, World, WorldCharacter
 from seeds.seed import seed_database
 
@@ -13,6 +14,13 @@ async def test_seed_database_loads_wuyinzhen_data(db, test_engine, test_session_
     assert world is not None
     assert world.name == "雾隐镇"
     assert world.genre == "悬疑"
+    assert world.cover_image == "/static/images/seeds/wuyinzhen-cover.png"
+    assert world.hero_image == "/static/images/seeds/wuyinzhen-hero.png"
+    assert world.created_by_user_id is not None
+
+    owner = await db.get(User, world.created_by_user_id)
+    assert owner is not None
+    assert owner.is_admin is True
 
     world_chars = (await db.execute(select(WorldCharacter).where(WorldCharacter.world_id == world_id))).scalars().all()
     events = (await db.execute(select(Event).where(Event.world_id == world_id))).scalars().all()

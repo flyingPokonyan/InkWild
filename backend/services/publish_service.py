@@ -242,7 +242,7 @@ def normalize_world_payload(payload: dict) -> dict:
     # re-opening a draft restores the full agent output.
     for v2_key in (
         "lore_pack", "shared_events", "relations_pack",
-        "events_data", "playable", "quality_warnings",
+        "events_data", "playable", "quality_warnings", "visual_style",
         "free_start_stages",
     ):
         if payload.get(v2_key) is not None:
@@ -305,8 +305,15 @@ async def apply_world_payload(db: AsyncSession, world: World, payload: dict) -> 
         world.events_data = payload["events_data"]
     if "shared_events" in payload:
         world.shared_events = payload["shared_events"]
-    if "lore_pack" in payload:
-        world.lore_pack = payload["lore_pack"]
+    if "lore_pack" in payload or "visual_style" in payload:
+        lore_pack = payload.get("lore_pack")
+        lore_pack = dict(lore_pack) if isinstance(lore_pack, dict) else {}
+        if not lore_pack and isinstance(world.lore_pack, dict):
+            lore_pack = dict(world.lore_pack)
+        visual_style = payload.get("visual_style")
+        if isinstance(visual_style, dict):
+            lore_pack["visual_style"] = visual_style
+        world.lore_pack = lore_pack
 
     playable_ids: list[str] = []
     name_to_id: dict[str, str] = {}

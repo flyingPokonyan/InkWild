@@ -14,6 +14,7 @@ import pytest
 from config import settings
 from models.draft import WorldDraft
 from models.user import User, WebSession
+from models.world import World
 
 
 async def _make_user(db, *, can_create: bool, is_admin: bool = False, nickname: str = "u") -> User:
@@ -78,3 +79,105 @@ async def test_world_drafts_listing_respects_ownership(client, db):
     assert resp.status_code == 200
     names = sorted(d["payload"].get("name") for d in resp.json()["data"])
     assert names == ["alice-draft", "bob-draft"]
+
+
+@pytest.mark.asyncio
+async def test_worlds_listing_prefers_linked_draft_cover(client, db):
+    """A saved private world card should show the latest regenerated draft cover."""
+    owner = await _make_user(db, can_create=True, nickname="owner")
+    world = World(
+        name="哈利·波特",
+        description="奇幻冒险",
+        genre="奇幻冒险",
+        era="二十世纪九十年代至二十一世纪初（魔法英国）",
+        difficulty=3,
+        estimated_time="30m",
+        cover_image="/static/placeholder-cover.png",
+        hero_image="/static/placeholder-cover.png",
+        base_setting="b",
+        locations_data=[],
+        status="private",
+        play_count=0,
+        created_by_user_id=str(owner.id),
+    )
+    db.add(world)
+    await db.flush()
+    draft = WorldDraft(
+        world_id=world.id,
+        payload={
+            "name": "哈利·波特",
+            "cover_image": "https://oss.test/worlds/cover/new.png",
+            "hero_image": "/static/placeholder-cover.png",
+        },
+        created_by_user_id=str(owner.id),
+    )
+    db.add(draft)
+    await db.commit()
+
+    sid = await _make_session(db, owner)
+    client.cookies.set(settings.auth_cookie_name, sid)
+    resp = await client.get("/api/workshop/worlds")
+
+    assert resp.status_code == 200
+    items = resp.json()["data"]["published"]
+    item = next(w for w in items if w["id"] == str(world.id))
+    assert item["cover_image"] == "https://oss.test/worlds/cover/new.png"
+    assert item["hero_image"] == "https://oss.test/worlds/cover/new.png"
+    assert item["has_draft"] is True
+    assert item["draft_id"] == str(draft.id)
+
+
+@pytest.mark.asyncio
+async def test_worlds_listing_drops_missing_local_cover(client, db):
+    """Missing local static files should fall back instead of rendering a blank cover layer."""
+    owner = await _make_user(db, can_create=True, nickname="owner")
+    world = World(
+        name="lost-image",
+        description="d",
+        genre="g",
+        era="e",
+        difficulty=3,
+        estimated_time="30m",
+        cover_image="/static/images/worlds/cover/not-found.png",
+        hero_image="/static/placeholder-cover.png",
+        base_setting="b",
+        locations_data=[],
+        status="private",
+        play_count=0,
+        created_by_user_id=str(owner.id),
+    )
+    db.add(world)
+    await db.commit()
+
+    sid = await _make_session(db, owner)
+    client.cookies.set(settings.auth_cookie_name, sid)
+    resp = await client.get("/api/workshop/worlds")
+
+    assert resp.status_code == 200
+    item = next(w for w in resp.json()["data"]["published"] if w["id"] == str(world.id))
+    assert item["cover_image"] == ""
+    assert item["hero_image"] == ""
+
+
+@pytest.mark.asyncio
+async def test_world_draft_detail_drops_missing_local_cover(client, db):
+    owner = await _make_user(db, can_create=True, nickname="owner")
+    draft = WorldDraft(
+        payload={
+            "name": "lost-image-draft",
+            "cover_image": "/static/images/worlds/cover/not-found.png",
+            "hero_image": "/static/placeholder-cover.png",
+        },
+        created_by_user_id=str(owner.id),
+    )
+    db.add(draft)
+    await db.commit()
+
+    sid = await _make_session(db, owner)
+    client.cookies.set(settings.auth_cookie_name, sid)
+    resp = await client.get(f"/api/workshop/world-drafts/{draft.id}")
+
+    assert resp.status_code == 200
+    payload = resp.json()["data"]["payload"]
+    assert payload["cover_image"] == ""
+    assert payload["hero_image"] == ""
