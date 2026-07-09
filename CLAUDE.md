@@ -93,6 +93,7 @@ docker compose up -d db redis
 ### 总体
 
 - **注重开发效率，注重用户体验。** 功能做出来、体验做到位是第一优先级。
+- **生产变更必须走标准链路。** InkWild 项目以后所有代码 / schema / 配置类变更都先在本地仓库修改并验证，再提交并上传 GitHub，最后由服务器拉取/部署；不要直接把线上手改当成最终状态。紧急线上止血可以先做，但必须立即补回本地代码、提交和部署链路。
 - **轻量测试。** 核心逻辑和关键路径写测试，不追求覆盖率，不为边角 case 补大量测试。新功能优先跑通再补测试。
 - **遵循现有技术栈。** 前后端技术选型已经稳定，不是不能改，但不能随意引入新框架/新库。要引入时先说明理由。前端已就位的基础设施：TanStack Query、React Hook Form + Zod、Framer Motion (`motion/react`)、next-intl、Radix Dialog/Popover/Toast、vaul (Drawer)、cmdk (Command Menu)、serwist (PWA)、Sentry (`@sentry/nextjs`)、vitest 单测。
 - **文档与代码冲突时以代码为准。** 旧 spec/plan 中的描述可能已过时，以当前实现和最新 spec 为准。

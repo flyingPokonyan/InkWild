@@ -88,7 +88,7 @@ class TokenUsage(Base):
     purpose: Mapped[str] = mapped_column(String(20))
     # Free-form sub-stage for drill-down (e.g. "world_gen.research").
     phase: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    provider: Mapped[str] = mapped_column(String(20))
+    provider: Mapped[str] = mapped_column(String(64))
     model: Mapped[str] = mapped_column(String(50))
     provider_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     model_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
