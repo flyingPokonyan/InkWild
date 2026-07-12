@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import io
+import mimetypes
 import re
 import time
 import uuid
@@ -23,6 +23,22 @@ from config import settings
 from llm.base import ImageResult
 
 logger = structlog.get_logger()
+
+_oss_upload_sem: asyncio.Semaphore | None = None
+_oss_upload_sem_cap: int | None = None
+
+
+class ImageStorageUploadError(RuntimeError):
+    """Storage exhausted its own retries; callers must not regenerate the image."""
+
+
+def _get_oss_upload_semaphore() -> asyncio.Semaphore:
+    global _oss_upload_sem, _oss_upload_sem_cap
+    cap = max(int(settings.oss_upload_concurrency), 1)
+    if _oss_upload_sem is None or _oss_upload_sem_cap != cap:
+        _oss_upload_sem = asyncio.Semaphore(cap)
+        _oss_upload_sem_cap = cap
+    return _oss_upload_sem
 
 
 class ImageStorage(ABC):
@@ -106,7 +122,12 @@ class OSSImageStorage(ImageStorage):
 
         import oss2
 
-        self.endpoint = str(endpoint)
+        raw_endpoint = str(endpoint).strip().rstrip("/")
+        self.endpoint = (
+            raw_endpoint
+            if raw_endpoint.startswith(("https://", "http://"))
+            else f"https://{raw_endpoint}"
+        )
         self.bucket_name = str(bucket_name)
         self.public_base_url = (public_base_url or settings.oss_public_base_url).rstrip("/")
         self.key_prefix = (key_prefix or settings.oss_key_prefix).strip("/")
@@ -126,27 +147,106 @@ class OSSImageStorage(ImageStorage):
         endpoint = self.endpoint.removeprefix("https://").removeprefix("http://").rstrip("/")
         return f"https://{self.bucket_name}.{endpoint}/{full_key}"
 
+    async def _upload_once(
+        self,
+        data: bytes,
+        full_key: str,
+        *,
+        timeout_seconds: float,
+    ) -> None:
+        content_type = mimetypes.guess_type(full_key)[0] or "application/octet-stream"
+        headers = {"Content-Type": content_type}
+        expires = max(300, round(timeout_seconds * 4))
+        signed_url = self.bucket.sign_url(
+            "PUT",
+            full_key,
+            expires,
+            headers=headers,
+        )
+        timeout = httpx.Timeout(
+            connect=min(10.0, timeout_seconds),
+            read=timeout_seconds,
+            write=timeout_seconds,
+            pool=10.0,
+        )
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with asyncio.timeout(timeout_seconds):
+                response = await client.put(signed_url, content=data, headers=headers)
+            response.raise_for_status()
+
     async def save(self, data: bytes, key: str) -> str:
         full_key = self._full_key(key)
-        started_at = time.monotonic()
-        await asyncio.to_thread(self.bucket.put_object, full_key, data)
-        duration_ms = round((time.monotonic() - started_at) * 1000)
-        logger.info(
-            "image_saved_oss",
-            key=full_key,
-            size=len(data),
-            bucket=self.bucket_name,
-            duration_ms=duration_ms,
-        )
-        if duration_ms >= 30_000:
-            logger.warning(
-                "image_oss_upload_slow",
-                key=full_key,
-                size=len(data),
-                bucket=self.bucket_name,
-                duration_ms=duration_ms,
-            )
-        return self._public_url(key)
+        timeout_seconds = max(float(settings.oss_upload_timeout_seconds), 0.1)
+        max_attempts = max(int(settings.oss_upload_max_attempts), 1)
+        backoff_seconds = max(float(settings.oss_upload_retry_backoff_seconds), 0.0)
+        semaphore = _get_oss_upload_semaphore()
+        queue_started_at = time.monotonic()
+
+        async with semaphore:
+            queue_wait_ms = round((time.monotonic() - queue_started_at) * 1000)
+            for attempt in range(1, max_attempts + 1):
+                started_at = time.monotonic()
+                try:
+                    await self._upload_once(
+                        data,
+                        full_key,
+                        timeout_seconds=timeout_seconds,
+                    )
+                except (TimeoutError, httpx.TimeoutException, httpx.NetworkError) as exc:
+                    duration_ms = round((time.monotonic() - started_at) * 1000)
+                    logger.warning(
+                        "image_oss_upload_retry",
+                        key=full_key,
+                        size=len(data),
+                        bucket=self.bucket_name,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        duration_ms=duration_ms,
+                        queue_wait_ms=queue_wait_ms,
+                        error_type=type(exc).__name__,
+                    )
+                    if attempt >= max_attempts:
+                        raise ImageStorageUploadError(
+                            f"OSS upload timed out after {max_attempts} attempts"
+                        ) from exc
+                    await asyncio.sleep(backoff_seconds * attempt)
+                    continue
+                except httpx.HTTPStatusError as exc:
+                    duration_ms = round((time.monotonic() - started_at) * 1000)
+                    status_code = exc.response.status_code
+                    retryable = status_code in {408, 409, 425, 429} or status_code >= 500
+                    logger.warning(
+                        "image_oss_upload_http_error",
+                        key=full_key,
+                        size=len(data),
+                        bucket=self.bucket_name,
+                        attempt=attempt,
+                        max_attempts=max_attempts,
+                        duration_ms=duration_ms,
+                        queue_wait_ms=queue_wait_ms,
+                        status_code=status_code,
+                        retryable=retryable,
+                    )
+                    if not retryable or attempt >= max_attempts:
+                        raise ImageStorageUploadError(
+                            f"OSS upload failed with HTTP {status_code}"
+                        ) from exc
+                    await asyncio.sleep(backoff_seconds * attempt)
+                    continue
+
+                duration_ms = round((time.monotonic() - started_at) * 1000)
+                logger.info(
+                    "image_saved_oss",
+                    key=full_key,
+                    size=len(data),
+                    bucket=self.bucket_name,
+                    attempt=attempt,
+                    duration_ms=duration_ms,
+                    queue_wait_ms=queue_wait_ms,
+                )
+                return self._public_url(key)
+
+        raise ImageStorageUploadError("OSS upload failed")
 
     async def save_from_url(self, source_url: str, key: str) -> str:
         # Follow redirects (see LocalImageStorage.save_from_url).
@@ -183,26 +283,6 @@ def make_image_key(category: str, name: str, ext: str = "png") -> str:
 
 _UPLOAD_IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 _UPLOAD_DATA_URL_RE = re.compile(r"^data:(?P<mime>image/[a-z+]+);base64,(?P<b64>.+)$", re.DOTALL)
-
-
-def _compress_generated_image(data: bytes, original_format: str) -> tuple[bytes, str]:
-    """Encode generated raster output as WebP when it is meaningfully smaller."""
-    try:
-        from PIL import Image
-
-        with Image.open(io.BytesIO(data)) as image:
-            output = io.BytesIO()
-            image.save(output, format="WEBP", quality=85, method=4)
-        compressed = output.getvalue()
-        if compressed and len(compressed) < len(data):
-            return compressed, "webp"
-    except Exception as exc:  # noqa: BLE001 - storage must preserve original bytes
-        logger.warning(
-            "image_webp_compression_failed",
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-    return data, original_format
 
 
 def decode_data_url_image(data_url: str, *, max_bytes: int) -> tuple[bytes, str]:
@@ -242,11 +322,6 @@ async def save_generated_image_result(storage: ImageStorage, result: ImageResult
         return await storage.save_from_url(result.url, key)
     if result.has_data:
         ext = (result.format or "png").lower().strip() or "png"
-        data, ext = await asyncio.to_thread(
-            _compress_generated_image,
-            result.base64_data,
-            ext,
-        )
         normalized_key = key.rsplit(".", 1)[0]
-        return await storage.save(data, f"{normalized_key}.{ext}")
+        return await storage.save(result.base64_data, f"{normalized_key}.{ext}")
     return ""

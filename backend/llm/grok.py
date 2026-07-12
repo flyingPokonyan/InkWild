@@ -6,6 +6,7 @@ on chat.completions) for web search, and xAI SDK for image generation (Imagine A
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator
 
@@ -181,36 +182,49 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
         text_parts: list[str] = []
         raw_sources: list[dict] = []
         try:
-            # 100s：Live Search 深查实测可达 ~75s（grok-4.20-fast），60s 会贴边偶发
-            # 超时→静默返回空结果。给到 100s 留足余量。
-            async with httpx.AsyncClient(timeout=100.0) as http:
-                async with http.stream("POST", url, headers=headers, json=payload) as resp:
-                    if resp.status_code != 200:
-                        body = (await resp.aread())[:300]
-                        logger.warning(
-                            "grok_web_search_http_error",
-                            query=query,
-                            status=resp.status_code,
-                            body=body,
-                        )
-                        return WebSearchResult(query=query)
-                    async for line in resp.aiter_lines():
-                        if not line.startswith("data:"):
-                            continue
-                        chunk = line[5:].strip()
-                        if not chunk or chunk == "[DONE]":
-                            continue
-                        try:
-                            obj = json.loads(chunk)
-                        except json.JSONDecodeError:
-                            continue
-                        src = obj.get("search_sources")
-                        if isinstance(src, list):
-                            raw_sources.extend(src)
-                        for ch in obj.get("choices") or []:
-                            piece = ((ch or {}).get("delta") or {}).get("content")
-                            if piece:
-                                text_parts.append(piece)
+            total_timeout = max(
+                float(settings.grok_web_search_total_timeout_seconds),
+                0.001,
+            )
+            # The httpx read timeout is an inter-chunk timeout. Enforce a total
+            # deadline as well so gateway heartbeats cannot keep a dead search
+            # alive indefinitely.
+            async with asyncio.timeout(total_timeout):
+                async with httpx.AsyncClient(timeout=100.0) as http:
+                    async with http.stream("POST", url, headers=headers, json=payload) as resp:
+                        if resp.status_code != 200:
+                            body = (await resp.aread())[:300]
+                            logger.warning(
+                                "grok_web_search_http_error",
+                                query=query,
+                                status=resp.status_code,
+                                body=body,
+                            )
+                            return WebSearchResult(query=query)
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            chunk = line[5:].strip()
+                            if not chunk or chunk == "[DONE]":
+                                continue
+                            try:
+                                obj = json.loads(chunk)
+                            except json.JSONDecodeError:
+                                continue
+                            src = obj.get("search_sources")
+                            if isinstance(src, list):
+                                raw_sources.extend(src)
+                            for ch in obj.get("choices") or []:
+                                piece = ((ch or {}).get("delta") or {}).get("content")
+                                if piece:
+                                    text_parts.append(piece)
+        except TimeoutError:
+            logger.warning(
+                "grok_web_search_timeout",
+                query=query,
+                timeout_seconds=settings.grok_web_search_total_timeout_seconds,
+            )
+            return WebSearchResult(query=query)
         except Exception:  # noqa: BLE001
             logger.warning("grok_web_search_failed", query=query, exc_info=True)
             return WebSearchResult(query=query)
@@ -274,6 +288,4 @@ def _convert_tool(tool: dict) -> dict:
             "parameters": tool.get("input_schema", {}),
         },
     }
-
-
 

@@ -74,6 +74,7 @@ from services.generation_feedback import (
 )
 from services.image_storage import (
     IMAGE_PLACEHOLDER_URL,
+    ImageStorageUploadError,
     get_image_storage,
     make_image_key,
     save_generated_image_result,
@@ -209,6 +210,16 @@ async def _generate_image_with_fallback(
                 timeout_s=attempt_timeout_s,
                 error_type=type(exc).__name__,
             )
+        except ImageStorageUploadError as exc:
+            # Storage already retried the exact same bytes. Regenerating here
+            # would spend another image call without improving the OSS path.
+            logger.error(
+                "image_storage_upload_failed",
+                key=log_key,
+                attempt=attempt,
+                error=str(exc),
+            )
+            break
         except Exception as exc:  # noqa: BLE001
             retryable = _is_retryable_image_error(exc)
             logger.warning(

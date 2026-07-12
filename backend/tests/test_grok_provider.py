@@ -1,4 +1,5 @@
 import json
+import asyncio
 
 import httpx
 import pytest
@@ -95,3 +96,41 @@ async def test_web_search_malformed_chunks_are_skipped(monkeypatch):
     result = await provider.web_search("q")
 
     assert result.text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_web_search_has_total_wall_clock_timeout(monkeypatch):
+    class HangingStream:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def aiter_lines(self):
+            while True:
+                yield "data: {}"
+                await asyncio.sleep(0.01)
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        def stream(self, *args, **kwargs):
+            return HangingStream()
+
+    monkeypatch.setattr(grok_module.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(grok_module.settings, "grok_web_search_total_timeout_seconds", 0.02)
+    provider = GrokProvider(api_key="k", base_url="https://gw/v1", model="grok-test")
+
+    result = await provider.web_search("q")
+
+    assert result.text == ""

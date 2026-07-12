@@ -1147,6 +1147,43 @@ async def test_generate_image_with_fallback_retries_timeout(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_generate_image_with_fallback_does_not_regenerate_after_storage_failure(monkeypatch):
+    """OSS retries bytes internally; exhausting them must not spend another image call."""
+    from llm.base import ImageResult
+    from services import world_creator_agent_v2 as v2
+    from services.image_storage import IMAGE_PLACEHOLDER_URL, ImageStorageUploadError
+
+    monkeypatch.setattr(v2, "_IMAGE_RETRY_BACKOFFS", (0.0, 0.0))
+
+    class ImageGen:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def generate_image(self, prompt, *, aspect_ratio="1:1", resolution="1k"):
+            self.calls += 1
+            return ImageResult(base64_data=b"generated-once")
+
+    image_gen = ImageGen()
+    with patch(
+        "services.world_creator_agent_v2.save_generated_image_result",
+        AsyncMock(side_effect=ImageStorageUploadError("OSS timeout")),
+    ):
+        url, result = await v2._generate_image_with_fallback(
+            image_gen,
+            ["prompt"],
+            aspect_ratio="3:2",
+            storage=MagicMock(),
+            storage_key="worlds/test.png",
+            log_key="test",
+            max_attempts=3,
+        )
+
+    assert image_gen.calls == 1
+    assert url == IMAGE_PLACEHOLDER_URL
+    assert result is None
+
+
+@pytest.mark.asyncio
 async def test_generate_image_with_fallback_does_not_repeat_provider_placeholder(monkeypatch):
     """Provider-level placeholder means the provider already exhausted itself."""
     from llm.base import ImageResult
