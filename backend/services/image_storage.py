@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import re
 import time
 import uuid
@@ -184,6 +185,26 @@ _UPLOAD_IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "w
 _UPLOAD_DATA_URL_RE = re.compile(r"^data:(?P<mime>image/[a-z+]+);base64,(?P<b64>.+)$", re.DOTALL)
 
 
+def _compress_generated_image(data: bytes, original_format: str) -> tuple[bytes, str]:
+    """Encode generated raster output as WebP when it is meaningfully smaller."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            output = io.BytesIO()
+            image.save(output, format="WEBP", quality=85, method=4)
+        compressed = output.getvalue()
+        if compressed and len(compressed) < len(data):
+            return compressed, "webp"
+    except Exception as exc:  # noqa: BLE001 - storage must preserve original bytes
+        logger.warning(
+            "image_webp_compression_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+    return data, original_format
+
+
 def decode_data_url_image(data_url: str, *, max_bytes: int) -> tuple[bytes, str]:
     """Decode a base64 image data URL → (bytes, ext). Raises AppError on bad input.
 
@@ -221,6 +242,11 @@ async def save_generated_image_result(storage: ImageStorage, result: ImageResult
         return await storage.save_from_url(result.url, key)
     if result.has_data:
         ext = (result.format or "png").lower().strip() or "png"
+        data, ext = await asyncio.to_thread(
+            _compress_generated_image,
+            result.base64_data,
+            ext,
+        )
         normalized_key = key.rsplit(".", 1)[0]
-        return await storage.save(result.base64_data, f"{normalized_key}.{ext}")
+        return await storage.save(data, f"{normalized_key}.{ext}")
     return ""

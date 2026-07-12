@@ -59,7 +59,7 @@ def test_image_timeout_uses_settings(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_gpt_image_requests_compressed_webp_output():
+async def test_gpt_image_uses_gateway_supported_request_shape():
     provider = OpenAICompatibleImageProvider(
         api_key="test",
         base_url="https://example.test/v1",
@@ -78,8 +78,6 @@ async def test_gpt_image_requests_compressed_webp_output():
         prompt="cover",
         size="1536x1024",
         quality="high",
-        output_format="webp",
-        output_compression=85,
     )
     assert result.base64_data == b"webp-bytes"
-    assert result.format == "webp"
+    assert result.format == "png"
