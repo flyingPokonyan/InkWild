@@ -1,6 +1,16 @@
-"""Aspect ratio → size mapping tests for Seedream-compatible providers."""
+"""OpenAI-compatible image provider tests."""
+import base64
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
 from config import settings
-from llm.openai_compatible import _image_httpx_timeout, _size_for_aspect_ratio
+from llm.openai_compatible import (
+    OpenAICompatibleImageProvider,
+    _image_httpx_timeout,
+    _size_for_aspect_ratio,
+)
 
 
 def test_legacy_ratios_unchanged():
@@ -46,3 +56,30 @@ def test_image_timeout_uses_settings(monkeypatch):
     timeout = _image_httpx_timeout()
 
     assert timeout.read == 42.0
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_requests_compressed_webp_output():
+    provider = OpenAICompatibleImageProvider(
+        api_key="test",
+        base_url="https://example.test/v1",
+        model="gpt-image-2",
+    )
+    provider.client.images.generate = AsyncMock(
+        return_value=SimpleNamespace(
+            data=[SimpleNamespace(b64_json=base64.b64encode(b"webp-bytes").decode())]
+        )
+    )
+
+    result = await provider.generate_image("cover", aspect_ratio="3:2")
+
+    provider.client.images.generate.assert_awaited_once_with(
+        model="gpt-image-2",
+        prompt="cover",
+        size="1536x1024",
+        quality="high",
+        output_format="webp",
+        output_compression=85,
+    )
+    assert result.base64_data == b"webp-bytes"
+    assert result.format == "webp"

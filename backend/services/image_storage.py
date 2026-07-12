@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import re
+import time
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -126,8 +127,24 @@ class OSSImageStorage(ImageStorage):
 
     async def save(self, data: bytes, key: str) -> str:
         full_key = self._full_key(key)
+        started_at = time.monotonic()
         await asyncio.to_thread(self.bucket.put_object, full_key, data)
-        logger.info("image_saved_oss", key=full_key, size=len(data), bucket=self.bucket_name)
+        duration_ms = round((time.monotonic() - started_at) * 1000)
+        logger.info(
+            "image_saved_oss",
+            key=full_key,
+            size=len(data),
+            bucket=self.bucket_name,
+            duration_ms=duration_ms,
+        )
+        if duration_ms >= 30_000:
+            logger.warning(
+                "image_oss_upload_slow",
+                key=full_key,
+                size=len(data),
+                bucket=self.bucket_name,
+                duration_ms=duration_ms,
+            )
         return self._public_url(key)
 
     async def save_from_url(self, source_url: str, key: str) -> str:

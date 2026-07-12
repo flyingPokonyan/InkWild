@@ -14,6 +14,9 @@ from llm.base import ImageGenerator, ImageResult, LLMProvider
 # raises ReadTimeout, which the router classifies as transient.
 _DEFAULT_HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=150.0, write=10.0, pool=10.0)
 
+_GPT_IMAGE_OUTPUT_FORMAT = "webp"
+_GPT_IMAGE_OUTPUT_COMPRESSION = 85
+
 # Image generation is non-streaming and legitimately slow, but the OpenAI SDK
 # default is 600s/attempt. Use a bounded per-attempt read timeout; the workshop
 # image ladder retries timeout/unknown failures above this layer.
@@ -238,7 +241,12 @@ class OpenAICompatibleImageProvider(ImageGenerator):
             "size": _size_for_aspect_ratio(aspect_ratio),
             "quality": quality,
         }
-        if not self.model.startswith("gpt-image"):
+        if self.model.startswith("gpt-image"):
+            # GPT Image defaults to lossless PNG. Covers are photographic and
+            # cross-region OSS uploads are substantially faster as WebP.
+            request["output_format"] = _GPT_IMAGE_OUTPUT_FORMAT
+            request["output_compression"] = _GPT_IMAGE_OUTPUT_COMPRESSION
+        else:
             request["extra_body"] = {"aspect_ratio": aspect_ratio, "resolution": resolution}
         response = await self.client.images.generate(**request)
         data = response.data[0] if getattr(response, "data", None) else None
@@ -249,6 +257,11 @@ class OpenAICompatibleImageProvider(ImageGenerator):
         if getattr(data, "b64_json", None):
             return ImageResult(
                 base64_data=base64.b64decode(data.b64_json),
+                format=(
+                    _GPT_IMAGE_OUTPUT_FORMAT
+                    if self.model.startswith("gpt-image")
+                    else "png"
+                ),
                 model=self.model,
             )
         return ImageResult(model=self.model)

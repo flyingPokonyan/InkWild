@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { streamAdminEvents } from "./workshop-api";
+import { regenerateWorldDraftImage, streamAdminEvents } from "./workshop-api";
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -54,5 +55,34 @@ describe("streamAdminEvents", () => {
       meta: undefined,
     });
     expect(onResult).toHaveBeenCalledWith({ draft_id: "d1" });
+  });
+});
+
+describe("regenerateWorldDraftImage", () => {
+  it("polls the draft when the long POST connection is interrupted", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        Response.json({
+          code: 0,
+          data: { payload: { cover_image: "old", hero_image: "", world_characters: [] } },
+          message: "ok",
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          code: 0,
+          data: { payload: { cover_image: "new", hero_image: "", world_characters: [] } },
+          message: "ok",
+        }),
+      );
+
+    const resultPromise = regenerateWorldDraftImage("draft-1", "cover", "prompt", "old");
+    await vi.runAllTimersAsync();
+
+    await expect(resultPromise).resolves.toBe("new");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

@@ -1,8 +1,16 @@
 import { dispatchAdminSseEvent, type AdminSSECallbacks } from "./admin-sse-events";
 import { extractSSEBlocks } from "./sse-parser";
-import type { AdminGenerationTaskSummary, ApiEnvelope, ApiErrorDetail } from "./types";
+import type {
+  AdminGenerationTaskSummary,
+  AdminScriptDraftDetail,
+  AdminWorldDraftDetail,
+  ApiEnvelope,
+  ApiErrorDetail,
+} from "./types";
 
 const ADMIN_STREAM_TIMEOUT_MS = 30 * 60 * 1000;
+const IMAGE_REGEN_RECOVERY_TIMEOUT_MS = 12 * 60 * 1000;
+const IMAGE_REGEN_POLL_INTERVAL_MS = 3 * 1000;
 
 export type AdminStreamResult = {
   completed: boolean;
@@ -177,29 +185,113 @@ export async function getScriptDraftImagePrompt(draftId: string): Promise<string
   return prompt;
 }
 
+function isFetchConnectionError(error: unknown): boolean {
+  return error instanceof TypeError;
+}
+
+function waitForDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      return;
+    }
+
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timeoutId = setTimeout(finish, ms);
+    const abort = () => {
+      clearTimeout(timeoutId);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function worldDraftImageURL(detail: AdminWorldDraftDetail, target: string): string {
+  if (target === "hero") return detail.payload.hero_image || "";
+  if (target === "cover") return detail.payload.cover_image || "";
+  if (!target.startsWith("avatar:")) return "";
+
+  const characterName = target.slice("avatar:".length).trim();
+  const characterImages = (
+    detail.payload as typeof detail.payload & { character_images?: Record<string, string> }
+  ).character_images;
+  return (
+    characterImages?.[characterName] ||
+    detail.payload.world_characters.find((character) => character.name.trim() === characterName)?.avatar ||
+    ""
+  );
+}
+
+async function pollForRegeneratedImage(
+  readCurrentURL: () => Promise<string>,
+  previousURL: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const deadline = Date.now() + IMAGE_REGEN_RECOVERY_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    await waitForDelay(IMAGE_REGEN_POLL_INTERVAL_MS, signal);
+    try {
+      const currentURL = await readCurrentURL();
+      if (currentURL && currentURL !== previousURL) return currentURL;
+    } catch (error) {
+      if (!isFetchConnectionError(error)) throw error;
+    }
+  }
+  throw new Error("图片仍在后台处理，请稍后刷新草稿");
+}
+
 /** Regenerate one world-draft image. ``target`` ∈ "hero" | "cover" | "avatar:<名>". */
 export async function regenerateWorldDraftImage(
   draftId: string,
   target: string,
   prompt: string,
+  previousURL = "",
+  signal?: AbortSignal,
 ): Promise<string> {
-  const { url } = await workshopFetch<{ url: string }>(
-    `/api/workshop/world-drafts/${draftId}/regenerate-image`,
-    { method: "POST", body: JSON.stringify({ target, prompt }) },
-  );
-  return url;
+  try {
+    const { url } = await workshopFetch<{ url: string }>(
+      `/api/workshop/world-drafts/${draftId}/regenerate-image`,
+      { method: "POST", body: JSON.stringify({ target, prompt }), signal },
+    );
+    return url;
+  } catch (error) {
+    if (!isFetchConnectionError(error) || signal?.aborted) throw error;
+    return pollForRegeneratedImage(async () => {
+      const detail = await workshopFetch<AdminWorldDraftDetail>(
+        `/api/workshop/world-drafts/${draftId}`,
+        { signal },
+      );
+      return worldDraftImageURL(detail, target);
+    }, previousURL, signal);
+  }
 }
 
 /** Regenerate a script-draft cover. */
 export async function regenerateScriptDraftImage(
   draftId: string,
   prompt: string,
+  previousURL = "",
+  signal?: AbortSignal,
 ): Promise<string> {
-  const { url } = await workshopFetch<{ url: string }>(
-    `/api/workshop/script-drafts/${draftId}/regenerate-image`,
-    { method: "POST", body: JSON.stringify({ target: "cover", prompt }) },
-  );
-  return url;
+  try {
+    const { url } = await workshopFetch<{ url: string }>(
+      `/api/workshop/script-drafts/${draftId}/regenerate-image`,
+      { method: "POST", body: JSON.stringify({ target: "cover", prompt }), signal },
+    );
+    return url;
+  } catch (error) {
+    if (!isFetchConnectionError(error) || signal?.aborted) throw error;
+    return pollForRegeneratedImage(async () => {
+      const detail = await workshopFetch<AdminScriptDraftDetail>(
+        `/api/workshop/script-drafts/${draftId}`,
+        { signal },
+      );
+      return detail.payload.cover_image || "";
+    }, previousURL, signal);
+  }
 }
 
 export async function streamAdminEvents<T>(

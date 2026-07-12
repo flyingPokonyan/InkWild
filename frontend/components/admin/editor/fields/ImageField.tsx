@@ -165,7 +165,10 @@ function ActionPanel({
   const [promptLoading, setPromptLoading] = useState(false);
   const [link, setLink] = useState(url ?? "");
   const fileRef = useRef<HTMLInputElement>(null);
+  const regenAbortRef = useRef<AbortController | null>(null);
   const fileInputId = useId();
+
+  useEffect(() => () => regenAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (mode !== "regen" || prompt) return;
@@ -221,17 +224,33 @@ function ActionPanel({
   const doRegen = async () => {
     setError(null);
     setBusy("regen");
+    const controller = new AbortController();
+    regenAbortRef.current = controller;
     try {
       if (beforeRegenerate) await beforeRegenerate();
       const next =
         draftKind === "world"
-          ? await regenerateWorldDraftImage(draftId, regenTarget, prompt.trim())
-          : await regenerateScriptDraftImage(draftId, prompt.trim());
+          ? await regenerateWorldDraftImage(
+              draftId,
+              regenTarget,
+              prompt.trim(),
+              url ?? "",
+              controller.signal,
+            )
+          : await regenerateScriptDraftImage(
+              draftId,
+              prompt.trim(),
+              url ?? "",
+              controller.signal,
+            );
       onChange(next);
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("errorGeneric"));
+      if (!controller.signal.aborted) {
+        setError(e instanceof Error ? e.message : t("errorGeneric"));
+      }
     } finally {
+      if (regenAbortRef.current === controller) regenAbortRef.current = null;
       setBusy(null);
     }
   };
