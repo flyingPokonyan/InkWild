@@ -11,6 +11,7 @@ from services.image_storage import (
     ImageStorageUploadError,
     OSSImageStorage,
     get_image_storage,
+    is_our_oss_public_url,
     save_generated_image_result,
 )
 
@@ -143,3 +144,32 @@ async def test_oss_timeout_retries_same_bytes_without_regeneration(monkeypatch):
         await storage.save(b"same-image", "worlds/test.png")
 
     assert attempts == [b"same-image", b"same-image"]
+
+
+@pytest.mark.asyncio
+async def test_our_oss_url_passthrough_skips_reupload(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings, "oss_bucket_name", "ai-gateway-bucket", raising=False)
+    monkeypatch.setattr(settings, "oss_endpoint", "oss-cn-shanghai.aliyuncs.com", raising=False)
+    monkeypatch.setattr(settings, "oss_public_base_url", "", raising=False)
+
+    assert is_our_oss_public_url(
+        "https://ai-gateway-bucket.oss-cn-shanghai.aliyuncs.com/ai-gateway/images/bridge/x.png"
+    )
+
+    class BoomStorage(ImageStorage):
+        async def save(self, data: bytes, key: str) -> str:
+            raise AssertionError("should not save bytes")
+
+        async def save_from_url(self, source_url: str, key: str) -> str:
+            raise AssertionError("should not re-upload URL")
+
+        async def delete(self, key: str) -> None:
+            return None
+
+    oss_url = "https://ai-gateway-bucket.oss-cn-shanghai.aliyuncs.com/ai-gateway/images/bridge/x.png"
+    url = await save_generated_image_result(
+        BoomStorage(),
+        ImageResult(url=oss_url),
+        "worlds/cover/test.png",
+    )
+    assert url == oss_url

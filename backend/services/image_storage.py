@@ -309,16 +309,46 @@ def decode_data_url_image(data_url: str, *, max_bytes: int) -> tuple[bytes, str]
     return data, ext
 
 
+def is_our_oss_public_url(url: str) -> bool:
+    """True when ``url`` already points at our configured OSS/CDN public host.
+
+    Used to skip download+re-upload when the image gateway (igw) has already
+    persisted the object to Aliyun OSS and returned the public URL.
+    """
+    value = (url or "").strip()
+    if not value.startswith(("http://", "https://")):
+        return False
+    public_base = (settings.oss_public_base_url or "").strip().rstrip("/")
+    if public_base and value.startswith(public_base + "/"):
+        return True
+    bucket = (settings.oss_bucket_name or "").strip()
+    endpoint = (settings.oss_endpoint or "").strip()
+    endpoint = endpoint.removeprefix("https://").removeprefix("http://").rstrip("/")
+    if bucket and endpoint and f"{bucket}.{endpoint}/" in value:
+        return True
+    # Common production bucket used by inkwild + igw bridge.
+    if "ai-gateway-bucket.oss-cn-shanghai.aliyuncs.com/" in value:
+        return True
+    return False
+
+
 async def save_generated_image_result(storage: ImageStorage, result: ImageResult, key: str) -> str:
     """Persist an image result regardless of whether the provider returned a URL or raw bytes.
 
     When the provider already returned the placeholder URL (image generation
     gave up after retries), pass it through unchanged — there's nothing to
     download or persist.
+
+    When the provider (or the igw OSS bridge) already returned our own OSS
+    public URL, pass it through — re-uploading from the US VPS is slow and
+    frequently times out on multi-MB images.
     """
     if result.has_url:
         if result.url == IMAGE_PLACEHOLDER_URL:
             return IMAGE_PLACEHOLDER_URL
+        if is_our_oss_public_url(result.url):
+            logger.info("image_url_passthrough_oss", key=key, url=result.url[:160])
+            return result.url
         return await storage.save_from_url(result.url, key)
     if result.has_data:
         ext = (result.format or "png").lower().strip() or "png"
