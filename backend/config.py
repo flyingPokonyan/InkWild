@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     # 较新作品。fast 单次 kind 字段会抖动（哈利波特偶判 original），靠 recognize_ip 里的
     # best-of-N 投票消除（任一次判 known_ip 即采用）。推理档(medium/low)分类更稳但网关
     # 429 限流不可用。
-    ip_recognition_model: str = "grok-4.3-fast"
+    ip_recognition_model: str = "grok-chat-fast"
     # IP 识别投票次数：强 few-shot prompt 已把著名 IP 单次锚死（第1次即命中、提前结束），
     # 投票只为冷门 IP（kind 仍会抖）兜底，2 次足够，避免原创世界等满 3 次。
     ip_recognition_votes: int = 2
