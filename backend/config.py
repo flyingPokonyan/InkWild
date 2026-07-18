@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     grok_api_key: str = ""
     grok_base_url: str = "https://api.x.ai/v1"
-    grok_model: str = "grok-4.20-0309-reasoning"
+    grok_model: str = "grok-4.5"
     # IP 识别专用模型：走 Grok fast（网关后端联网且不限流），识别离线生成模型认不出的
     # 较新作品。fast 单次 kind 字段会抖动（哈利波特偶判 original），靠 recognize_ip 里的
     # best-of-N 投票消除（任一次判 known_ip 即采用）。推理档(medium/low)分类更稳但网关

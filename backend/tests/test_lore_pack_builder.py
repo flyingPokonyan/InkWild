@@ -2,12 +2,10 @@
 
 使用 fake LLMRouter（MagicMock + async generator），不发真实 LLM 请求。
 """
-import asyncio
-
 import pytest
 from unittest.mock import MagicMock
 
-from schemas.research_pack import IPCanon, Passage
+from schemas.research_pack import IPCanon
 from schemas.lore_pack import LorePack, LoreDimension
 from services.lore_pack_builder import (
     build_lore_dimensions,
@@ -74,15 +72,16 @@ async def test_dimensions_handles_llm_exception():
 # ---- build_lore_pack ----
 
 @pytest.mark.asyncio
-async def test_lore_pack_concurrent_calls():
-    """每个维度独立 LLM 调用，并发跑。"""
+async def test_lore_pack_batches_all_dimensions_in_one_call():
     dims = [
         LoreDimension(key="tech", name="技术", why_relevant="why1"),
         LoreDimension(key="schools", name="门派", why_relevant="why2"),
     ]
     router = _make_router([
-        '{"content_blocks":[{"heading":"技术 H","body":"技术 B"}]}',
-        '{"content_blocks":[{"heading":"门派 H","body":"门派 B"}]}',
+        '{"dimensions":['
+        '{"key":"tech","content_blocks":[{"heading":"技术 H","body":"技术 B"}]},'
+        '{"key":"schools","content_blocks":[{"heading":"门派 H","body":"门派 B"}]}'
+        ']}'
     ])
     canon = IPCanon()
 
@@ -95,11 +94,11 @@ async def test_lore_pack_concurrent_calls():
     keys = {d.key for d in pack.dimensions}
     assert keys == {"tech", "schools"}
     assert pack.generated_at  # 非空
+    assert router._call_count["n"] == 1
 
 
 @pytest.mark.asyncio
-async def test_lore_pack_single_dimension_failure_isolates():
-    """某维度 LLM 调用失败，其他维度继续；失败维度 content_blocks 为空。"""
+async def test_lore_pack_missing_dimension_retry_isolates_failure():
     dims = [
         LoreDimension(key="ok", name="正常", why_relevant=""),
         LoreDimension(key="bad", name="坏", why_relevant=""),
@@ -112,7 +111,13 @@ async def test_lore_pack_single_dimension_failure_isolates():
         idx = call_idx["n"]
         call_idx["n"] += 1
         if idx == 0:
-            yield {"type": "text_delta", "text": '{"content_blocks":[{"heading":"H","body":"B"}]}'}
+            yield {
+                "type": "text_delta",
+                "text": (
+                    '{"dimensions":[{"key":"ok","content_blocks":'
+                    '[{"heading":"H","body":"B"}]}]}'
+                ),
+            }
         else:
             raise RuntimeError("LLM timeout")
             yield
@@ -139,24 +144,22 @@ async def test_lore_pack_empty_dimensions_returns_empty_pack():
 
 
 @pytest.mark.asyncio
-async def test_lore_pack_respects_concurrency_limit():
-    """concurrency=2 + 5 dimensions 时实际并发不超过 2"""
-    in_flight = {"now": 0, "max": 0}
-
-    fake_router = MagicMock()
-
-    async def slow_stream(*, messages, tools, system, max_tokens):
-        in_flight["now"] += 1
-        in_flight["max"] = max(in_flight["max"], in_flight["now"])
-        await asyncio.sleep(0.02)
-        in_flight["now"] -= 1
-        yield {"type": "text_delta", "text": '{"content_blocks":[]}'}
-
-    fake_router.stream_with_tools = slow_stream
-
-    dims = [LoreDimension(key=f"k{i}", name=f"n{i}", why_relevant="") for i in range(5)]
-    await build_lore_pack(
-        dimensions=dims, description="x", ip_canon=IPCanon(), passages=[],
-        llm_router=fake_router, concurrency=2,
+async def test_lore_pack_retries_only_missing_dimensions_once():
+    dims = [
+        LoreDimension(key="a", name="A", why_relevant=""),
+        LoreDimension(key="b", name="B", why_relevant=""),
+    ]
+    router = _make_router([
+        '{"dimensions":[{"key":"a","content_blocks":[{"heading":"A","body":"A"}]}]}',
+        '{"dimensions":[{"key":"b","content_blocks":[{"heading":"B","body":"B"}]}]}',
+    ])
+    pack = await build_lore_pack(
+        dimensions=dims,
+        description="x",
+        ip_canon=IPCanon(),
+        passages=[],
+        llm_router=router,
+        concurrency=2,
     )
-    assert in_flight["max"] <= 2, f"实际并发峰值 {in_flight['max']}，应 ≤ 2"
+    assert all(dim.content_blocks for dim in pack.dimensions)
+    assert router._call_count["n"] == 2

@@ -1,18 +1,19 @@
 """events_data_builder — LLM 生成 events_data: list[EventDataEntry]。
 
-分批生成（≤batch_size events / 批），并发 concurrency 路。
+分批**逐次**生成（≤batch_size events / 批），世界主流程用 3 条/批。批次按
+shared-events 时间线切成不相交的 early→late 段，每批只具体化分配到的正典节拍，
+并把已生成事件的 summary 注入后续批次，令同一节拍无法被换措辞重复生成。
 每条 event 生成后逐条校验：
   1. condition_dsl 能被 engine.condition_dsl.parse 接受，否则 disabled=true
   2. trigger.npc_name (npc_intent_driven) 必须在 characters 列表中，否则 disabled=true
   3. rumors[].knower_npcs 中不在 characters 的丢弃
   4. effects.npc_mood_changes 中不在 characters 的 keys 丢弃
 
-单批失败不阻塞其他批（asyncio.gather return_exceptions=True）。
-总产出 dedup by id（取第一个出现的）。
+单批失败不阻塞其他批（异常记 warning 后跳过）。
+批次若生成相同 ID，会在合并时确定性重编号，不能误删不同内容。
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import math
 from typing import Any
@@ -48,6 +49,12 @@ def _build_user_prompt(
     existing_ids: list[str],
     batch_n: int,
     *,
+    batch_idx: int = 0,
+    batch_total: int = 1,
+    event_id_start: int = 1,
+    focus_items: list[str] | None = None,
+    already_generated: list[str] | None = None,
+    extra_directive: str = "",
     ip_pack: object | None = None,
     fidelity_mode: str = "none",
 ) -> str:
@@ -63,7 +70,9 @@ def _build_user_prompt(
         lore_summary = "; ".join(parts)
 
     shared_summary = ""
-    if shared_events:
+    if focus_items:
+        shared_summary = ", ".join(focus_items)
+    elif shared_events:
         shared_summary = ", ".join(e.title for e in shared_events[:5])
 
     ip_info = ""
@@ -93,6 +102,19 @@ def _build_user_prompt(
     existing_note = ""
     if existing_ids:
         existing_note = f"\n已存在的事件ID（不要重复）: {', '.join(existing_ids)}"
+    event_ids = [f"evt_{i:03d}" for i in range(event_id_start, event_id_start + batch_n)]
+    focus_note = "\n".join(f"- {item}" for item in (focus_items or [])) or "- 本批自选一段尚未被其他批次覆盖的剧情阶段"
+    generated_note = ""
+    if already_generated:
+        generated_note = (
+            "\n【已生成事件·禁止重复其剧情节拍】（换措辞/换视角/换地点重写同一件事＝不合格）:\n"
+            + "\n".join(f"- {s}" for s in already_generated)
+            + "\n"
+        )
+    revise_note = (
+        f"\n【返工要求·最高优先级】上一版事件被质检判为不合格，本次必须修正：{extra_directive}\n"
+        if extra_directive else ""
+    )
 
     return f"""世界描述:
 {description}
@@ -111,6 +133,15 @@ def _build_user_prompt(
 世界观深度内容:
 {lore_summary or '（无）'}
 {existing_note}
+
+本批是第 {batch_idx + 1}/{batch_total} 批。任务：把下面【指定节拍】各**具体化成一个可玩的运行时事件**（触发条件 + 后果 + 谣言），推进这些正典剧情，让玩家在游戏里真正经历到它们（不是复述背景，而是给出"在什么条件下触发、触发后世界如何变化"）：
+{focus_note}
+{generated_note}{revise_note}
+批次纪律（违反即不合格）：
+- 本批事件 ID 依次使用 {', '.join(event_ids)}，不要从 evt_001 重新编号
+- **只**具体化上面【指定节拍】、覆盖它们对应的剧情阶段；不要漂移到其他阶段或其他角色更著名的桥段
+- 与【已生成事件】**不得是同一件事**：同一场流产/死亡/出家/倒台/身份揭露，即便换措辞、换视角、换地点，也算重复，禁止
+- 每个事件使用不同的 world_state key，summary 与触发因果也要互不重复
 
 请生成 {batch_n} 个不同类型的 events_data 条目，输出严格 JSON（不含 markdown）：
 {{
@@ -350,6 +381,11 @@ async def _generate_batch(
     llm_router: Any,
     char_names: set[str],
     *,
+    batch_total: int,
+    event_id_start: int,
+    focus_items: list[str],
+    already_generated: list[str] | None = None,
+    extra_directive: str = "",
     ip_pack: object | None = None,
     fidelity_mode: str = "none",
 ) -> list[EventDataEntry]:
@@ -363,6 +399,12 @@ async def _generate_batch(
         lore_pack=lore_pack,
         existing_ids=existing_ids,
         batch_n=batch_n,
+        batch_idx=batch_idx,
+        batch_total=batch_total,
+        event_id_start=event_id_start,
+        focus_items=focus_items,
+        already_generated=already_generated,
+        extra_directive=extra_directive,
         ip_pack=ip_pack,
         fidelity_mode=fidelity_mode,
     )
@@ -371,9 +413,8 @@ async def _generate_batch(
         llm_router,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_prompt}],
-        # 8192: 一批多个含 condition_tree+rumors 的事件 JSON 较大，6144 易截断 →
-        # 整批 JSON 解析失败被静默丢弃（事件数骤减）。留足余量。(2026-05-31)
-        max_tokens=8192,
+        # Keep enough output headroom for three structurally rich entries.
+        max_tokens=12288,
     )
 
     data = _extract_json_from_text(text)
@@ -426,6 +467,7 @@ async def build_events_data(
     # 导致整批解析失败丢弃。target 8 → 3 批(3+3+2)，concurrency 3 一轮并发，零额外延迟。
     batch_size: int = 3,
     concurrency: int = 3,
+    extra_directive: str = "",
     ip_pack: object | None = None,
     fidelity_mode: str = "none",
 ) -> list[EventDataEntry]:
@@ -449,17 +491,48 @@ async def build_events_data(
         batch_counts.append(n)
         remaining -= n
 
-    # 串行按 concurrency 分组并发
+    # Sequential (not concurrent): each batch is shown the summaries already
+    # produced so it cannot re-tell a beat another batch just covered. Latency
+    # rises, cost is flat — the right trade for quality. ``concurrency`` is kept
+    # in the signature for caller compatibility only.
+    del concurrency
     all_results: list[EventDataEntry] = []
     existing_ids: list[str] = []
+    used_ids: set[str] = set()
+    generated_summaries: list[str] = []
+    next_generated_id = 1
 
-    for group_start in range(0, num_batches, concurrency):
-        group = batch_counts[group_start : group_start + concurrency]
+    def _reserve_unique_id(entry: EventDataEntry) -> EventDataEntry:
+        nonlocal next_generated_id
+        if entry.id not in used_ids:
+            used_ids.add(entry.id)
+            return entry
+        while f"evt_{next_generated_id:03d}" in used_ids:
+            next_generated_id += 1
+        replacement = f"evt_{next_generated_id:03d}"
+        next_generated_id += 1
+        logger.info("events_data_id_collision_repaired", old_id=entry.id, new_id=replacement)
+        used_ids.add(replacement)
+        return entry.model_copy(update={"id": replacement})
 
-        coros = [
-            _generate_batch(
-                batch_idx=group_start + i,
-                batch_n=group[i],
+    # Anchor pool: the shared-events timeline is already distinct and spans the
+    # whole arc, so each batch concretizes a disjoint early→late slice of it
+    # instead of every batch drifting to the loudest canonical beats.
+    if shared_events:
+        anchor_labels = [
+            f"{e.id}: {e.title}" for e in shared_events if getattr(e, "title", "")
+        ]
+    else:
+        anchor_labels = [f"角色冲突: {c.name}" for c in characters]
+
+    for batch_idx in range(num_batches):
+        batch_n = batch_counts[batch_idx]
+        start = sum(batch_counts[:batch_idx])
+        focus = anchor_labels[start : start + batch_n]
+        try:
+            batch_events = await _generate_batch(
+                batch_idx=batch_idx,
+                batch_n=batch_n,
                 description=description,
                 ip_canon=ip_canon,
                 characters=characters,
@@ -469,26 +542,24 @@ async def build_events_data(
                 existing_ids=list(existing_ids),
                 llm_router=llm_router,
                 char_names=char_names,
+                batch_total=num_batches,
+                event_id_start=start + 1,
+                focus_items=focus,
+                already_generated=list(generated_summaries),
+                extra_directive=extra_directive,
                 ip_pack=ip_pack,
                 fidelity_mode=fidelity_mode,
             )
-            for i in range(len(group))
-        ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("events_data_batch_failed", batch_idx=batch_idx, error=str(exc))
+            continue
 
-        results = await asyncio.gather(*coros, return_exceptions=True)
-
-        for i, result in enumerate(results):
-            batch_idx = group_start + i
-            if isinstance(result, BaseException):
-                logger.warning(
-                    "events_data_batch_failed",
-                    batch_idx=batch_idx,
-                    error=str(result),
-                )
-                continue
-            for entry in result:
-                all_results.append(entry)
-                existing_ids.append(entry.id)
+        for entry in batch_events:
+            entry = _reserve_unique_id(entry)
+            all_results.append(entry)
+            existing_ids.append(entry.id)
+            if entry.summary:
+                generated_summaries.append(entry.summary)
 
     # Dedup by id (take first occurrence)
     seen_ids: set[str] = set()

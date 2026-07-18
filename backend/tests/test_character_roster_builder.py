@@ -357,7 +357,10 @@ async def test_strict_force_injects_dropped_must_have():
     names = {e.name for e in roster}
     assert "苏无名" in names, "漏掉的 must_have 必须被强制补回"
     injected = next(e for e in roster if e.name == "苏无名")
-    assert injected.is_image_target is True  # must_have 补回时设为可玩
+    # must_have only guarantees roster closure; playability/portrait are a
+    # separate WorldSpec decision and must not be inferred from importance.
+    assert injected.playable_role is False
+    assert injected.portrait_target is False
 
 
 @pytest.mark.asyncio
@@ -413,7 +416,8 @@ def test_backfill_missing_must_have_appends_stub():
     assert injected == ["苏无名"]
     stub = next(c for c in result if c["name"] == "苏无名")
     assert stub["personality"]  # 必填字段非空
-    assert stub["is_image_target"] is True
+    assert stub["playable_role"] is False
+    assert stub["portrait_target"] is False
     # optional（裴喜君）不补
     assert "裴喜君" not in {c["name"] for c in result}
 

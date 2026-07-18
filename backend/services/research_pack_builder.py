@@ -13,7 +13,6 @@ LLMRouter API 说明：
 import asyncio
 import json
 import uuid
-from collections.abc import AsyncIterator
 from typing import Any
 
 import structlog
@@ -167,6 +166,9 @@ async def build_research_pack(
     max_passages: int,
     max_passage_chars: int,
     research_request: Any | None = None,    # schemas.generation_strategy.ResearchRequest | None
+    *,
+    probe_canon: bool = True,
+    summarize: bool = True,
 ) -> ResearchPack:
     """三路并发合并产出 ResearchPack：
 
@@ -190,7 +192,14 @@ async def build_research_pack(
         query_candidates=[description] if description.strip() else [],
     )
     tavily_coro = broker.collect_passages(request, max_chars=max_passage_chars)
-    canon_coro = probe_ip_canon(description, llm_router=llm_router)
+    async def _empty_canon() -> IPCanon:
+        return IPCanon()
+
+    canon_coro = (
+        probe_ip_canon(description, llm_router=llm_router)
+        if probe_canon
+        else _empty_canon()
+    )
 
     admin_passages, tavily_passages, ip_canon = await asyncio.gather(
         admin_passages_coro, tavily_coro, canon_coro,
@@ -202,7 +211,11 @@ async def build_research_pack(
     if remaining > 0:
         passages.extend(tavily_passages[:remaining])
 
-    summary = await broker.summarize_passages(passages) if passages else ""
+    summary = (
+        await broker.summarize_passages(passages)
+        if passages and summarize
+        else ""
+    )
 
     return ResearchPack(
         summary=summary,

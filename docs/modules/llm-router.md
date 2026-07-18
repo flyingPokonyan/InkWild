@@ -1,8 +1,8 @@
 # LLM Router 模块技术说明
 
-> 状态截至 2026-05-08。覆盖 LLMProvider 抽象 + 各 provider（DeepSeek / Claude / Gemini / Grok / OpenAI 兼容 / Seedream / Tavily）+ Phase 2.B.1 first-token timeout / bounded retry / prefix_hash 日志 + 三层 slot/provider/model 动态绑定（admin 后台）落地后的形态。
+> 状态截至 2026-07-16。覆盖 LLMProvider 抽象、首包/流停顿超时、生成调用完整 deadline、bounded retry、prefix_hash 日志和三层 slot/provider/model 动态绑定。
 
-LLM Router 是 InkWild 调用一切大模型的统一入口。`LLMRouter` 包一层 fallback chain + first-token timeout + transient retry，前面再叠 `services/model_management.py` 的三层抽象（Slot → ModelSlotBinding → ProviderModel → ModelProvider）把"业务调用什么模型"动态化——admin 后台改个绑定就生效，业务代码全程只见 slot 名（`game_main` / `npc_agent` / `moderation_slot` / ...）。
+LLM Router 是 InkWild 调用一切大模型的统一入口。`LLMRouter` 包一层 fallback chain + stream-stall timeout + transient retry；生成槽额外有完整调用 deadline。前面再叠 `services/model_management.py` 的三层抽象（Slot → ModelSlotBinding → ProviderModel → ModelProvider）把"业务调用什么模型"动态化——admin 后台改个绑定就生效，业务代码全程只见 slot 名（`game_main` / `npc_agent` / `moderation_slot` / ...）。
 
 它**不直接**做的事：
 - 不做业务编排（orchestrator / agents 各自负责）
@@ -37,7 +37,8 @@ LLM Router 是 InkWild 调用一切大模型的统一入口。`LLMRouter` 包一
 |---|---|---|
 | Fallback chain（多个 provider 顺序尝试，记录最后一个 error） | ✅ | `LLMRouter.stream_with_tools` line 113-180 |
 | `provider_name` 参数把指定 provider 顶到 chain 头部 | ✅ | line 122-123 |
-| First-token timeout（默认 60s）—只盖第一次 `__anext__`，开始流之后不再 enforce | ✅ | `_stream_one_provider` line 216-219 |
+| 首包/逐 chunk 停顿 timeout；只在首个 event 前允许 retry | ✅ | `_stream_one_provider` |
+| 完整调用 deadline（生成槽 600s，覆盖持续吐 token 但不结束） | ✅ | `total_timeout_seconds` + `GENERATION_TOTAL_TIMEOUT_SECONDS` |
 | Bounded retry（默认 1 次）只在 first event 之前生效 | ✅ | line 231-253 |
 | `_is_transient` 通过类名 + 5xx status_code 识别可重试错误（不 import openai/httpx） | ✅ | `llm/router.py:48` |
 | 已 yield first event 之后不再重试（避免 partial output 重发） | ✅ | line 256-261 |
@@ -86,6 +87,7 @@ LLM Router 是 InkWild 调用一切大模型的统一入口。`LLMRouter` 包一
 | `prompt.prefix_hash` 日志（哈希 + tool_count + response_format 类型 + system 总字节） | ✅ | `LLMRouter._system_prefix_signature` |
 | `llm_provider_failed` warn（含 error_type） | ✅ | line 173-178 |
 | `llm.timeout` warn + `llm.retry` info | ✅ | line 225-251 |
+| `llm.stream_stall` / `llm.total_timeout` warn | ✅ | `llm/router.py` |
 | `image_generation.retry` / `image_generation.failed` warn | ✅ | `seedream.py:62-79` |
 | Image 失败返回 placeholder URL，不 raise（创作工坊不被一次失败卡死） | ✅ | `seedream.py:80` + `IMAGE_PLACEHOLDER_URL` |
 | Grok web_search 部署失败时记 `_web_search_disabled_reason` 后续直接跳过 | ✅ | `llm/grok.py:148-184` |
@@ -109,15 +111,16 @@ LLM Router 是 InkWild 调用一切大模型的统一入口。`LLMRouter` 包一
 
 **问题**：之前 `LLMRouter.stream_with_tools` 直接 `async for` 上游 provider，DeepSeek 偶发抽风（30s 不返第一个 token）整局僵在那；fallback chain 也只在 generator 抛错时才切换，超时一直挂着用户看不到。
 
-**解决**：把 provider 流式拆成"等第一个事件"（带 `asyncio.wait_for`）+"第一个事件之后纯透传"两段。第一段超时 / transient error 可以重试（同 provider）或 fallback（chain 下一个）；第二段已经在喂 token 给前端，不能重启。
+**解决**：把 provider 流式拆成"等第一个事件"和"第一个事件之后继续取 chunk"两段，每次 `__anext__` 都有停顿超时。第一段超时 / transient error 可以重试（同 provider）或 fallback（chain 下一个）；一旦已有输出就不能重启，避免把两段答案拼接。`admin_generation` / `research_planning` 另有 600 秒完整调用 deadline，防止上游持续发心跳或零碎 token 而永不 EOF。
 
 **实现**：
 - `llm/router.py::_stream_one_provider`：用 `iterator.__anext__()` 单独 await 拿首个事件，超时阈值取 `settings.llm_call_timeout_seconds`（默认 60s）
 - 重试条件：`asyncio.TimeoutError` 总是重试；其他异常按 `_is_transient` 判断（类名 in `_TRANSIENT_EXC_NAMES` 或 `status_code` ∈ [500, 600)）
 - 重试上限 `settings.llm_call_max_retries`（默认 1，即最多 2 次尝试）；之后让 outer chain 切到下一个 provider
 - 类名匹配规避了 import 顺序耦合：不需要在 router 里 import openai / anthropic / httpx
+- `services/model_management.py` 只给生成槽注入 `total_timeout_seconds=600`；实时游戏槽不受这个长任务 deadline 影响
 
-**取舍**：拒绝了"全程 timeout 包住 provider stream" —— 流式 generation 合法跑几分钟，套外层 timeout 等于强行限制 max_tokens。`first-token only` 是"判断 provider 是否还活着"的最便宜信号。
+**取舍**：完整 deadline 不是全局默认，只用于离线生成槽。正常长输出可以运行数分钟，但单次模型调用不能无限占住整条世界 workflow；超时后由当前节点按既有失败语义处理，不增加 circuit breaker 或额外重试层。
 
 ### 2.2 Slot → Binding → Model → Provider 三层动态绑定
 
@@ -201,6 +204,7 @@ if event.get("type") == "usage":
 | 环境变量 | 默认 | 含义 |
 |---|---|---|
 | `LLM_CALL_TIMEOUT_SECONDS` | `60.0` | first-token 超时（秒） |
+| `GENERATION_TOTAL_TIMEOUT_SECONDS` | `600.0` | 生成槽单次完整调用上限（代码常量） |
 | `LLM_CALL_MAX_RETRIES` | `1` | 单 provider transient 重试次数 |
 | `LLM_CALL_RETRY_BACKOFF_SECONDS` | `0.5` | 重试退避秒数 |
 | `MODEL_PROBE_TTL_HOURS` | `168` | 能力探活结果缓存 TTL（一周） |

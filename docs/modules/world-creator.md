@@ -1,6 +1,6 @@
 # World Creator（创作工坊）模块技术说明
 
-> 状态截至 2026-05-08。覆盖 Phase 0.D（并发限制 / 草稿→发布原子性 / SSE 客户端超时）+ Phase 2.E.2（图片 retry + placeholder 兜底）+ 2.E.3（generation_event 写入事务）落地后的形态。
+> 状态截至 2026-07-16。世界生成使用受约束 Director + 固定 Workflow；脚本生成仍沿用同一任务/SSE/草稿基础设施。
 
 创作工坊是 admin 端的**多步骤 AI 生成系统**——给一段中文描述，自动生成完整的"世界"（base_setting + locations + characters + playable + cover image）或"剧本"（绑定已有世界，生成 events + endings + playable）。
 
@@ -16,30 +16,39 @@
 - 上：`api/admin.py` 的 `/world-generation-tasks` / `/script-generation-tasks` 端点 + 前端 `app/admin/generate/*`
 - 下：[llm-router](./llm-router.md)（多个 slot 调用）+ Tavily（联网检索）+ Seedream（图片生成）
 
-## 1. 能力矩阵
+## 1. 当前世界生成流程
 
-### A. 五层模型（参考 `docs/世界生成Agent.md` 老指南整理）
+世界生成不是自由 Agent。Director 只做一次受约束规划，Workflow 冻结 `WorldSpec` 后按节点执行；完成、失败和发布资格由契约与状态机决定。
 
-每个生成阶段都遵循 policy → research → strategy → execution → validation 的递进结构。
+```text
+Phase A: IP recognition
+  → 用户确认 strict / loose / none
+Phase B: research_pack(skip for known IP) → IP research → Director/WorldSpec
+  → world_base → roster → lore + character batches
+  → shared events → runtime events → playable/free-start
+  → critic/moderation → visual brief/images → final contract → draft
+  → durable async quality job → passed / needs_review / failed
+```
 
-| 层 | 职责 | 实现 |
-|---|---|---|
-| **policy** | 决定本阶段要不要做研究、研究范围 | `_decide_research_policy(stage, context)` line ~681 |
-| **research** | 联网检索 + LLM 总结成 reference_doc | `_stream_research_stage` + `ResearchBroker.search` |
-| **strategy** | 用 reference_doc + 上一阶段产出生成"brief"（短摘要 + 决策） | `GenerationStrategyService.build_*_brief` |
-| **execution** | 用 brief + reference_doc 调主 LLM 出本阶段产物 | `_generate_world_base / _generate_characters / ...` 系列 |
-| **validation** | 形状校验 + critic gate（复审 + 修复） | `_validate_world / _validate_script / _normalize_*_review_result` |
+关键完成语义：
 
-### B. World 生成阶段流（`create_world`）
+- `strict` 已知 IP 必须有可用 pack、带可追溯 citations 的原作证据和至少一个 must-have；研究失败/过薄时在 builder 前停止，不再生成“同名原创世界”。
+- `WorldSpec.ip_name` 继承 Phase A 识别结果，不依赖 pack 是否成功持久化。
+- 生成槽单次模型调用最长 600 秒；超时记为 `generation_call_timeout`，不误报为 provider factory 超时。
+- 失败/取消任务不创建 quality job；质量任务绑定 payload revision/hash。
+- 流程校验使用代码检查规模、must-have、引用、事件和图片；内容质检独立读取最终角色关系、lore、完整事件因果、研究证据与 WorldSpec。
+- 正常质量审核 1 次；低分、低置信度或 major violation 才追加第 2 次，结论分歧才追加第 3 次。
 
-按 progress 事件 phase 名顺序：
+### B. World 生成主要节点（`WorldCreatorAgentV2.create_world`）
 
 | phase | 内容 | 产出 |
 |---|---|---|
-| `research`（隐式两次） | 世界框架 + 角色补研究 | reference_doc 字符串 |
-| `world_base` | base_setting / world_brief / locations / 时代背景 | `world_base` dict |
-| `characters` | 全部 NPC 角色（personality / secret / schedule / knowledge / initial_peer_relations 等） | `characters` list |
-| `playable` | 可扮演角色列表（subset of characters） | `playable_data` list |
+| `research_pack` / `ip_research` | 原创素材研究；已知 IP 用两条互补检索 + evidence compile + canon finalize | `ResearchPack` / `IPKnowledgePack` |
+| `world_director` | 冻结规模、主视角候选、lore 维度和调用预算 | `WorldSpec` |
+| `world_base` / `character_roster` | 世界骨架、地点和角色名册 | base + roster |
+| `lore_pack` / `characters` | lore 批量正文 + 角色详情批次 | lore + characters |
+| `shared_events` / `events_data` | 共享历史、角色信息差，以及按互斥锚点分批的运行时事件 | events |
+| `playable` / `free_start_stages` | 可玩角色和最多 3 个主视角起点批量生成 | playable + stages |
 | `critic` | LLM 复审 + 自动修复 (`repair_completed` / 标记 quality_warnings) | warnings + 可能的 patch |
 | `visual_brief` | 静态派生 `CoverBrief` + LLM 辅助出英文名/4 维 descriptor（不再调主 brief LLM）| `CoverBrief` + `char_briefs` 存到 self（不持久化）|
 | `images` | hero（21:9）+ 角色头像（2:3）+ server-crop 3:2 cover；走 gpt-image-2 | image URLs |

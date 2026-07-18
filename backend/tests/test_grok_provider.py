@@ -1,22 +1,11 @@
-import json
 import asyncio
+import json
 
 import httpx
 import pytest
 
 from llm import grok as grok_module
 from llm.grok import GrokProvider
-
-
-def _sse_body(chunks: list[dict]) -> bytes:
-    """Render OpenAI-style chat.completion.chunk objects as an SSE byte stream.
-
-    Mirrors what the jiuuij gateway force-streams back even for non-stream
-    requests — `data: {chunk}` lines terminated by `data: [DONE]`.
-    """
-    lines = [f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks]
-    lines.append("data: [DONE]\n\n")
-    return "".join(lines).encode()
 
 
 def _patch_transport(monkeypatch, handler) -> None:
@@ -30,24 +19,40 @@ def _patch_transport(monkeypatch, handler) -> None:
 
 
 @pytest.mark.asyncio
-async def test_web_search_parses_sse_and_extracts_citations(monkeypatch):
-    """Gateway streams SSE; web_search must accumulate deltas + pull search_sources."""
-    chunks = [
-        {"choices": [{"delta": {"content": "Alpha "}}]},
-        {
-            "choices": [{"delta": {"content": "Beta"}}],
-            "search_sources": [
-                {"url": "https://example.com/source", "title": "Example Source"},
-                {"url": "https://example.com/source", "title": "dup"},  # deduped by url
-            ],
-        },
-    ]
+async def test_web_search_uses_responses_api_and_extracts_citations(monkeypatch):
+    response = {
+        "citations": ["https://example.com/top-level"],
+        "output": [
+            {"type": "web_search_call", "status": "completed"},
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": "Alpha Beta",
+                        "annotations": [
+                            {
+                                "type": "url_citation",
+                                "url": "https://example.com/source",
+                                "title": "Example Source",
+                            },
+                            {
+                                "type": "url_citation",
+                                "url": "https://example.com/source",
+                                "title": "duplicate",
+                            },
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
         captured["body"] = json.loads(request.content)
-        return httpx.Response(200, content=_sse_body(chunks))
+        return httpx.Response(200, json=response)
 
     _patch_transport(monkeypatch, handler)
 
@@ -56,13 +61,14 @@ async def test_web_search_parses_sse_and_extracts_citations(monkeypatch):
 
     assert result.text == "Alpha Beta"
     assert result.citations == [
+        {"url": "https://example.com/top-level", "title": ""},
         {"url": "https://example.com/source", "title": "Example Source"}
     ]
-    # request shape: chat.completions + Live Search params + explicit stream
-    assert captured["url"].endswith("/chat/completions")
+    assert captured["url"].endswith("/responses")
     assert captured["body"]["model"] == "grok-test"
-    assert captured["body"]["stream"] is True
-    assert captured["body"]["search_parameters"]["mode"] == "on"
+    assert captured["body"]["max_output_tokens"] == 123
+    assert captured["body"]["max_tool_calls"] == 8
+    assert captured["body"]["tools"] == [{"type": "web_search"}]
 
 
 @pytest.mark.asyncio
@@ -80,40 +86,21 @@ async def test_web_search_non_200_returns_empty(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_web_search_malformed_chunks_are_skipped(monkeypatch):
-    """A non-JSON data line shouldn't abort the whole parse."""
-    body = (
-        b"data: not-json\n\n"
-        + _sse_body([{"choices": [{"delta": {"content": "ok"}}]}])
-    )
-
+async def test_web_search_malformed_json_returns_empty(monkeypatch):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=body)
+        return httpx.Response(200, content=b"not-json")
 
     _patch_transport(monkeypatch, handler)
 
     provider = GrokProvider(api_key="k", base_url="https://gw/v1", model="grok-test")
     result = await provider.web_search("q")
 
-    assert result.text == "ok"
+    assert result.text == ""
+    assert result.citations == []
 
 
 @pytest.mark.asyncio
 async def test_web_search_has_total_wall_clock_timeout(monkeypatch):
-    class HangingStream:
-        status_code = 200
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            return None
-
-        async def aiter_lines(self):
-            while True:
-                yield "data: {}"
-                await asyncio.sleep(0.01)
-
     class FakeClient:
         def __init__(self, **kwargs):
             pass
@@ -124,8 +111,8 @@ async def test_web_search_has_total_wall_clock_timeout(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
-        def stream(self, *args, **kwargs):
-            return HangingStream()
+        async def post(self, *args, **kwargs):
+            await asyncio.sleep(60)
 
     monkeypatch.setattr(grok_module.httpx, "AsyncClient", FakeClient)
     monkeypatch.setattr(grok_module.settings, "grok_web_search_total_timeout_seconds", 0.02)

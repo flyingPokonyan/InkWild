@@ -19,6 +19,14 @@ MODEL_SLOTS = [
 ]
 
 
+def test_generation_slots_use_bounded_tail_latency_policy():
+    router = model_management_service._legacy_text_router("admin_generation")
+    assert router is not None
+    assert router._timeout_seconds == 180.0
+    assert router._total_timeout_seconds == 600.0
+    assert router._max_retries == 1
+
+
 @pytest.mark.asyncio
 async def test_model_management_lists_start_empty(client, admin_auth_cookies, monkeypatch):
     monkeypatch.setattr(settings, "model_management_bootstrap_enabled", False)
@@ -195,6 +203,7 @@ async def test_bootstrap_seeds_current_runtime_models_and_bindings(client, admin
     monkeypatch.setattr(settings, "llm_default_model", "deepseek-chat")
     monkeypatch.setattr(settings, "llm_compression_model", "deepseek-lite")
     monkeypatch.setattr(settings, "grok_model", "grok-4")
+    monkeypatch.setattr(settings, "ip_recognition_model", "grok-chat-fast")
     monkeypatch.setattr(settings, "grok_image_model", "grok-imagine")
     # gpt-image is the preferred default for the image_generation slot since the
     # 2026-05 cover-image redesign; set it explicitly so the binding is deterministic.
@@ -218,6 +227,7 @@ async def test_bootstrap_seeds_current_runtime_models_and_bindings(client, admin
     assert slots["game_main"]["binding"]["model"]["model_id"] == "deepseek-chat"
     assert slots["conversation_compression"]["binding"]["model"]["model_id"] == "deepseek-lite"
     assert slots["research_summary"]["binding"]["model"]["model_id"] == "grok-4"
+    assert slots["ip_recognition"]["binding"]["model"]["model_id"] == "grok-chat-fast"
     assert slots["image_generation"]["binding"]["model"]["model_id"] == "gpt-image-2"
 
 

@@ -23,6 +23,20 @@ def test_relations_from_shared_events():
     assert any(r.target == "C" and r.why == "e2" for r in b_rels)
 
 
+def test_explicit_character_relations_are_preserved_in_runtime_pack():
+    from schemas.character_v2 import CharacterPeerRelation
+
+    a = _ch("A")
+    a.initial_peer_relations = [CharacterPeerRelation(target="B", trust=-8, kind="宿敌")]
+    pack = build_relations_pack([a, _ch("B")], shared_events=[])
+
+    relation = pack.relations_by_npc["A"][0]
+    assert relation.target == "B"
+    assert relation.trust == -8
+    assert relation.kind == "宿敌"
+    assert relation.why == "character.initial_peer_relations"
+
+
 def test_no_self_relation():
     chars = [_ch("A"), _ch("B")]
     events = [SharedEvent(id="e1", title="T", summary="S", involved_npcs=["A","B"], source_passage_ids=[])]

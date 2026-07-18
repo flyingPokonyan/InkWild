@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
-from services.ip_recognizer import build_recognizer_llm, recognize_ip
+from services.ip_recognizer import IPRecognition, build_recognizer_llm, recognize_ip
 
 
 class FakeLLM:
@@ -13,6 +13,17 @@ class FakeLLM:
     async def stream_with_tools(self, **_kwargs):
         for ch in self._text:
             yield {"type": "text_delta", "text": ch}
+
+
+def test_ip_name_strips_model_added_title_marks():
+    rec = IPRecognition(
+        kind="known_ip",
+        confidence=0.9,
+        ip_name="《长安十二时辰》",
+        ip_type="tv",
+    )
+
+    assert rec.ip_name == "长安十二时辰"
 
 
 @pytest.mark.asyncio
@@ -124,6 +135,40 @@ async def test_no_rescue_when_search_yields_nothing(monkeypatch):
     monkeypatch.setattr("services.ip_recognizer._web_search_evidence", empty_evidence)
     llm = FakeLLM('{"kind":"original","confidence":0.9}')
     rec = await recognize_ip("一个纯粹虚构的泛概念", llm_router=llm)
+    assert rec.kind == "original"
+    assert rec.ip_name is None
+
+
+@pytest.mark.asyncio
+async def test_explicit_titled_work_cannot_be_mislabeled_original(monkeypatch):
+    async def empty_evidence(_llm, _description):
+        return ""
+
+    monkeypatch.setattr("services.ip_recognizer._web_search_evidence", empty_evidence)
+    class MustNotBeCalled:
+        async def stream_with_tools(self, **_kwargs):
+            raise AssertionError("explicit title recognition must not call the LLM")
+            yield
+
+    rec = await recognize_ip(
+        "生成《凡人修仙传》原著小说版的大型世界",
+        llm_router=MustNotBeCalled(),
+    )
+
+    assert rec.kind == "known_ip"
+    assert rec.ip_name == "凡人修仙传"
+    assert rec.ip_type == "novel"
+
+
+@pytest.mark.asyncio
+async def test_explicit_original_world_title_stays_original(monkeypatch):
+    async def empty_evidence(_llm, _description):
+        return ""
+
+    monkeypatch.setattr("services.ip_recognizer._web_search_evidence", empty_evidence)
+    llm = FakeLLM('{"kind":"original","confidence":0.95,"ip_type":"other"}')
+    rec = await recognize_ip("创作原创世界《雾城》", llm_router=llm)
+
     assert rec.kind == "original"
     assert rec.ip_name is None
 

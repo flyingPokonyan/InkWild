@@ -225,6 +225,35 @@ class MidStreamStallProvider(LLMProvider):
         yield {"type": "text_delta", "text": "never reached"}
 
 
+class SlowButActiveProvider(LLMProvider):
+    """Keeps producing chunks, so only the whole-call deadline can stop it."""
+
+    async def stream_with_tools(self, messages, tools, system=None, max_tokens=2048, response_format=None):
+        for i in range(100):
+            await asyncio.sleep(0.01)
+            yield {"type": "text_delta", "text": str(i)}
+
+
+@pytest.mark.asyncio
+async def test_router_total_timeout_caps_an_active_stream():
+    router = LLMRouter(
+        providers={"slow": SlowButActiveProvider()},
+        fallback_chain=["slow"],
+        timeout_seconds=0.1,
+        total_timeout_seconds=0.05,
+        max_retries=0,
+        retry_backoff_seconds=0.0,
+    )
+    events: list[dict] = []
+
+    with pytest.raises(asyncio.TimeoutError):
+        async for event in router.stream_with_tools([], [], provider_name="slow"):
+            events.append(event)
+
+    assert events
+    assert len(events) < 100
+
+
 @pytest.mark.asyncio
 async def test_router_mid_stream_stall_raises_timeout_after_first_event():
     stalling = MidStreamStallProvider()

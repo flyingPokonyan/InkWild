@@ -5,7 +5,13 @@ from models.credit import CreditConfig, CreditHold, CreditLedger, CreditWallet
 from models.draft import ScriptDraft, WorldDraft
 from models.feedback import Feedback, FeedbackEvent
 from models.game import GameSession, Message, TokenUsage
-from models.generation_task import GenerationTask, GenerationTaskEvent
+from models.generation_task import (
+    GenerationAction,
+    GenerationNodeRun,
+    GenerationTask,
+    GenerationTaskEvent,
+    GenerationViolation,
+)
 from models.ip_knowledge_pack import IPKnowledgePack
 from models.memory import MemoryEntry
 from models.model_management import ModelCapabilityProbe, ModelProvider, ModelSlotBinding, ProviderModel
@@ -39,6 +45,9 @@ __all__ = [
     "ScriptDraft",
     "GenerationTask",
     "GenerationTaskEvent",
+    "GenerationNodeRun",
+    "GenerationAction",
+    "GenerationViolation",
     "Script",
     "User",
     "AuthIdentity",

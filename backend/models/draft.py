@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, JSON, String, Text, Uuid
+from sqlalchemy import ForeignKey, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -21,6 +21,9 @@ class WorldDraft(Base):
     id: Mapped[str] = mapped_column(Uuid(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
     world_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), ForeignKey("worlds.id"), nullable=True, unique=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    payload_revision: Mapped[int] = mapped_column(Integer, default=0)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    quality_status: Mapped[str] = mapped_column(String(20), default="not_requested", index=True)
     created_by_user_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("users.id"), index=True)
     review_status: Mapped[str] = mapped_column(String(16), default="editing", index=True)
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)

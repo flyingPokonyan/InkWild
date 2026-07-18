@@ -28,6 +28,8 @@ _CONFIDENCE_DEMOTE_DELTA = 0.20
 _CONFIDENCE_DEMOTE_FLOOR = 0.40
 # Below this confidence after demotion, downgrade kind from known_ip → hybrid.
 _HYBRID_DOWNGRADE_THRESHOLD = 0.50
+_EXPLICIT_TITLE_RE = re.compile(r"[《「](?P<title>[^》」\n]{1,80})[》」]")
+_ORIGINAL_INTENT_RE = re.compile(r"原创|自创|完全虚构|非现有\s*IP", re.IGNORECASE)
 
 
 class IPRecognition(BaseModel):
@@ -37,6 +39,17 @@ class IPRecognition(BaseModel):
     ip_type: IPType | None = None
     one_liner: str | None = None
     source_hints: list[str] = Field(default_factory=list)
+
+    @field_validator("ip_name", mode="before")
+    @classmethod
+    def _normalize_ip_name(cls, value: Any) -> str | None:
+        name = str(value or "").strip()
+        while len(name) >= 2 and (
+            (name.startswith("《") and name.endswith("》"))
+            or (name.startswith("「") and name.endswith("」"))
+        ):
+            name = name[1:-1].strip()
+        return name or None
 
     @field_validator("source_hints", mode="before")
     @classmethod
@@ -89,7 +102,7 @@ async def build_recognizer_llm(db: Any, fallback: Any | None = None) -> Any | No
 
     **统一走 slot 体系**（与其余槽一致、admin 可改，不再硬编码 provider/model）：
     `resolve_slot_provider` 取 `ip_recognition` 槽绑定的 provider；未绑定时其
-    `_legacy_text_router` 用 `ip_recognition_model`（grok-4.3-fast）建 grok 兜底；grok 完全
+    `_legacy_text_router` 用 `ip_recognition_model`（grok-chat-fast）建 grok 兜底；grok 完全
     未配置时返回 `fallback`（生成主模型，退化为纯参数判断、web_search 兜底自动失效）。
     """
     try:
@@ -159,13 +172,13 @@ async def _tavily_verify(ip_name: str, tavily: Any | None) -> bool:
 
 
 async def _web_search_evidence(llm_router: Any, description: str) -> str:
-    """识别兜底取证：用识别器自己的 grok 模型（ip_recognition_model，当前 grok-4.3-fast）
+    """识别兜底取证：用识别器自己的 grok 模型（ip_recognition_model，当前 grok-chat-fast）
     做 Live Search，查"这个描述是不是某部具体作品"。
 
     离线主模型 / grok 参数知识认不出较新作品（典型：网文标题像普通词组，如「十日终焉」），
     把真 IP 误判成 original → 整条 IP 研究 / 裁决链路被跳过。这里在参数判断说 original 时
     补一次联网检索，把证据喂回判断。**与判断步同一个 grok 模型、不另起 provider**（实测
-    grok-4.3-fast Live Search 对「十日终焉」返回作者/主角/类型 + 15 条引用）；llm_router
+    grok-chat-fast Live Search 对「十日终焉」返回作者/主角/类型 + 15 条引用）；llm_router
     不支持 web_search（如回退到离线主模型）时返回空串，退回纯参数行为。
     """
     web_search = getattr(llm_router, "web_search", None)
@@ -194,6 +207,33 @@ async def recognize_ip(description: str, llm_router: Any, tavily: Any | None = N
     """
     if not description.strip():
         return IPRecognition(kind="original", confidence=0.0)
+
+    # Explicitly titled adaptation/source requests are deterministic and do not
+    # need an LLM vote. This both removes a noisy gateway call and guarantees
+    # that strict evidence research cannot be skipped by a recognizer wobble.
+    title_match = _EXPLICIT_TITLE_RE.search(description)
+    if title_match and not _ORIGINAL_INTENT_RE.search(description):
+        title = title_match.group("title").strip()
+        if "电视剧" in description or "剧版" in description:
+            explicit_type: IPType = "tv"
+        elif "电影" in description:
+            explicit_type = "movie"
+        elif "小说" in description or "原著" in description:
+            explicit_type = "novel"
+        elif "动漫" in description or "动画" in description:
+            explicit_type = "anime"
+        elif "游戏" in description:
+            explicit_type = "game"
+        else:
+            explicit_type = "other"
+        logger.info("ip_recognition_explicit_title", ip_name=title, ip_type=explicit_type)
+        return IPRecognition(
+            kind="known_ip",
+            confidence=0.9,
+            ip_name=title,
+            ip_type=explicit_type,
+            source_hints=[title],
+        )
 
     async def _attempt(evidence: str = "") -> IPRecognition:
         user = description

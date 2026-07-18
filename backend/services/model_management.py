@@ -104,7 +104,7 @@ SLOT_DEFINITIONS = (
     {
         "slot_name": "ip_recognition",
         "label": "IP 识别",
-        "description": "Stage 0 判断世界描述是否指向已知 IP。需联网（Live Search）能力，建议绑 Grok；未绑定回退 grok-4.3-fast。",
+        "description": "Stage 0 判断世界描述是否指向已知 IP。需联网（Live Search）能力，建议绑定 grok-chat-fast。",
         "model_kind": TEXT_MODEL_KIND,
         "required_capabilities": ("chat_basic", "streaming"),
     },
@@ -138,7 +138,8 @@ REALTIME_TEXT_SLOT_NAMES = {"game_main", "npc_agent", "intermission"}
 # 生成槽：① 关 thinking（reasoning=False）—— 实测 thinking-capable 模型(deepseek-v4-pro)
 # 在慢网关(OpenCode)上 CoT 开时会把 token 预算耗在隐藏推理上、正文为空或被截 →
 # 批次 JSON 解析失败、事件/角色被静默丢弃(事件数骤减甚至生成失败)。结构化 JSON 生成
-# 不需要可见 CoT，关掉更稳更快。② 仍给更长首 token 超时(300s)作余量。
+# 不需要可见 CoT，关掉更稳更快。② 生成槽给 180s 首 token 超时和 1 次重试；
+# 单批最坏 6 分钟。旧 300s + 3 retries 会让一个坏批次拖住整条世界约 20 分钟。
 # (2026-05-31：硬证据推翻了"CoT 对生成有帮助"的旧假设——见 [[generation-infra-2026-05-31]])
 GENERATION_TEXT_SLOT_NAMES = {"admin_generation", "research_planning"}
 # Offline summary slots that also disable thinking. conversation_compression is
@@ -153,7 +154,9 @@ REASONING_OFF_TEXT_SLOT_NAMES = (
     | GENERATION_TEXT_SLOT_NAMES
     | {"conversation_compression"}
 )
-GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS = 300.0
+GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS = 180.0
+GENERATION_TOTAL_TIMEOUT_SECONDS = 600.0
+GENERATION_MAX_RETRIES = 1
 
 
 def _reasoning_for_slot(slot_name: str) -> bool | None:
@@ -541,6 +544,12 @@ def _default_bootstrap_specs() -> list[dict]:
             "display_name": "xAI 文本模型",
             "model_kind": TEXT_MODEL_KIND,
         }
+    if settings.ip_recognition_model:
+        xai_models[(settings.ip_recognition_model, TEXT_MODEL_KIND)] = {
+            "model_id": settings.ip_recognition_model,
+            "display_name": "xAI 快速 IP 识别模型",
+            "model_kind": TEXT_MODEL_KIND,
+        }
     if settings.grok_image_model:
         xai_models[(settings.grok_image_model, IMAGE_MODEL_KIND)] = {
             "model_id": settings.grok_image_model,
@@ -557,6 +566,7 @@ def _default_bootstrap_specs() -> list[dict]:
                 "models": list(xai_models.values()),
                 "slot_models": {
                     "research_summary": (settings.grok_model, TEXT_MODEL_KIND),
+                    "ip_recognition": (settings.ip_recognition_model, TEXT_MODEL_KIND),
                     "image_generation": (settings.grok_image_model, IMAGE_MODEL_KIND),
                 },
             }
@@ -1402,6 +1412,8 @@ def _legacy_text_router(slot_name: str) -> LLMRouter | None:
             identity={"provider_name": "deepseek-legacy", "model_id": model_name},
             reasoning=_reasoning_for_slot(slot_name),
             timeout_seconds=GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
+            total_timeout_seconds=GENERATION_TOTAL_TIMEOUT_SECONDS if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
+            max_retries=GENERATION_MAX_RETRIES if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
         )
     if slot_name == "research_summary" and settings.grok_api_key:
         provider = GrokProvider(model=settings.grok_model)
@@ -1411,7 +1423,7 @@ def _legacy_text_router(slot_name: str) -> LLMRouter | None:
             identity={"provider_name": "grok-legacy", "model_id": settings.grok_model},
         )
     if slot_name == "ip_recognition" and settings.grok_api_key:
-        # 槽未绑定时的兜底：用 ip_recognition_model（grok-4.3-fast）建 grok provider，
+        # 槽未绑定时的兜底：用 ip_recognition_model（grok-chat-fast）建 grok provider，
         # 保留判断 + web_search 联网取证能力（与绑定态行为一致）。
         provider = GrokProvider(model=settings.ip_recognition_model)
         return LLMRouter(
@@ -1444,6 +1456,8 @@ async def resolve_slot_router(
         },
         reasoning=_reasoning_for_slot(slot_name),
         timeout_seconds=GENERATION_FIRST_TOKEN_TIMEOUT_SECONDS if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
+        total_timeout_seconds=GENERATION_TOTAL_TIMEOUT_SECONDS if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
+        max_retries=GENERATION_MAX_RETRIES if slot_name in GENERATION_TEXT_SLOT_NAMES else None,
     )
 
 

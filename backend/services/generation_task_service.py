@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
+import hashlib
 import inspect
+import json
 from typing import Any
+import uuid
 
 import structlog
 from sqlalchemy import func, select, text
@@ -37,6 +40,7 @@ _OUTLINE_AUTO_RECOMMEND_THRESHOLD = 12
 
 PHASE_A = "phase_a"
 PHASE_B = "phase_b"
+REFINE = "refine"  # AI 精修：对已生成草稿的 payload 做定向内容重写
 
 
 class GenerationTaskLimitExceeded(Exception):
@@ -137,7 +141,9 @@ class GenerationTaskService:
             }
             if phase:
                 request_payload["phase"] = phase
+            generation_run_id = str(uuid.uuid4())
             task = GenerationTask(
+                generation_run_id=generation_run_id,
                 kind="world",
                 draft_type="world_draft",
                 draft_id=draft.id,
@@ -151,6 +157,7 @@ class GenerationTaskService:
             )
             session.add(task)
             await session.flush()
+            task.root_task_id = task.id
             session.add(
                 GenerationTaskEvent(
                     task_id=task.id,
@@ -185,7 +192,26 @@ class GenerationTaskService:
         async with self.session_factory() as session:
             await self._acquire_generation_task_limit_lock(session, user_id)
             await self._enforce_generation_task_limit(session, user_id)
+            parent_task = (
+                await session.execute(
+                    select(GenerationTask)
+                    .where(
+                        GenerationTask.draft_type == "world_draft",
+                        GenerationTask.draft_id == draft_id,
+                    )
+                    .order_by(GenerationTask.created_at.desc())
+                )
+            ).scalars().first()
+            generation_run_id = str(
+                parent_task.generation_run_id if parent_task and parent_task.generation_run_id else uuid.uuid4()
+            )
+            root_task_id = str(
+                parent_task.root_task_id if parent_task and parent_task.root_task_id else parent_task.id
+            ) if parent_task else None
             task = GenerationTask(
+                generation_run_id=generation_run_id,
+                root_task_id=root_task_id,
+                parent_task_id=str(parent_task.id) if parent_task else None,
                 kind="world",
                 draft_type="world_draft",
                 draft_id=draft_id,
@@ -207,6 +233,8 @@ class GenerationTaskService:
             )
             session.add(task)
             await session.flush()
+            if task.root_task_id is None:
+                task.root_task_id = task.id
             session.add(
                 GenerationTaskEvent(
                     task_id=task.id,
@@ -217,6 +245,71 @@ class GenerationTaskService:
                         "code": "task_created",
                         "message": "生成任务已创建，正在准备创作会话…",
                     },
+                )
+            )
+            await session.commit()
+            return str(task.id)
+
+    async def start_world_refine_task(
+        self,
+        *,
+        draft_id: str,
+        targets: list[str],
+        user_id: str,
+    ) -> str:
+        """Create a `refine` task on an EXISTING world draft.
+
+        Ownership is enforced by the API layer. Inherits generation_run_id /
+        root_task_id from the draft's latest task so all runs stay linked.
+        """
+        async with self.session_factory() as session:
+            await self._acquire_generation_task_limit_lock(session, user_id)
+            await self._enforce_generation_task_limit(session, user_id)
+            parent_task = (
+                await session.execute(
+                    select(GenerationTask)
+                    .where(
+                        GenerationTask.draft_type == "world_draft",
+                        GenerationTask.draft_id == draft_id,
+                    )
+                    .order_by(GenerationTask.created_at.desc())
+                )
+            ).scalars().first()
+            generation_run_id = str(
+                parent_task.generation_run_id if parent_task and parent_task.generation_run_id else uuid.uuid4()
+            )
+            root_task_id = (
+                str(parent_task.root_task_id or parent_task.id) if parent_task else None
+            )
+            task = GenerationTask(
+                generation_run_id=generation_run_id,
+                root_task_id=root_task_id,
+                parent_task_id=str(parent_task.id) if parent_task else None,
+                kind="world",
+                draft_type="world_draft",
+                draft_id=draft_id,
+                request_payload={
+                    "phase": REFINE,
+                    "targets": list(targets or []),
+                    "user_id": user_id,
+                },
+                created_by_user_id=user_id,
+                started_at=utcnow(),
+                current_phase="boot",
+                current_code="task_created",
+                current_message="精修任务已创建…",
+                last_event_seq=1,
+            )
+            session.add(task)
+            await session.flush()
+            if task.root_task_id is None:
+                task.root_task_id = task.id
+            session.add(
+                GenerationTaskEvent(
+                    task_id=task.id,
+                    seq=1,
+                    event_name="progress",
+                    payload={"phase": "boot", "code": "task_created", "message": "精修任务已创建…"},
                 )
             )
             await session.commit()
@@ -340,6 +433,22 @@ class GenerationTaskService:
     def launch_script_generation(self, task_id: str) -> None:
         self._launch(self._run_script_generation(task_id))
 
+    def launch_world_refine(self, task_id: str) -> None:
+        self._launch(self._run_world_refine(task_id))
+
+    async def request_world_quality(self, task_id: str) -> str | None:
+        """Durably enqueue quality for the draft's current payload revision."""
+        from services.world_quality_scorer import WorldQualityScorer
+
+        job_id = await WorldQualityScorer(self.session_factory, None).enqueue(task_id)
+        if job_id is None:
+            return None
+        base_agent = await asyncio.wait_for(
+            _resolve_factory_result(self.world_creator_factory()), timeout=30.0
+        )
+        self._launch(self._score_world_quality(job_id, getattr(base_agent, "llm", None)))
+        return job_id
+
     async def get_task(self, task_id: str) -> GenerationTask | None:
         async with self.session_factory() as session:
             return await session.get(GenerationTask, task_id)
@@ -414,12 +523,21 @@ class GenerationTaskService:
 
         task.add_done_callback(_cleanup)
 
-    async def _score_world_quality(self, task_id: str, llm_router: Any) -> None:
-        """异步质量打分 — fire-and-forget 调用，整体 try/except 在 scorer 内部，绝不影响生成。"""
+    async def _score_world_quality(self, job_id: str, llm_router: Any) -> None:
+        """Execute a job whose pending row was already committed durably."""
         from services.world_quality_scorer import WorldQualityScorer
 
         scorer = WorldQualityScorer(self.session_factory, llm_router)
-        await scorer.score_task(task_id, run_soft=llm_router is not None)
+        await scorer.run_job(job_id, run_soft=llm_router is not None)
+
+    async def _enqueue_world_quality(self, task_id: str, llm_router: Any) -> str | None:
+        from services.world_quality_scorer import WorldQualityScorer
+
+        scorer = WorldQualityScorer(self.session_factory, llm_router)
+        job_id = await scorer.enqueue(task_id)
+        if job_id:
+            self._launch(self._score_world_quality(job_id, llm_router))
+        return job_id
 
     async def _run_world_generation(self, task_id: str) -> None:
         """AOP wrapper: attribute every nested LLM/image call to this task.
@@ -450,7 +568,6 @@ class GenerationTaskService:
                 await self._credit_settle(user_id, hold_id, acc, task_id)
 
     async def _run_world_generation_impl(self, task_id: str) -> None:
-        from config import settings
         from services.world_creator_agent_v2 import WorldCreatorAgentV2
 
         logger.info("world_generation_started", task_id=task_id)
@@ -472,6 +589,7 @@ class GenerationTaskService:
         # failures (e.g. slot-bound provider with missing API-key env var) bubble up to
         # _launch._cleanup which only logs — the task then stays "running" forever and
         # the SSE stream never terminates, leaving the UI stuck at "session_started".
+        factory_ready = False
         try:
             # Factory does pure DB lookups + provider constructors — should be sub-second.
             # If it hangs (e.g. DB connection pool exhausted, asyncpg deadlock), the
@@ -482,6 +600,7 @@ class GenerationTaskService:
                 _resolve_factory_result(self.world_creator_factory()),
                 timeout=30.0,
             )
+            factory_ready = True
             logger.info(
                 "world_generation_factory_ready",
                 task_id=task_id,
@@ -535,7 +654,7 @@ class GenerationTaskService:
                     description = request.get("description", "")
                     llm_router = getattr(base_agent, "llm", None)
                     tavily = getattr(base_agent, "tavily", None)
-                    # 识别步走 ip_recognition 槽（admin 可管，默认 grok-4.3-fast 联网）；
+                    # 识别步走 ip_recognition 槽（admin 可管，默认 grok-chat-fast 联网）；
                     # 未绑/grok 未配置时回退到生成主模型。
                     async with self.session_factory() as _rec_db:
                         recognizer_llm = await build_recognizer_llm(_rec_db, fallback=llm_router)
@@ -638,12 +757,18 @@ class GenerationTaskService:
             # 异步质量打分（plan 2026-06-24）：done 已记录、draft 已落库后 fire-and-forget。
             # 不阻塞生成、失败不影响 draft。PHASE_A 只做 IP 识别、无 payload，跳过。
             if phase != PHASE_A:
-                self._launch(self._score_world_quality(task_id, getattr(agent, "llm", None)))
+                await self._enqueue_world_quality(task_id, getattr(agent, "llm", None))
         except asyncio.TimeoutError:
             logger.exception("world_generation_task_timed_out", task_id=task_id)
+            code = "generation_call_timeout" if factory_ready else "factory_timeout"
+            message = (
+                "模型单次生成超过 10 分钟，已停止本次任务，请重试"
+                if factory_ready
+                else "创作会话建立超时（30s 内未完成 LLM/Provider 初始化），请检查模型槽位绑定与 API key 是否配置正确"
+            )
             await self._record_event(
                 task_id,
-                {"type": "error", "message": "创作会话建立超时（30s 内未完成 LLM/Provider 初始化），请检查模型槽位绑定与 API key 是否配置正确", "phase": "general", "code": "factory_timeout"},
+                {"type": "error", "message": message, "phase": "general", "code": code},
             )
             await self._record_event(task_id, {"type": "done"})
         except Exception as exc:  # noqa: BLE001
@@ -654,6 +779,103 @@ class GenerationTaskService:
                 {"type": "error", "message": message, "phase": "general", "code": "generation_failed"},
             )
             await self._record_event(task_id, {"type": "done"})
+
+    async def _run_world_refine(self, task_id: str) -> None:
+        """AOP wrapper for the refine executor — attributes nested LLM cost to this task."""
+        user_id = await self._load_task_user_id(task_id)
+        # purpose 必须是 usage_context 白名单里的值；精修归入 world_gen 计成本。
+        token = push_usage_context(purpose="world_gen", task_id=str(task_id), user_id=user_id)
+        with usage_accumulator():
+            try:
+                await self._run_world_refine_impl(task_id)
+            finally:
+                pop_usage_context(token)
+
+    async def _run_world_refine_impl(self, task_id: str) -> None:
+        from services.world_gen_refiner import refine_world_payload
+
+        request = await self._get_request_payload(task_id)
+        task = await self.get_task(task_id)
+        if not request or task is None:
+            await self._record_event(task_id, {"type": "error", "message": "精修任务不存在", "phase": "refine", "code": "task_missing"})
+            await self._record_event(task_id, {"type": "done"})
+            return
+        draft_id = str(task.draft_id)
+        targets = list(request.get("targets") or [])
+
+        await self._mark_task_running(task_id)
+        await self._record_event(
+            task_id,
+            {"type": "progress", "phase": "refine", "code": "started", "message": "开始精修…"},
+        )
+        try:
+            async with self.session_factory() as session:
+                draft = await session.get(WorldDraft, draft_id)
+                if draft is None:
+                    raise ValueError("draft not found")
+                payload = dict(draft.payload or {})
+
+            # 撤销快照：精修前的 payload 存进本任务 intermediate_state
+            await self.record_intermediate(task_id, phase="pre_refine_snapshot", snapshot={"payload": payload})
+
+            base_agent = await asyncio.wait_for(
+                _resolve_factory_result(self.world_creator_factory()), timeout=30.0
+            )
+            llm = getattr(base_agent, "llm", None)
+
+            async def _progress(code: str, message: str) -> None:
+                await self._record_event(
+                    task_id, {"type": "progress", "phase": "refine", "code": code, "message": message}
+                )
+
+            result = await refine_world_payload(
+                payload, targets=targets, llm_router=llm, progress=_progress
+            )
+
+            if result.changed:
+                async with self.session_factory() as session:
+                    draft = await session.get(WorldDraft, draft_id)
+                    if draft is not None:
+                        self._write_versioned_world_payload(draft, result.payload)
+                        await session.commit()
+                # payload 变了，之前的质量分作废 → 重新打分
+                await self._enqueue_world_quality(task_id, llm)
+
+            # 精修不发 result 事件（避免触发世界落库的 _apply_result_payload）——
+            # payload 已写回，前端收到 completed(meta) + done 后重拉 draft 即可。
+            await self._record_event(
+                task_id,
+                {
+                    "type": "progress",
+                    "phase": "refine",
+                    "code": "completed",
+                    "message": "精修完成" if result.changed else "精修未产生改动",
+                    "meta": result.as_dict(),
+                },
+            )
+            await self._record_event(task_id, {"type": "done"})
+        except asyncio.TimeoutError:
+            logger.exception("world_refine_timed_out", task_id=task_id)
+            await self._record_event(task_id, {"type": "error", "message": "精修超时，请重试", "phase": "refine", "code": "refine_timeout"})
+            await self._record_event(task_id, {"type": "done"})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("world_refine_failed", task_id=task_id)
+            await self._record_event(
+                task_id,
+                {"type": "error", "message": str(exc) or "精修异常退出", "phase": "refine", "code": "refine_failed"},
+            )
+            await self._record_event(task_id, {"type": "done"})
+
+    def _write_versioned_world_payload(self, draft: WorldDraft, payload: dict) -> None:
+        """写回 draft.payload 并 bump revision/hash，标记质量为 stale（需重新打分才能发布）。"""
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        draft.payload = payload
+        flag_modified(draft, "payload")
+        if draft.payload_hash != payload_hash:
+            draft.payload_revision = int(draft.payload_revision or 0) + 1
+            draft.payload_hash = payload_hash
+            draft.quality_status = "stale"
 
     async def _run_script_generation(self, task_id: str) -> None:
         """AOP wrapper — see ``_run_world_generation`` for the rationale."""
@@ -679,7 +901,6 @@ class GenerationTaskService:
                 await self._credit_settle(user_id, hold_id, acc, task_id)
 
     async def _run_script_generation_impl(self, task_id: str) -> None:
-        from config import settings
         from services.world_creator_agent_v2 import WorldCreatorAgentV2
 
         request = await self._get_request_payload(task_id)
@@ -930,7 +1151,15 @@ class GenerationTaskService:
             if draft:
                 before_keys = len(draft.payload or {})
                 normalized = self.normalize_world_payload(payload)
+                canonical = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+                next_revision = int(draft.payload_revision or 0) + 1
                 draft.payload = normalized
+                draft.payload_revision = next_revision
+                draft.payload_hash = payload_hash
+                draft.quality_status = "pending"
+                task.payload_revision = next_revision
+                task.payload_hash = payload_hash
                 flag_modified(draft, "payload")
                 await session.flush()
                 logger.info(

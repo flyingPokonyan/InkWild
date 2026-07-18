@@ -4,9 +4,10 @@
   build_relations_pack(characters, shared_events, ...) -> RelationsPack
 
 逻辑：
-  1. 来源 1：涉及自己的 shared_events → 对方列为 event_tied 关系
-  2. 来源 2：同派系兜底（faction 非空，非自己）→ 同派系核心 NPC（前 max_faction_core_npcs）
-  3. 来源 3：敌对派系兜底（显式 enemy_faction_pairs）→ 对方派系核心 NPC
+  1. 来源 0：角色详情明确给出的 initial_peer_relations（保留 trust/kind）
+  2. 来源 1：涉及自己的 shared_events → 对方列为 event_tied 关系
+  3. 来源 2：同派系兜底（faction 非空，非自己）→ 同派系核心 NPC（前 max_faction_core_npcs）
+  4. 来源 3：敌对派系兜底（显式 enemy_faction_pairs）→ 对方派系核心 NPC
   4. 去重 (target, kind)：同对方 + 同 kind 只保留第一个
   5. 不把自己加为自己的关系
 """
@@ -84,6 +85,22 @@ def build_relations_pack(
         relations_by_npc[owner].append(rel)
 
     # -----------------------------------------------------------------------
+    # 来源 0：角色详情显式关系。关系详情模型比 shared-event 共现更能表达敌友与亲疏，
+    # 必须进入最终 runtime relations_pack，不能只留在 character 卡片里。
+    # -----------------------------------------------------------------------
+    for char in characters:
+        for rel in char.initial_peer_relations:
+            _add_relation(
+                char.name,
+                ImportantRelation(
+                    target=rel.target,
+                    trust=rel.trust,
+                    kind=rel.kind or "explicit",
+                    why="character.initial_peer_relations",
+                ),
+            )
+
+    # -----------------------------------------------------------------------
     # 来源 1：shared_events → event_tied 关系
     # -----------------------------------------------------------------------
     for event in shared_events:
@@ -98,7 +115,7 @@ def build_relations_pack(
                     npc_a,
                     ImportantRelation(
                         target=npc_b,
-                        trust=2,
+                        trust=0,
                         kind="event_tied",
                         why=event.id,
                     ),
@@ -107,8 +124,6 @@ def build_relations_pack(
     # -----------------------------------------------------------------------
     # 来源 2：同派系兜底
     # -----------------------------------------------------------------------
-    char_faction: dict[str, str] = {c.name: c.faction for c in characters}
-
     for char in characters:
         if not char.faction:
             continue

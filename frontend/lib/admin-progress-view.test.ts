@@ -4,6 +4,7 @@ import type { AdminPhaseEntry } from "./admin-progress-state.ts";
 import {
   buildAdminLoadingSnapshot,
   computeWeightedProgress,
+  formatClock,
   MAX_VISIBLE_ADMIN_FEEDBACK,
 } from "./admin-progress-view.ts";
 
@@ -137,4 +138,10 @@ test("computeWeightedProgress keeps advancing during critic review", () => {
   ]);
 
   assert.ok(duringCritic > beforeCritic, `expected critic review to add progress (${beforeCritic} -> ${duringCritic})`);
+});
+
+test("formatClock pads seconds", () => {
+  assert.equal(formatClock(0), "0:00");
+  assert.equal(formatClock(65), "1:05");
+  assert.equal(formatClock(12 * 60 + 3), "12:03");
 });

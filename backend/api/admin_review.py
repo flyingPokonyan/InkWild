@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from dependencies import get_current_admin_user, get_db
 from models.draft import ScriptDraft, WorldDraft
+from models.world_quality_score import WorldQualityScore
 from models.user import User
 from services import notification_service as ns
 from services import publish_service
@@ -34,6 +35,10 @@ def _ua(request: Request) -> str | None:
 
 class RejectRequest(BaseModel):
     note: str | None = None
+
+
+class QualityWaiverRequest(BaseModel):
+    note: str
 
 
 async def _submitter_names(db: AsyncSession, user_ids: set[str]) -> dict[str, str]:
@@ -96,6 +101,7 @@ async def get_review(
     _admin: User = Depends(get_current_admin_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    quality_data = None
     if kind == "world":
         draft = await db.get(WorldDraft, draft_id)
     elif kind == "script":
@@ -104,6 +110,28 @@ async def get_review(
         raise HTTPException(status_code=400, detail="kind 必须是 world 或 script")
     if not draft:
         raise HTTPException(status_code=404, detail="草稿不存在")
+    if kind == "world":
+        score = (
+            await db.execute(
+                select(WorldQualityScore)
+                .where(
+                    WorldQualityScore.draft_id == draft.id,
+                    WorldQualityScore.payload_revision == draft.payload_revision,
+                    WorldQualityScore.payload_hash == draft.payload_hash,
+                )
+                .order_by(WorldQualityScore.created_at.desc())
+            )
+        ).scalars().first()
+        quality_data = (
+            {
+                "id": str(score.id),
+                "status": score.status,
+                "overall_score": score.overall_score,
+                "blocking_flags": score.blocking_flags or [],
+                "detail": score.detail,
+            }
+            if score else None
+        )
     return {
         "code": 0,
         "data": {
@@ -113,9 +141,66 @@ async def get_review(
             "review_note": draft.review_note,
             "world_id": str(draft.world_id) if draft.world_id else None,
             "payload": draft.payload,
+            "payload_revision": getattr(draft, "payload_revision", 0),
+            "quality_status": getattr(draft, "quality_status", None),
+            "quality": quality_data,
         },
         "message": "ok",
     }
+
+
+@router.post("/reviews/world/{draft_id}/quality-waiver")
+async def waive_world_quality(
+    draft_id: str,
+    payload: QualityWaiverRequest,
+    request: Request,
+    admin: User = Depends(get_current_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    note = payload.note.strip()
+    if len(note) < 3:
+        raise HTTPException(status_code=422, detail="豁免原因至少 3 个字")
+    draft = await db.get(WorldDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="草稿不存在")
+    score = (
+        await db.execute(
+            select(WorldQualityScore)
+            .where(
+                WorldQualityScore.draft_id == draft.id,
+                WorldQualityScore.payload_revision == draft.payload_revision,
+                WorldQualityScore.payload_hash == draft.payload_hash,
+            )
+            .order_by(WorldQualityScore.created_at.desc())
+        )
+    ).scalars().first()
+    if score is None:
+        raise HTTPException(status_code=409, detail="当前草稿版本还没有质检记录")
+    detail = dict(score.detail or {})
+    detail["waiver"] = {
+        "note": note,
+        "admin_user_id": str(admin.id),
+    }
+    score.detail = detail
+    score.status = "waived"
+    draft.quality_status = "waived"
+    await record_admin_action(
+        db,
+        admin_user=admin,
+        action="world.quality_waive",
+        resource_type="world_draft",
+        resource_id=str(draft.id),
+        payload={
+            "draft_id": draft_id,
+            "quality_score_id": str(score.id),
+            "payload_revision": draft.payload_revision,
+            "note": note,
+        },
+        ip_address=_client_ip(request),
+        user_agent=_ua(request),
+    )
+    await db.commit()
+    return {"code": 0, "data": {"quality_status": "waived"}, "message": "ok"}
 
 
 @router.post("/reviews/{kind}/{draft_id}/approve")

@@ -1,8 +1,8 @@
-"""LorePack builder — lore 维度规划 + 并发内容生成。
+"""LorePack builder — lore 维度规划 + 批量内容生成。
 
 两个公共函数：
 - build_lore_dimensions: planner LLM 一次调用，输出 2-6 个 lore 维度清单
-- build_lore_pack: 并发（asyncio.Semaphore）对每个维度生成详细内容
+- build_lore_pack: 常态一次生成全部维度正文，缺项时只补缺失 key
 
 LLMRouter API 说明：
   只暴露 stream_with_tools(messages, tools, system, max_tokens)。
@@ -23,6 +23,7 @@ from schemas.lore_pack import (
     LorePack,
 )
 from schemas.research_pack import IPCanon, Passage
+from schemas.world_generation import WorldScalePlan
 from services.research_pack_builder import (
     _collect_stream_text,
     _extract_json_from_text,
@@ -64,6 +65,15 @@ _DIMENSION_CONTENT_SYSTEM = """你是一个世界构建专家，负责为特定�
 - 严格 JSON 输出，不包含解释文字
 - 格式：{"content_blocks": [{"heading": "...", "body": "..."}]}"""
 
+_DIMENSION_BATCH_SYSTEM = """你是一个世界构建专家。一次为给定的全部 lore 维度生成内容。
+
+要求：
+- 每个输入 key 恰好返回一项，不得改名或遗漏
+- 每个维度输出 2-4 个 content_blocks，每块含 heading 和 2-5 句话的 body
+- 各维度职责分明，不重复抄写同一段设定
+- 严格 JSON，不含 markdown
+- 格式：{"dimensions":[{"key":"输入 key","content_blocks":[{"heading":"...","body":"..."}]}]}"""
+
 
 # ---------------------------------------------------------------------------
 # build_lore_dimensions
@@ -79,6 +89,7 @@ async def build_lore_dimensions(
     *,
     ip_pack: IPKnowledgePack | None = None,
     fidelity_mode: FidelityMode = "none",
+    scale_plan: WorldScalePlan | None = None,
 ) -> list[LoreDimension]:
     """Planner LLM 一次调用，识别出 2-6 个 lore 维度。
 
@@ -130,6 +141,17 @@ async def build_lore_dimensions(
             "覆盖角色背后的势力 / 历史 / 地理 / 修炼或科技体系 / 标志性器物 等设定。\n"
         )
         user_message += ip_block
+
+    if scale_plan is not None:
+        target_band = {
+            "compact": "2-3",
+            "standard": "3-4",
+            "epic": "4-5",
+        }[scale_plan.scale_class.value]
+        user_message += (
+            f"\nWorldSpec 规模为 {scale_plan.scale_class.value}，"
+            f"请规划 {target_band} 个真正必要的维度。"
+        )
 
     user_message += "\n请输出适合该世界的 lore 维度清单（JSON 格式）。"
 
@@ -297,11 +319,11 @@ async def build_lore_pack(
     *,
     concurrency: int = 4,
 ) -> LorePack:
-    """并发生成所有维度的内容，汇聚为 LorePack。
+    """Generate all lore dimensions in one normal-path call.
 
-    - 用 asyncio.Semaphore(concurrency) 控制并发上限
-    - 单路 LLM 失败 → 该维度 content_blocks 为空，不阻塞其他维度
-    - generated_at 填 UTC ISO 时间戳
+    A missing-only retry is allowed once, so one malformed dimension does not
+    force four independent normal calls or discard the healthy dimensions.
+    ``concurrency`` remains in the signature for caller compatibility.
     """
     if not dimensions:
         return LorePack(
@@ -309,35 +331,75 @@ async def build_lore_pack(
             generated_at=datetime.now(timezone.utc).isoformat(),
         )
 
-    semaphore = asyncio.Semaphore(concurrency)
+    del concurrency
+    by_key = {dim.key: dim for dim in dimensions}
+    content_by_key: dict[str, LoreDimensionContent] = {}
 
-    tasks = [
-        _build_single_dimension_content(
-            dimension=dim,
-            description=description,
-            ip_canon=ip_canon,
-            passages=passages,
-            llm_router=llm_router,
-            semaphore=semaphore,
+    async def generate(targets: list[LoreDimension], *, retry: bool) -> None:
+        evidence = "\n\n".join(
+            passage.text for passage in passages[:12] if passage.text
         )
+        prompt = (
+            f"世界描述：{description}\n"
+            f"IP/作品：{', '.join(ip_canon.title_guesses[:2]) or '无'}\n"
+            f"维度清单：{[dim.model_dump() for dim in targets]}\n"
+            f"参考资料：{evidence[:10000] or '无'}\n"
+            + ("上次有维度缺失；本次只补这些 key。\n" if retry else "")
+            + "请输出严格 JSON。"
+        )
+        try:
+            text = await _collect_stream_text(
+                llm_router,
+                system=_DIMENSION_BATCH_SYSTEM,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=8192,
+            )
+            data = _extract_json_from_text(text) or {}
+            items = data.get("dimensions") or []
+            if not isinstance(items, list):
+                return
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key") or "")
+                dim = by_key.get(key)
+                if dim is None:
+                    continue
+                blocks: list[LoreContentBlock] = []
+                for raw in item.get("content_blocks") or []:
+                    if not isinstance(raw, dict):
+                        continue
+                    try:
+                        blocks.append(
+                            LoreContentBlock(
+                                heading=raw.get("heading", ""),
+                                body=raw.get("body", ""),
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "lore_content_block_invalid",
+                            dimension_key=key,
+                            error=str(exc),
+                        )
+                if blocks:
+                    content_by_key[key] = LoreDimensionContent(
+                        key=key,
+                        name=dim.name,
+                        content_blocks=blocks,
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("lore_dimension_batch_failed", retry=retry, error=str(exc))
+
+    await generate(dimensions, retry=False)
+    missing = [dim for dim in dimensions if dim.key not in content_by_key]
+    if missing:
+        await generate(missing, retry=True)
+
+    dimension_contents = [
+        content_by_key.get(dim.key, LoreDimensionContent(key=dim.key, name=dim.name))
         for dim in dimensions
     ]
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    dimension_contents: list[LoreDimensionContent] = []
-    for dim, result in zip(dimensions, results):
-        if isinstance(result, Exception):
-            # asyncio.gather + return_exceptions=True 捕获了异常
-            # 但 _build_single_dimension_content 内部已经 try/except，正常情况不会到这里
-            logger.warning(
-                "lore_dimension_gather_exception",
-                dimension_key=dim.key,
-                error=str(result),
-            )
-            dimension_contents.append(LoreDimensionContent(key=dim.key, name=dim.name))
-        else:
-            dimension_contents.append(result)
 
     return LorePack(
         dimensions=dimension_contents,

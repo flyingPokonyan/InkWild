@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useMemo } from "react";
 
 import { DraftEditorShell } from "@/components/admin/editor/DraftEditorShell";
+import { QualityRefineBar } from "@/components/admin/editor/QualityRefineBar";
 import { ImageField } from "@/components/admin/editor/fields/ImageField";
 import { EditorSection } from "@/components/admin/editor/EditorSection";
 import { ResearchPackSection } from "@/components/admin/editor/sections/ResearchPackSection";
@@ -121,6 +122,11 @@ function WorldEditorBody({ payload, setPayload, draftId, saveNow }: BodyProps) {
 
   return (
     <>
+      <QualityRefineBar
+        draftId={draftId}
+        payload={payload}
+        onRefined={(next) => setPayload(() => next)}
+      />
       <EditorSection
         id="section-basic"
         index={1}

@@ -143,7 +143,7 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
         }
 
     # -------------------------------------------------------------------
-    # WebSearcher — Grok Live Search via chat.completions search_parameters
+    # WebSearcher — Grok server-side Web Search via Responses API
     # -------------------------------------------------------------------
 
     async def web_search(
@@ -151,73 +151,34 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
         query: str,
         max_tokens: int = 2048,
     ) -> WebSearchResult:
-        """Run Grok Live Search via /chat/completions + ``search_parameters``.
+        """Run Grok Web Search and preserve its structured source citations.
 
-        We use httpx directly (not the OpenAI SDK) because the response payload
-        includes a non-OpenAI ``search_sources`` field at the top level; the SDK
-        strips unknown fields depending on Pydantic config. httpx returns the raw
-        JSON dict so we can read both content and sources reliably.
+        xAI exposes server-side web search through the Responses API. Some
+        OpenAI-compatible gateways accept ``search_parameters`` on Chat
+        Completions but silently ignore the search tool, returning plausible
+        model-memory text with no sources. Responses API output annotations are
+        the authoritative citation channel used here.
         """
-        url = f"{self._base_url.rstrip('/')}/chat/completions"
+        url = f"{self._base_url.rstrip('/')}/responses"
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": query}],
-            "max_tokens": max_tokens,
-            "search_parameters": {
-                "mode": "on",
-                "sources": [{"type": "web"}],
-                "max_search_results": 8,
-            },
+            "input": [{"role": "user", "content": query}],
+            "tools": [{"type": "web_search"}],
+            "max_output_tokens": max_tokens,
+            "max_tool_calls": 8,
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-        # The gateway force-streams responses as SSE (`data: {chunk}`) even when
-        # stream isn't requested, so a single resp.json() chokes on char 0 — this
-        # is why web_search silently failed for every IP. Parse the SSE stream:
-        # accumulate delta content and capture the top-level `search_sources`
-        # field that xAI Live Search emits in one of the chunks.
-        payload["stream"] = True
-        text_parts: list[str] = []
-        raw_sources: list[dict] = []
         try:
             total_timeout = max(
                 float(settings.grok_web_search_total_timeout_seconds),
                 0.001,
             )
-            # The httpx read timeout is an inter-chunk timeout. Enforce a total
-            # deadline as well so gateway heartbeats cannot keep a dead search
-            # alive indefinitely.
             async with asyncio.timeout(total_timeout):
                 async with httpx.AsyncClient(timeout=100.0) as http:
-                    async with http.stream("POST", url, headers=headers, json=payload) as resp:
-                        if resp.status_code != 200:
-                            body = (await resp.aread())[:300]
-                            logger.warning(
-                                "grok_web_search_http_error",
-                                query=query,
-                                status=resp.status_code,
-                                body=body,
-                            )
-                            return WebSearchResult(query=query)
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data:"):
-                                continue
-                            chunk = line[5:].strip()
-                            if not chunk or chunk == "[DONE]":
-                                continue
-                            try:
-                                obj = json.loads(chunk)
-                            except json.JSONDecodeError:
-                                continue
-                            src = obj.get("search_sources")
-                            if isinstance(src, list):
-                                raw_sources.extend(src)
-                            for ch in obj.get("choices") or []:
-                                piece = ((ch or {}).get("delta") or {}).get("content")
-                                if piece:
-                                    text_parts.append(piece)
+                    resp = await http.post(url, headers=headers, json=payload)
         except TimeoutError:
             logger.warning(
                 "grok_web_search_timeout",
@@ -229,18 +190,57 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
             logger.warning("grok_web_search_failed", query=query, exc_info=True)
             return WebSearchResult(query=query)
 
-        text = "".join(text_parts).strip()
+        if resp.status_code != 200:
+            logger.warning(
+                "grok_web_search_http_error",
+                query=query,
+                status=resp.status_code,
+                body=resp.content[:300],
+            )
+            return WebSearchResult(query=query)
 
+        try:
+            data = resp.json()
+        except (json.JSONDecodeError, ValueError):
+            logger.warning("grok_web_search_invalid_json", query=query)
+            return WebSearchResult(query=query)
+
+        text_parts: list[str] = []
         citations: list[dict] = []
         seen: set[str] = set()
-        for src in raw_sources:
-            if not isinstance(src, dict):
-                continue
-            url_ = str(src.get("url") or "").strip()
+
+        def _add_citation(raw: object) -> None:
+            if isinstance(raw, str):
+                url_ = raw.strip()
+                title = ""
+            elif isinstance(raw, dict):
+                nested = raw.get("url_citation") or raw.get("web_citation") or raw
+                if not isinstance(nested, dict):
+                    return
+                url_ = str(nested.get("url") or "").strip()
+                title = str(nested.get("title") or raw.get("title") or "")
+            else:
+                return
             if not url_ or url_ in seen:
-                continue
+                return
             seen.add(url_)
-            citations.append({"url": url_, "title": str(src.get("title") or "")})
+            citations.append({"url": url_, "title": title})
+
+        for raw in data.get("citations") or []:
+            _add_citation(raw)
+        for item in data.get("output") or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for content in item.get("content") or []:
+                if not isinstance(content, dict) or content.get("type") != "output_text":
+                    continue
+                piece = str(content.get("text") or "")
+                if piece:
+                    text_parts.append(piece)
+                for annotation in content.get("annotations") or []:
+                    _add_citation(annotation)
+
+        text = "".join(text_parts).strip()
 
         return WebSearchResult(text=text, citations=citations, query=query)
 
@@ -288,4 +288,3 @@ def _convert_tool(tool: dict) -> dict:
             "parameters": tool.get("input_schema", {}),
         },
     }
-

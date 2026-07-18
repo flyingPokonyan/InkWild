@@ -79,8 +79,9 @@ BLOCKING_SOFT_THRESHOLD = 4
 def compute_blocking_flags(soft: dict | None) -> tuple[list[str], bool]:
     """从软裁判分算「阻断红旗」+ shippable 布尔（P0 两数门控，替代旧 cap-to-55）。
 
-    返回 (blocking_flags, shippable)。flags 非空 = 有设定硬伤、不建议直接发布（但**只建议、
-    不硬卡**，admin 仍可发）。soft 缺失/未跑 → 无法判定，按"暂不阻断"(shippable=True) 处理。
+    返回 (blocking_flags, shippable)。flags 非空 = 有设定硬伤，版本化 quality gate
+    进入 needs_review；管理员仍可留下原因后 waiver。soft 缺失时不凭空制造语义红旗，
+    结构层是否可发布由 ``compute_hard_blocking_flags`` 单独决定。
     """
     if not soft:
         return [], True
@@ -89,7 +90,56 @@ def compute_blocking_flags(soft: dict | None) -> tuple[list[str], bool]:
         v = soft.get(key)
         if isinstance(v, int) and v <= BLOCKING_SOFT_THRESHOLD:
             flags.append(f"{key}={v}")
+    for item in soft.get("confirmed_violations") or []:
+        if isinstance(item, dict) and item.get("severity") == "major":
+            flags.append(f"quality:{item.get('code') or 'major_violation'}")
+    for item in soft.get("unconfirmed_violations") or []:
+        if isinstance(item, dict) and item.get("severity") == "major":
+            flags.append(f"quality_review:{item.get('code') or 'major_violation'}")
     return flags, not flags
+
+
+def compute_hard_blocking_flags(
+    hard: dict,
+    payload: dict,
+    world_spec: dict | None,
+) -> list[str]:
+    """Deterministic publish blockers, separate from subjective quality scores."""
+    flags: list[str] = []
+    scale = (world_spec or {}).get("scale") or {}
+    if scale:
+        active_min = int(scale.get("active_roles_min") or 0)
+        playable_min = int(scale.get("playable_min") or 0)
+        events_min = max(3, int(scale.get("events_target") or 0) // 2)
+        if hard["character_count"] < active_min:
+            flags.append(f"active_roles={hard['character_count']}<{active_min}")
+        if hard["playable_count"] < playable_min:
+            flags.append(f"playable={hard['playable_count']}<{playable_min}")
+        if hard["events_count"] < events_min:
+            flags.append(f"events={hard['events_count']}<{events_min}")
+    if hard["must_have_genuine_covered"] < hard["must_have_total"]:
+        flags.append(
+            "must_have_genuine="
+            f"{hard['must_have_genuine_covered']}<{hard['must_have_total']}"
+        )
+    if hard["shape_warnings"]:
+        flags.append(f"shape_violations={len(hard['shape_warnings'])}")
+
+    placeholder = "/static/placeholder-cover.png"
+    for field in ("cover_image", "hero_image"):
+        value = str(payload.get(field) or "")
+        if not value or value == placeholder:
+            flags.append(f"{field}_missing_or_placeholder")
+    for warning in payload.get("quality_warnings") or []:
+        if isinstance(warning, dict):
+            code = str(warning.get("code") or (warning.get("payload") or {}).get("code") or "")
+            if code == "image_placeholder":
+                flags.append("generated_image_placeholder")
+                break
+        elif "image_placeholder" in str(warning):
+            flags.append("generated_image_placeholder")
+            break
+    return flags
 
 
 def compute_hard_metrics(payload: dict, ip_must_have: list[str] | None = None) -> dict:

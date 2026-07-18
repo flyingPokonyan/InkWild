@@ -7,21 +7,23 @@ from schemas.research_pack import IPCanon
 from schemas.character_v2 import Character
 from schemas.shared_events import SharedEvent
 from schemas.lore_pack import LorePack
-from schemas.events_data import EventDataEntry
 from services.events_data_builder import build_events_data
 
 
 def _make_router(responses: list[str]):
     fake = MagicMock()
     idx = {"n": 0}
+    prompts: list[str] = []
 
     async def stream(*, messages, tools, system, max_tokens):
+        prompts.append(messages[0]["content"])
         i = idx["n"]
         idx["n"] += 1
         yield {"type": "text_delta", "text": responses[i] if i < len(responses) else "{}"}
 
     fake.stream_with_tools = stream
     fake._calls = idx
+    fake._prompts = prompts
     return fake
 
 
@@ -199,6 +201,37 @@ async def test_batches_split():
 
 
 @pytest.mark.asyncio
+async def test_concurrent_batches_receive_disjoint_event_focus_and_id_ranges():
+    chars = [_ch(f"角色{i}") for i in range(6)]
+    shared = [
+        SharedEvent(id=f"history_{i}", title=f"历史{i}", summary="S", involved_npcs=[], source_passage_ids=[])
+        for i in range(6)
+    ]
+    router = _make_router([
+        json.dumps({"events": [_ev_json(f"evt_{i:03d}") for i in range(1, 4)]}),
+        json.dumps({"events": [_ev_json(f"evt_{i:03d}") for i in range(4, 7)]}),
+    ])
+
+    await build_events_data(
+        description="x",
+        ip_canon=IPCanon(),
+        characters=chars,
+        locations=[],
+        shared_events=shared,
+        lore_pack=LorePack(),
+        llm_router=router,
+        target_count=6,
+        batch_size=3,
+        concurrency=2,
+    )
+
+    assert "历史0" in router._prompts[0] and "历史3" not in router._prompts[0]
+    assert "evt_001, evt_002, evt_003" in router._prompts[0]
+    assert "历史3" in router._prompts[1] and "历史0" not in router._prompts[1]
+    assert "evt_004, evt_005, evt_006" in router._prompts[1]
+
+
+@pytest.mark.asyncio
 async def test_single_batch_failure_isolates():
     chars = [_ch("A")]
     fake = MagicMock()
@@ -237,6 +270,8 @@ async def test_dedup_by_id():
     )
     ids = [e.id for e in events]
     assert ids.count("dup") == 1
+    assert len(ids) == 4
+    assert len(set(ids)) == 4
 
 
 @pytest.mark.asyncio

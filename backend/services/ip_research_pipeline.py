@@ -1,15 +1,13 @@
-"""IP Research Pipeline：grok 多角度并行研究 → 按轴抽取 merge → 接地核查 → 自检补抓。
+"""IP Research Pipeline：2 条互补 Grok 检索 → evidence compile → Director finalize。
 
-流程（2026-06-22 重写，C 阶段）：
-1. per-axis pre-extract：4 个聚焦轴（核心 / 对立 / 外围 NPC / 设定）并发凭训练知识抽取 → merge
-2. grok fan-out：同 4 轴并发 web_search → 富 passages + 候选名并集（**生产唯一活源**）
-3. ground & augment：用 passages 核查 / 补 / 增删（单次，验证非生成）
-4. 完整性自检 + grok 补抓（≤ 2 轮）
-5. quality gate：characters < 按 IP 规模缩放的下限 → IPPackUnderfilledError
+常态路径（2026-07-16）：
+1. 2 条互补查询覆盖核心+对立、外围 NPC+设定，并行 web_search；
+2. 单次 evidence compile 生成完整 IPKnowledgePack；
+3. 单次 finalize 同时归并别名、锚定 canon、降级跨版本角色和规划可玩生态位；
+4. quality gate：underfilled 时失败，不把空薄知识包送给下游。
 
-校正（2026-06-22）：百度 / wiki / tavily 在生产是死源（403 / 无 key / 抓不到），已退役，
-不再空转。grok 是唯一活源，因此把它做成多角度并行 + 抽取目标按题材规模放开（替掉旧"至少 8"
-一刀切），专门解决"单 query 只捞到最有名几个 → 世界从源头就薄"。
+这保留了 2026-06-22 为解决薄世界引入的四类覆盖意图，但移除了默认四次 pre-extract、
+self-check/refetch/reground、独立 consolidate 和独立 arbitration 的重复加工。
 
 前置：Stage 0 已识别出 IPRecognition (kind=known_ip 或 hybrid)。fidelity_mode=none 时不调用。
 """
@@ -42,19 +40,16 @@ MAX_PASSAGE_CHARS = 2000
 MAX_REFETCH_ROUNDS = 1
 
 # ── 多角度 fan-out 轴（C1/C2）────────────────────────────────────────────────
-# 固定 4 类 coverage role 保证 merge 稳定；grok query 措辞 + pre-extract 聚焦提示按轴定。
+# 固定 2 条互补 coverage query。真实生产同模型验证中，4 路并发连续两次都只有
+# 2 路成功、2 路等满读取超时，而成功的任意两路已能编译出 30+ 角色。
 # 题材无关（按"故事功能"切分，非"主角/反派"字面）——推理无明面反派、武侠是门派、群像无单
 # 主角时也成立。原创世界（kind != known_ip/hybrid）整条 pipeline 跳过。
 # (axis_key, grok_focus, preextract_focus_hint)
 _RESEARCH_AXES: list[tuple[str, str, str]] = [
-    ("core", "主要角色 核心人物 主角",
-     "本作核心 / 中心人物（主角一方）"),
-    ("opposing", "反派 对手 对立势力 竞争者 嫌疑人",
-     "与主角对立 / 竞争 / 制造冲突的人物（反派 / 对手 / 嫌疑人 / 敌对势力）"),
-    ("supporting", "配角 次要角色 全部登场人物 龙套 工具人",
-     "外围配角与功能性角色——尽量穷举次要人物，别只给最有名的几个"),
-    ("world", "世界观 设定 地点 势力 组织 重要事件 规矩",
-     "世界设定：地点 / 势力 / 重要事件 / 规矩黑话"),
+    ("core_conflict", "主要角色 核心人物 主角 反派 对手 对立势力 人物关系 剧情",
+     "核心人物、对立阵营与主冲突"),
+    ("supporting_world", "配角 次要角色 全部登场人物 世界观 地点 势力 组织 重要事件 规矩",
+     "外围配角与世界设定，尽量穷举而不是只给名角"),
 ]
 
 
@@ -79,8 +74,8 @@ def _norm_name(name: str) -> str:
 class IPPackUnderfilledError(Exception):
     """raised when build_ip_knowledge_pack cannot produce a usable pack.
 
-    Caught by the world creator agent's _run_ip_research; the agent emits an SSE
-    warning so admin can decide to retry or downgrade fidelity_mode.
+    Strict generation stops on this error; loose generation may surface a
+    warning and continue without hard canon anchors.
     """
 
     def __init__(self, ip_name: str, character_count: int, summary_len: int):
@@ -91,6 +86,23 @@ class IPPackUnderfilledError(Exception):
             f"IP pack for {ip_name!r} underfilled: "
             f"characters={character_count} summary_len={summary_len}"
         )
+
+
+class IPResearchEvidenceError(Exception):
+    """Strict research did not return independently traceable source evidence."""
+
+    def __init__(
+        self,
+        ip_name: str,
+        reason: str,
+        passage_count: int = 0,
+        actual_calls: int = 0,
+    ):
+        self.ip_name = ip_name
+        self.reason = reason
+        self.passage_count = passage_count
+        self.actual_calls = actual_calls
+        super().__init__(f"strict IP research {reason}: {ip_name}")
 
 
 _MISSING_CHECK_SYSTEM = """检查 IPKnowledgePack 完整性，列出 4 维度的遗漏。
@@ -763,9 +775,9 @@ async def _arbitrate_canon(
 async def _gather_via_grok_fanout(
     rec: IPRecognition, grok_provider: Any | None,
 ) -> tuple[list[Passage], list[str]]:
-    """C1: 同 4 轴并发 grok web_search → 富 passages + 候选名并集去重。
+    """C1: 两条互补 query 并发 grok web_search → passages + 候选名并集。
 
-    grok 是生产唯一活源；多角度并行的并集远宽于单条大杂烩 query。
+    两条分别覆盖核心冲突与外围世界，避免单条大杂烩，也避免四路超时浪费。
     """
     if grok_provider is None or not rec.ip_name:
         return [], []
@@ -798,6 +810,101 @@ async def _gather_via_grok_fanout(
     return passages[:MAX_PASSAGES], names
 
 
+_FINALIZE_RESEARCH_SYSTEM = """你是 IP 世界研究的收口导演。给你已抽取的角色清单，完成一次性收口：
+1. 把同一人的本名/封号/简称归并，canonical 必须取输入中最正式常用的名字；
+2. 锚定一个自洽版本/主线；只降级明确跨时代、跨版本或来自别作的人，配角绝不能因不重要被降级；
+3. 给出 3-8 个互不雷同的可玩视角原型。
+
+输出严格 JSON：
+{"groups":[{"canonical":"名字","aliases":["输入里的名字"]}],
+ "canon_note":"设定基线", "playable_archetypes":["原型"],
+ "out_of_continuity":[{"name":"输入原名","reason":"原因"}]}
+每个输入名字必须且只能出现在一个 groups.aliases 中。只输出 JSON。"""
+
+
+async def _finalize_research_pack(
+    pack: IPKnowledgePack, rec: IPRecognition, llm_router: Any,
+) -> IPKnowledgePack:
+    """One bounded compile call for alias consolidation + canon arbitration."""
+    if len(pack.characters) < 2:
+        return pack
+    user = json.dumps(
+        {
+            "ip_name": rec.ip_name,
+            "ip_type": rec.ip_type,
+            "one_liner": rec.one_liner,
+            "summary": pack.summary[:1500],
+            "characters": [
+                {
+                    "name": c.name,
+                    "role_in_story": c.role_in_story,
+                    "relation_to_protagonist": c.relation_to_protagonist,
+                    "must_have": c.must_have,
+                }
+                for c in pack.characters
+            ],
+        },
+        ensure_ascii=False,
+    )
+    try:
+        text = await _collect_text(
+            llm_router, _FINALIZE_RESEARCH_SYSTEM, user, max_tokens=4096, reasoning=False,
+        )
+        data = _extract_json(text) or {}
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("ip_finalize_failed", ip_name=rec.ip_name, error=str(exc))
+        return pack
+
+    by_input = {_norm_name(c.name): c for c in pack.characters}
+    consumed: set[str] = set()
+    merged: list[IPCharacter] = []
+    for group in data.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        members: list[IPCharacter] = []
+        for alias in group.get("aliases") or []:
+            key = _norm_name(alias)
+            if key in by_input and key not in consumed:
+                members.append(by_input[key])
+                consumed.add(key)
+        if not members:
+            continue
+        richer = max(members, key=_char_info_len)
+        canonical = str(group.get("canonical") or richer.name).strip()
+        # Never accept an invented canonical name absent from this group.
+        member_names = {_norm_name(c.name) for c in members}
+        if _norm_name(canonical) not in member_names:
+            canonical = richer.name
+        merged.append(richer.model_copy(update={
+            "name": canonical,
+            "must_have": any(c.must_have for c in members),
+        }))
+    for key, char in by_input.items():
+        if key not in consumed:
+            merged.append(char)
+
+    ooc = {
+        _norm_name(item.get("name")): str(item.get("reason") or "跨版本，已降级")
+        for item in (data.get("out_of_continuity") or [])
+        if isinstance(item, dict) and item.get("name")
+    }
+    finalized: list[IPCharacter] = []
+    for char in merged:
+        reason = ooc.get(_norm_name(char.name))
+        finalized.append(char.model_copy(update={
+            "in_continuity": not bool(reason),
+            "must_have": False if reason else char.must_have,
+            "arbitration_note": reason,
+        }))
+    pack.characters = finalized
+    pack.canon_note = str(data.get("canon_note") or "").strip() or None
+    pack.playable_archetypes = [
+        str(item).strip() for item in (data.get("playable_archetypes") or [])
+        if str(item).strip()
+    ][:8]
+    return pack
+
+
 async def build_ip_knowledge_pack(
     rec: IPRecognition,
     fidelity_mode: FidelityMode,
@@ -806,19 +913,12 @@ async def build_ip_knowledge_pack(
     grok_provider: Any | None = None,
     progress_cb: Callable[[str, str], Awaitable[None]] | None = None,
 ) -> IPKnowledgePack:
-    """主入口（grok 多角度并行研究，2026-06-22 重写）。
+    """Two parallel searches + one evidence compile + one Director finalize.
 
-    流程：
-        Stage 1  per-axis pre-extract → merge   (4 轴并发凭训练知识抽取，按 _norm_name 合并)
-        Stage 2  _gather_via_grok_fanout        (同 4 轴并发 grok web_search → 富 passages)
-        Stage 3  _ground_and_augment            (passages 核查 + 补 source_passage_ids + 增删)
-        Stage 4  self-check + grok 补抓 loop     (最多 MAX_REFETCH_ROUNDS 轮)
-        Stage 5  quality gate                   (characters < _min_pack_characters → IPPackUnderfilledError)
-
-    冷门 IP 主 LLM 不熟悉 → Stage 1 给空 / 单薄；grok 无果时走 pre-extract 兜底。
-
-    progress_cb(code, message)：在每个真实子阶段边界回报，让前端 loading 标题/进度随检索→
-    抽取→核对→查漏→整理逐步推进（而不是整段卡在"IP 知识抽取"+静止进度条）。
+    The former default path made four pre-extract calls, four searches, ground,
+    self-check/refetch/reground, consolidate and arbitration. This path merges
+    the four coverage roles into two reliable queries, compiles evidence once
+    and performs alias/canon decisions once: four model calls normally.
     """
     async def _emit(code: str, message: str) -> None:
         if progress_cb is None:
@@ -834,94 +934,44 @@ async def build_ip_knowledge_pack(
     ip_type = rec.ip_type or "other"
     target = _target_characters(ip_type)
     ip_disp = rec.ip_name
-    # 每轴目标取整体目标的一半——四轴并集覆盖整体目标，各轴聚焦自己那片挖深。
-    per_axis_target = max(6, target // 2)
-
     await _emit("searching", f"正在联网检索《{ip_disp}》的原作资料…")
-
-    # === Stage 1 + 2 并发：pre-extract(训练知识) ∥ grok fan-out(网络语料) ===
-    # 两者互相独立（pre-extract 不喂 passages、grok 用固定 axes 不依赖 pre-extract 结果），
-    # 只在 Stage 3 ground 时汇合 → 串行白白多等一段，并发可省约一个 stage 的墙钟时间。
-    async def _run_pre_extract() -> list:
-        return await asyncio.gather(
-            *[
-                _pre_extract_canon(
-                    rec, llm_router, focus_hint=hint, target_chars=per_axis_target,
-                )
-                for _, _, hint in _RESEARCH_AXES
-            ],
-            return_exceptions=True,
-        )
-
-    pre_results, (passages, _cand_names) = await asyncio.gather(
-        _run_pre_extract(),
-        _gather_via_grok_fanout(rec, grok_provider),
-    )
-    pre_packs = [p for p in pre_results if isinstance(p, IPKnowledgePack)]
-    for r in pre_results:
-        if isinstance(r, BaseException):
-            logger.warning("ip_pre_extract_axis_failed", ip_name=rec.ip_name, error=str(r))
-    candidates_pack = (
-        _merge_packs(pre_packs, rec, "none") if pre_packs else _empty_pack(rec, "none")
-    )
-    logger.info(
-        "ip_pre_extract_fanout_done",
-        ip_name=rec.ip_name,
-        axes=len(pre_packs),
-        characters=len(candidates_pack.characters),
-        places=len(candidates_pack.places),
-        factions=len(candidates_pack.factions),
-        summary_len=len(candidates_pack.summary),
-    )
-    await _emit(
-        "extracted",
-        f"已检索原作资料，抽取到 {len(candidates_pack.characters)} 个角色 · "
-        f"{len(candidates_pack.places)} 个地点",
-    )
-
-    # === Stage 3: ground & augment ===
+    passages, _cand_names = await _gather_via_grok_fanout(rec, grok_provider)
+    if fidelity_mode == "strict":
+        if not passages:
+            raise IPResearchEvidenceError(
+                rec.ip_name,
+                "returned no results",
+                actual_calls=len(_RESEARCH_AXES),
+            )
+        citation_tags = [
+            tag
+            for passage in passages
+            for tag in (passage.tags or [])
+            if str(tag).startswith("citation:") and str(tag) != "citation:"
+        ]
+        if not citation_tags:
+            raise IPResearchEvidenceError(
+                rec.ip_name,
+                "returned no citations",
+                passage_count=len(passages),
+                actual_calls=len(_RESEARCH_AXES),
+            )
     if not passages:
-        # 无外部语料（grok 无果 / 未配置）→ 返回 merge 后的 pre-extract pack 兜底。
+        # No live source: one training-knowledge compile, not four parallel
+        # hallucination-prone pre-extractors.
         logger.warning("ip_research_no_passages", ip_name=rec.ip_name)
-        pack = candidates_pack
+        pack = await _pre_extract_canon(rec, llm_router, target_chars=target)
         pack.fidelity_mode = fidelity_mode
         pack.passages = []
     else:
         await _emit("grounding", "正在核对史料、补全人物与设定细节…")
         pack = await _ground_and_augment(
-            rec, candidates_pack, passages, fidelity_mode, llm_router,
+            rec, _empty_pack(rec, "none"), passages, fidelity_mode, llm_router,
             target_chars=target,
         )
 
-    # === Stage 4: self-check + grok 补抓 loop ===
-    for _ in range(MAX_REFETCH_ROUNDS):
-        missing = await _self_check_missing_v2(pack, llm_router)
-        missing_names = missing["missing_characters"] + missing["missing_places"]
-        if not missing_names:
-            break
-        if grok_provider is None:
-            break
-        await _emit("refining", "查漏补缺，补抓遗漏的角色与设定…")
-        # 退死源后，补抓也走 grok：用缺失名拼一条聚焦 query。
-        extra_passages, _ = await fetch_via_grok_search(
-            rec.ip_name, ip_type, grok_provider, focus=" ".join(missing_names),
-        )
-        if not extra_passages:
-            break
-        passages = (passages + extra_passages)[:MAX_PASSAGES]
-        pack = await _ground_and_augment(
-            rec, pack, passages, fidelity_mode, llm_router, target_chars=target,
-        )
-
-    # === Stage 4.5: 归并名称变体（fan-out 多轴并发会让同一人出现多种叫法）===
-    await _emit("consolidating", "正在整理角色档案、归并别名…")
-    pack.characters = await _consolidate_characters(pack.characters, rec, llm_router)
-
-    # === Stage 4.6: 导演裁决（P1）—— 锚定版本/主线、滤跨时代角色、规划可玩生态位 ===
-    # 放在持久化之前 → 落库的 pack 本身就干净（同时治 DB 污染），下游 canon_characters()
-    # 自动跳过被降级的角色，编排零改动。fail-open：失败原样放行。
-    await _emit("arbitrating", "正在校准设定基线、剔除跨时代/跨版本人物…")
-    pack = await _arbitrate_canon(pack, rec, llm_router)
+    await _emit("arbitrating", "正在归并别名并校准设定基线…")
+    pack = await _finalize_research_pack(pack, rec, llm_router)
 
     # === Stage 5: quality gate（只数续作内角色，被降级的不算厚度）===
     if len(pack.canon_characters()) < _min_pack_characters(ip_type):

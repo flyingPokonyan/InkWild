@@ -435,3 +435,28 @@ export async function streamAdminRequest<T>(
 export async function getGenerationTask(taskId: string): Promise<AdminGenerationTaskSummary> {
   return workshopFetch<AdminGenerationTaskSummary>(`/api/workshop/generation-tasks/${taskId}`);
 }
+
+/** Start an AI-refine task on a world draft. `targets` = quality-warning codes to
+ * fix (without the `judge_` prefix); empty array = fix all refinable warnings. */
+export async function refineWorldDraft(
+  draftId: string,
+  targets: string[],
+): Promise<{ task_id: string; draft_id: string }> {
+  return workshopFetch<{ task_id: string; draft_id: string }>(
+    `/api/workshop/world-drafts/${draftId}/refine`,
+    { method: "POST", body: JSON.stringify({ targets }) },
+  );
+}
+
+/** Undo the last refine on a world draft (restores the pre-refine snapshot). */
+export async function undoWorldDraftRefine(draftId: string): Promise<{ draft_id: string }> {
+  return workshopFetch<{ draft_id: string }>(
+    `/api/workshop/world-drafts/${draftId}/refine/undo`,
+    { method: "POST" },
+  );
+}
+
+/** Re-fetch a world-draft detail (used to sync the editor after refine/undo). */
+export async function getWorldDraftDetail(draftId: string): Promise<AdminWorldDraftDetail> {
+  return workshopFetch<AdminWorldDraftDetail>(`/api/workshop/world-drafts/${draftId}`);
+}

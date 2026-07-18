@@ -3,7 +3,7 @@
 CharacterRosterEntry: planner LLM 产出的简略条目（name + role_tag + faction + is_image_target）。
 Character: 完整人物 schema（含 personality / secret / knowledge / schedule / relations 等）。
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class CharacterRosterEntry(BaseModel):
@@ -11,6 +11,19 @@ class CharacterRosterEntry(BaseModel):
     role_tag: str            # 如 "主角" / "宿敌" / "心腹" / "市井小贩"
     faction: str = ""        # 派系归属，可空
     is_image_target: bool = False
+    playable_role: bool = False
+    portrait_target: bool = False
+
+    @model_validator(mode="after")
+    def _compat_targets(self) -> "CharacterRosterEntry":
+        # Old prompts and saved snapshots only know is_image_target.  Preserve
+        # their meaning while new planners can split playability from portrait
+        # budget explicitly.
+        if self.is_image_target:
+            self.playable_role = True
+            self.portrait_target = True
+        self.is_image_target = self.portrait_target
+        return self
 
 
 class CharacterScheduleSlot(BaseModel):
@@ -29,6 +42,8 @@ class Character(BaseModel):
     role_tag: str = ""
     faction: str = ""
     is_image_target: bool = False
+    playable_role: bool = False
+    portrait_target: bool = False
     personality: str
     # 说话方式：称谓 / 句式 / 口头禅 / 1-2 句范例台词。IP 角色由 IPKnowledgePack
     # 的 voice_style+tone_lingo 种入，原创角色由生成 LLM 产出。运行时注入 NPC
@@ -47,3 +62,11 @@ class Character(BaseModel):
     description: str = ""                            # 背景、动机、关键经历（2-3 句）
     abilities: list[str] = Field(default_factory=list)
     starting_inventory: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _compat_targets(self) -> "Character":
+        if self.is_image_target:
+            self.playable_role = True
+            self.portrait_target = True
+        self.is_image_target = self.portrait_target
+        return self

@@ -353,6 +353,13 @@ export interface AdminGenerationTaskSummary {
   kind: "world" | "script";
   draft_type: "world_draft" | "script_draft";
   draft_id: string;
+  generation_run_id?: string | null;
+  root_task_id?: string | null;
+  parent_task_id?: string | null;
+  world_spec?: Record<string, unknown> | null;
+  world_spec_version?: number;
+  payload_revision?: number;
+  payload_hash?: string | null;
   status: "pending" | "running" | "succeeded" | "failed" | "cancel_requested" | "cancelled";
   current_phase: string | null;
   current_code: string | null;
@@ -412,6 +419,9 @@ export interface AdminWorldDraftDetail {
   id: string;
   world_id: string | null;
   payload: WorldDraftPayload;
+  payload_revision: number;
+  payload_hash: string | null;
+  quality_status: "not_requested" | "pending" | "running" | "passed" | "needs_review" | "failed" | "stale" | "waived";
   created_at: string;
   updated_at: string;
   generation_task?: AdminGenerationTaskSummary | null;

@@ -2,6 +2,7 @@
 from services.generation_rubric import (
     BLOCKING_SOFT_THRESHOLD,
     compute_blocking_flags,
+    compute_hard_blocking_flags,
     compute_hard_metrics,
 )
 
@@ -109,3 +110,25 @@ def test_hard_metrics_prune_penalty():
     assert hard["prune_count"] == 5
     assert hard["prune_penalty"] == 20.0   # 5*4 封顶 20
     assert hard["overall_score"] == round(max(0.0, clean["overall_score"] - 20.0), 1)
+
+
+def test_hard_contract_flags_are_separate_from_subjective_score():
+    payload = _payload(8, 3)
+    payload.update(
+        cover_image="/static/placeholder-cover.png",
+        hero_image="/generated/hero.png",
+    )
+    hard = compute_hard_metrics(payload, ip_must_have=[])
+    flags = compute_hard_blocking_flags(
+        hard,
+        payload,
+        {
+            "scale": {
+                "active_roles_min": 8,
+                "playable_min": 3,
+                "events_target": 6,
+            }
+        },
+    )
+    assert "events=1<3" in flags
+    assert "cover_image_missing_or_placeholder" in flags

@@ -17,24 +17,23 @@ from engine.content_status import (
     next_status_on_publish,
     next_status_on_withdraw,
 )
-
-publish_logger = structlog.get_logger("publish_service")
 from models.draft import ScriptDraft, WorldDraft
 from models.game import GameSession
 from models.script import Script
+from models.world import Ending, World, WorldCharacter
+from models.world_quality_score import WorldQualityScore
 from services import notification_service as ns
 from sqlalchemy import delete as sa_delete
-from models.world import Ending, World, WorldCharacter
 from services.cross_artifact_validator import (
-    CrossArtifactError,
     validate_cross_artifact,
 )
 from services.generation_schema import (
-    SchemaValidationError,
     validate_script_payload,
     validate_world_payload,
 )
 from services.world_image_fields import resolve_world_image_fields_from_mapping
+
+publish_logger = structlog.get_logger("publish_service")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,7 +59,7 @@ def _derive_narrative_weight(wc_data: dict) -> int:
         return 100
     if "宿敌" in role_tag or "反派" in role_tag:
         return 90
-    if wc_data.get("is_image_target"):
+    if wc_data.get("playable_role") or wc_data.get("is_image_target"):
         return 70
     return 50
 
@@ -124,6 +123,8 @@ def _coerce_world_character(
         "role_tag": raw.get("role_tag") or "",
         "faction": raw.get("faction") or "",
         "is_image_target": bool(raw.get("is_image_target")),
+        "playable_role": bool(raw.get("playable_role", raw.get("playable"))) or playable_override,
+        "portrait_target": bool(raw.get("portrait_target", raw.get("is_image_target"))),
     }
 
 
@@ -363,6 +364,9 @@ async def apply_world_payload(db: AsyncSession, world: World, payload: dict) -> 
         wc.abilities = wc_data.get("abilities", [])
         wc.starting_inventory = wc_data.get("starting_inventory", [])
         wc.avatar = wc_data.get("avatar")
+        # gender 此前漏落到 world_characters 表：生成阶段 payload 里已带 gender，但发布
+        # materialize 时未赋值，导致发布后角色性别全空（封面/头像 pipeline 与内容完整性依赖它）。
+        wc.gender = wc_data.get("gender") or ""
         wc.initial_peer_relations = wc_data.get("initial_peer_relations") or None
         wc.narrative_weight = _derive_narrative_weight(wc_data)
         name_to_id[wc.name] = str(wc.id)
@@ -556,11 +560,34 @@ async def publish_world_draft(
     then materializes the draft onto the World row.
     """
     draft = await _load_owned_world_draft(db, draft_id=draft_id, actor_user_id=actor_user_id)
+    await _ensure_world_quality_gate(db, draft)
     target_status = next_status_on_publish(audit_enabled=audit_enabled)
     world = await _materialize_world_draft(db, draft, target_status=target_status)
     await db.commit()
     await db.refresh(world)
     return world
+
+
+async def _ensure_world_quality_gate(db: AsyncSession, draft: WorldDraft) -> None:
+    """Only the exact scored/waived payload revision may become public."""
+    if int(draft.payload_revision or 0) <= 0:
+        return  # legacy/manual draft created before versioned generation
+    quality = (
+        await db.execute(
+            select(WorldQualityScore)
+            .where(
+                WorldQualityScore.draft_id == draft.id,
+                WorldQualityScore.payload_revision == draft.payload_revision,
+                WorldQualityScore.payload_hash == draft.payload_hash,
+            )
+            .order_by(WorldQualityScore.created_at.desc())
+        )
+    ).scalars().first()
+    if quality is None or quality.status not in {"passed", "waived"}:
+        status = quality.status if quality is not None else draft.quality_status
+        raise ValueError(
+            f"当前草稿版本尚未通过质量门：{status or 'not_checked'}；请完成质量检查后再公开发布"
+        )
 
 
 async def withdraw_world(
@@ -1014,6 +1041,7 @@ async def approve_world_draft(db: AsyncSession, *, draft_id: str) -> World:
         raise ValueError(f"Draft {draft_id} not found")
     if draft.review_status != "submitted":
         raise ValueError("草稿不在审核中")
+    await _ensure_world_quality_gate(db, draft)
     world = await _materialize_world_draft(db, draft, target_status=ContentStatus.PUBLISHED)
     draft.review_status = "editing"
     draft.review_note = None

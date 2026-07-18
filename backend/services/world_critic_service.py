@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import structlog
 
 from schemas.research_pack import IPCanon
@@ -346,7 +347,6 @@ async def heavy_critic_characters(
     ]
 
     # Merge: only accept repaired chars whose name matches an original char (name protection)
-    original_name_map = {c["name"]: c for c in characters if c.get("name")}
     repaired_name_map = {c["name"]: c for c in repaired_chars if c.get("name")}
 
     # Repair LLM only edits content fields (personality / secret / knowledge /
@@ -523,12 +523,30 @@ async def heavy_critic_playable(
 
 # ---- 软分(LLM 整体打分,供异步质量打分器调用)----
 
-_SOFT_SCORE_SYSTEM = """你是互动叙事世界的质量评审。对给定世界打三个维度的分(各 1-10 整数)：
-- ip_consistency：是否忠于所复刻 IP / 设定自洽（原创世界看设定内部一致性与质感）
-- collision：角色是否各有区分、不功能撞车、不雷同（分越高越好）
-- tension：可玩视角是否有信息差与行动空间、戏剧张力够不够
-再给一句 summary 概括整体质量与最大短板。
-输出严格 JSON：{"ip_consistency":int,"collision":int,"tension":int,"summary":str}"""
+_SOFT_SCORE_SYSTEM = """你是独立的互动叙事世界质量审计员。输入包含最终世界的审计投影、
+冻结的 WorldSpec，以及研究证据。不要因为世界名称、文风或人物数量像原作就给高分，必须检查
+角色身份、关系、地点归属、事件因果、时间线和 lore 正文。
+
+打三个维度的分（各 1-10 整数）：
+- ip_consistency：是否忠于指定 IP/版本；原创世界则看内部一致性与质感
+- collision：角色是否有区分、没有功能撞车
+- tension：可玩视角是否有信息差、行动空间和戏剧张力
+
+发现问题时输出可定位 violation：
+- severity=major：strict 复刻缺核心人物、用原创人物替换正典、版本/时代/身份/关键事件明显冲突
+- severity=warning：同质化、细节可疑、证据不足或开放行动空间偏弱
+- target 使用具体字段路径或实体名；detail 说明可执行的问题，不要泛泛而谈
+- 研究材料不足时标 evidence_insufficient，不要凭空编造“正确答案”
+- canon_characters 是可选正典池，不是全员必出；只有 must_have 缺失，或最终角色数低于 WorldSpec.scale 才算角色缺失
+- relations_pack 是运行时最终关系图；其中 explicit 关系表达敌友亲疏，event_tied/trust=0 只表示共同经历、不得覆盖 explicit。任一处已有核心关系时，不得误报“关系缺失”
+- code 只能从以下固定分类选择：canon_entity_missing、canon_identity_conflict、canon_relation_conflict、
+  canon_event_conflict、timeline_causality_conflict、lore_conflict、location_conflict、duplicate_content、
+  role_homogenization、text_corruption、evidence_insufficient、gameplay_weakness、other_quality_issue
+
+输出严格 JSON：
+{"ip_consistency":int,"collision":int,"tension":int,"confidence":0到1小数,
+ "violations":[{"code":"snake_case","severity":"major|warning","target":"路径或实体","detail":"具体问题"}],
+ "summary":"整体质量与最大短板"}"""
 
 
 def _clamp_score(v: object) -> int | None:
@@ -547,6 +565,52 @@ def _median_int(values: list[int]) -> int | None:
     return vs[mid]
 
 
+_QUALITY_CODES = {
+    "canon_entity_missing",
+    "canon_identity_conflict",
+    "canon_relation_conflict",
+    "canon_event_conflict",
+    "timeline_causality_conflict",
+    "lore_conflict",
+    "location_conflict",
+    "duplicate_content",
+    "role_homogenization",
+    "text_corruption",
+    "evidence_insufficient",
+    "gameplay_weakness",
+    "other_quality_issue",
+}
+
+
+def _normalize_quality_code(raw: object) -> str:
+    code = re.sub(r"[^a-z0-9_]+", "_", str(raw or "").lower()).strip("_")
+    if code in _QUALITY_CODES:
+        return code
+    if "evidence" in code or "citation" in code:
+        return "evidence_insufficient"
+    if "text" in code or "garbl" in code or "language" in code:
+        return "text_corruption"
+    if "relation" in code or "peer" in code or "parent_child" in code:
+        return "canon_relation_conflict"
+    if "location" in code or "place" in code:
+        return "location_conflict"
+    if "lore" in code:
+        return "lore_conflict"
+    if "duplicate" in code or "duplication" in code:
+        return "duplicate_content"
+    if "event" in code or "timeline" in code or "causality" in code or "plot" in code:
+        return "timeline_causality_conflict"
+    if "missing" in code and any(term in code for term in ("canon", "character", "entity", "core", "key")):
+        return "canon_entity_missing"
+    if any(term in code for term in ("identity", "faction", "affiliation", "canon_conflict")):
+        return "canon_identity_conflict"
+    if "homogen" in code or "collision" in code:
+        return "role_homogenization"
+    if "playable" in code or "gameplay" in code or "tension" in code:
+        return "gameplay_weakness"
+    return "other_quality_issue"
+
+
 async def _score_world_soft_once(score_input: str, llm_router) -> dict | None:
     """单次软评分。失败/坏 JSON → None。"""
     try:
@@ -562,49 +626,325 @@ async def _score_world_soft_once(score_input: str, llm_router) -> dict | None:
         return None
     if not data or not isinstance(data, dict):
         return None
+    violations: list[dict] = []
+    for item in data.get("violations") or []:
+        if not isinstance(item, dict):
+            continue
+        code = _normalize_quality_code(item.get("code"))
+        severity = str(item.get("severity") or "warning").lower()
+        violations.append(
+            {
+                "code": code,
+                "severity": "major" if severity == "major" else "warning",
+                "target": str(item.get("target") or "")[:200],
+                "detail": str(item.get("detail") or "")[:800],
+            }
+        )
+    try:
+        confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
+    except (TypeError, ValueError):
+        confidence = 0.5
     return {
         "ip_consistency": _clamp_score(data.get("ip_consistency")),
         "collision": _clamp_score(data.get("collision")),
         "tension": _clamp_score(data.get("tension")),
+        "confidence": confidence,
+        "violations": violations[:12],
         "summary": str(data.get("summary", ""))[:500],
     }
 
 
-async def score_world_soft(
-    payload: dict, ip_canon: dict | None, llm_router, *, vote: int = 3
-) -> dict | None:
-    """对最终 world payload 跑 best-of-N 软评分，逐维取中位数。全失败返回 None(不阻断)。
+def _clip(value: object, limit: int) -> str:
+    if isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        except (TypeError, ValueError):
+            text = str(value or "")
+    return text[:limit]
 
-    单次 LLM 评分有噪声——一旦这个分要当「发布门控」(blocking_flags) 用，单次假阳/假阴
-    代价很大。这里并发跑 ``vote`` 次、各维取中位数，把噪声压下去（与 IP 识别 best-of-N 同思路）。
-    summary 取最接近中位 ip_consistency 的那次，保证解释与分一致。
-    仅单次质量参考不进纵向趋势(软分换模型/prompt 不可比,见 plan 决策①)。
-    """
-    chars = payload.get("world_characters") or []
-    brief_chars = [
-        {
-            "name": c.get("name"),
-            "playable": bool(c.get("playable")),
-            "description": str(c.get("description", ""))[:200],
-            "personality": str(c.get("personality", ""))[:120],
-        }
-        for c in chars if isinstance(c, dict)
+
+def _quality_audit_projection(
+    payload: dict,
+    ip_pack: dict | None,
+    world_spec: dict | None,
+) -> dict:
+    """Bounded semantic projection of every canon-bearing world section."""
+    characters = []
+    for char in (payload.get("world_characters") or [])[:40]:
+        if not isinstance(char, dict):
+            continue
+        characters.append(
+            {
+                "name": char.get("name"),
+                "role_tag": char.get("role_tag"),
+                "faction": char.get("faction"),
+                "playable": bool(char.get("playable_role") or char.get("playable")),
+                "description": _clip(char.get("description"), 260),
+                "personality": _clip(char.get("personality"), 140),
+                "secret": _clip(char.get("secret"), 180),
+                "voice_style": _clip(char.get("voice_style"), 120),
+                "knowledge": [_clip(item, 140) for item in (char.get("knowledge") or [])[:3]],
+                "initial_location": char.get("initial_location"),
+                "schedule": dict(list((char.get("schedule") or {}).items())[:4]),
+                "initial_peer_relations": [
+                    {
+                        "target": item.get("target"),
+                        "kind": item.get("kind"),
+                        "trust": item.get("trust"),
+                    }
+                    for item in (char.get("initial_peer_relations") or [])[:6]
+                    if isinstance(item, dict)
+                ],
+                "runtime_relations": [
+                    {
+                        "target": item.get("target"),
+                        "kind": item.get("kind"),
+                        "trust": item.get("trust"),
+                        "why": item.get("why"),
+                    }
+                    for item in (
+                        ((payload.get("relations_pack") or {}).get("relations_by_npc") or {}).get(
+                            char.get("name"), []
+                        )
+                    )[:12]
+                    if isinstance(item, dict)
+                ],
+            }
+        )
+
+    locations = [
+        {"name": item.get("name"), "description": _clip(item.get("description"), 260)}
+        for item in (payload.get("locations") or [])[:24]
+        if isinstance(item, dict)
     ]
-    score_input = json.dumps(
+    shared_events = [
         {
+            "id": item.get("id"),
+            "title": item.get("title") or item.get("name"),
+            "summary": _clip(item.get("summary") or item.get("description"), 420),
+            "involved_npcs": list(item.get("involved_npcs") or [])[:12],
+            "perceptions": _clip(item.get("perceptions"), 600),
+        }
+        for item in (payload.get("shared_events") or [])[:20]
+        if isinstance(item, dict)
+    ]
+    events_data = [
+        {
+            "id": item.get("id"),
+            "kind": item.get("kind"),
+            "title": item.get("title") or item.get("name"),
+            "summary": _clip(item.get("summary") or item.get("description"), 320),
+            "trigger": item.get("trigger") or {},
+            "effects": item.get("effects") or {},
+            "rumors": (item.get("rumors") or [])[:6],
+            "disabled": bool(item.get("disabled")),
+        }
+        for item in (payload.get("events_data") or [])[:16]
+        if isinstance(item, dict)
+    ]
+
+    lore_dimensions = []
+    for dimension in ((payload.get("lore_pack") or {}).get("dimensions") or [])[:6]:
+        if not isinstance(dimension, dict):
+            continue
+        lore_dimensions.append(
+            {
+                "name": dimension.get("name"),
+                "blocks": [
+                    {
+                        "heading": block.get("heading"),
+                        "body": _clip(block.get("body"), 420),
+                    }
+                    for block in (dimension.get("content_blocks") or [])[:4]
+                    if isinstance(block, dict)
+                ],
+            }
+        )
+
+    pack = ip_pack or {}
+    research = {
+        "ip_name": pack.get("ip_name"),
+        "fidelity_mode": pack.get("fidelity_mode"),
+        "canon_note": _clip(pack.get("canon_note"), 500),
+        "summary": _clip(pack.get("summary"), 1600),
+        "characters": [
+            {
+                "name": item.get("name"),
+                "role": _clip(item.get("role_in_story"), 180),
+                "relation_to_protagonist": _clip(item.get("relation_to_protagonist"), 140),
+                "story_arc": _clip(item.get("story_arc"), 260),
+                "must_have": bool(item.get("must_have")),
+                "in_continuity": item.get("in_continuity", True),
+            }
+            for item in (pack.get("characters") or [])[:40]
+            if isinstance(item, dict)
+        ],
+        "places": [
+            {"name": item.get("name"), "description": _clip(item.get("description"), 180)}
+            for item in (pack.get("places") or [])[:24]
+            if isinstance(item, dict)
+        ],
+        "key_events": [
+            {"name": item.get("name"), "description": _clip(item.get("description"), 220)}
+            for item in (pack.get("key_events") or [])[:20]
+            if isinstance(item, dict)
+        ],
+        "timeline": [
+            {"when": item.get("when"), "event": _clip(item.get("event"), 260)}
+            for item in (pack.get("timeline") or [])[:20]
+            if isinstance(item, dict)
+        ],
+        "evidence_excerpt": [
+            {
+                "id": item.get("id"),
+                "source": item.get("source"),
+                "citations": [
+                    str(tag)[len("citation:") :]
+                    for tag in (item.get("tags") or [])
+                    if str(tag).startswith("citation:")
+                ][:5],
+                "text": _clip(item.get("text"), 1000),
+            }
+            for item in (pack.get("passages") or [])[:2]
+            if isinstance(item, dict)
+        ],
+    }
+    return {
+        "world_spec": world_spec or {},
+        "world": {
             "name": payload.get("name"),
-            "base_setting": str(payload.get("base_setting", ""))[:1500],
-            "characters": brief_chars,
-            "ip_canon": ip_canon or {},
+            "description": _clip(payload.get("description"), 1400),
+            "base_setting": _clip(payload.get("base_setting"), 2200),
+            "free_setting": _clip(payload.get("free_setting"), 1200),
+            "characters": characters,
+            "locations": locations,
+            "shared_events": shared_events,
+            "events_data": events_data,
+            "lore_dimensions": lore_dimensions,
         },
+        "research": research,
+    }
+
+
+def _merge_quality_violations(
+    runs: list[dict], *, require_consensus: bool,
+) -> tuple[list[dict], list[dict]]:
+    grouped: dict[tuple[str, str], dict] = {}
+    for run in runs:
+        seen: set[tuple[str, str]] = set()
+        for item in run.get("violations") or []:
+            key = (str(item.get("code") or "other_quality_issue"), "")
+            if key in seen:
+                continue
+            seen.add(key)
+            current = grouped.setdefault(key, {**item, "votes": 0})
+            current["votes"] += 1
+            if item.get("severity") == "major":
+                current["severity"] = "major"
+    confirmed = [
+        item
+        for item in grouped.values()
+        if item["votes"] >= 2 or (len(runs) == 1 and not require_consensus)
+    ]
+    unconfirmed = [item for item in grouped.values() if item not in confirmed]
+    return confirmed, unconfirmed
+
+
+async def score_world_soft(
+    payload: dict,
+    ip_canon: dict | None,
+    llm_router,
+    *,
+    world_spec: dict | None = None,
+    vote: int | None = None,
+) -> dict | None:
+    """Adaptive soft review: normally one judge, escalate only on risk.
+
+    ``vote`` remains as a compatibility/testing override.  Without it we run a
+    second judge only for blocking/borderline output, and a third only when the
+    first two materially disagree.  This replaces the unconditional 3-call
+    quality tax while retaining protection where a false decision matters.
+    """
+    score_input = json.dumps(
+        _quality_audit_projection(payload, ip_canon, world_spec),
         ensure_ascii=False,
     )
 
-    n = max(1, vote)
-    results = await asyncio.gather(
-        *[_score_world_soft_once(score_input, llm_router) for _ in range(n)]
-    )
-    runs = [r for r in results if r]
+    require_consensus = bool(vote and vote > 1)
+    required_names = {
+        re.sub(r"[\s·•・]", "", str(name or "")).strip()
+        for name in (world_spec or {}).get("must_have_characters", [])
+        if str(name or "").strip()
+    }
+    present_names = {
+        re.sub(r"[\s·•・]", "", str(item.get("name") or "")).strip()
+        for item in (payload.get("world_characters") or [])
+        if isinstance(item, dict) and item.get("name")
+    }
+    missing_required = required_names - present_names
+    target_count = int(((world_spec or {}).get("scale") or {}).get("active_roles_target") or 0)
+    scale_satisfied = target_count <= 0 or len(present_names) >= target_count
+
+    def _apply_contract(run: dict | None) -> dict | None:
+        if run is None or missing_required or not scale_satisfied:
+            return run
+        # canon_characters is an eligible source pool, while must_have is the
+        # required set.  A judge cannot promote an optional omission to major
+        # when the frozen scale and must-have contract are both satisfied.
+        for item in run.get("violations") or []:
+            if item.get("code") == "canon_entity_missing" and item.get("severity") == "major":
+                item["severity"] = "warning"
+        return run
+
+    if vote is not None:
+        n = max(1, vote)
+        results = await asyncio.gather(
+            *[_score_world_soft_once(score_input, llm_router) for _ in range(n)]
+        )
+        runs = [normalized for r in results if (normalized := _apply_contract(r))]
+    else:
+        first = _apply_contract(await _score_world_soft_once(score_input, llm_router))
+        runs = [first] if first else []
+        dims = ("ip_consistency", "collision", "tension")
+        first_major = any(
+            item.get("severity") == "major" for item in (first or {}).get("violations", [])
+        )
+        borderline = (
+            first is None
+            or any(not isinstance(first.get(k), int) or first[k] <= 6 for k in dims)
+            or first_major
+            or float(first.get("confidence", 0.0)) < 0.65
+        )
+        require_consensus = borderline
+        if borderline:
+            second = _apply_contract(await _score_world_soft_once(score_input, llm_router))
+            if second:
+                runs.append(second)
+            first_major_keys = {
+                item.get("code")
+                for item in (first or {}).get("violations", [])
+                if item.get("severity") == "major"
+            }
+            second_major_keys = {
+                item.get("code")
+                for item in (second or {}).get("violations", [])
+                if item.get("severity") == "major"
+            }
+            disagree = bool(
+                first and second and any(
+                    isinstance(first.get(k), int)
+                    and isinstance(second.get(k), int)
+                    and abs(first[k] - second[k]) >= 2
+                    for k in dims
+                )
+            ) or bool(first and second and first_major_keys != second_major_keys)
+            if disagree:
+                third = _apply_contract(await _score_world_soft_once(score_input, llm_router))
+                if third:
+                    runs.append(third)
+        n = len(runs)
     if not runs:
         return None
 
@@ -624,10 +964,16 @@ async def score_world_soft(
     else:
         best = runs[0]
 
+    confirmed, unconfirmed = _merge_quality_violations(
+        runs, require_consensus=require_consensus,
+    )
+    confidence_values = [float(run.get("confidence", 0.0)) for run in runs]
+    confidence = sorted(confidence_values)[(len(confidence_values) - 1) // 2]
     logger.info(
         "score_world_soft_voted",
         votes=len(runs),
         of=n,
+        adaptive=vote is None,
         ip_consistency=ip_med,
         collision=col_med,
         tension=ten_med,
@@ -636,5 +982,10 @@ async def score_world_soft(
         "ip_consistency": ip_med,
         "collision": col_med,
         "tension": ten_med,
+        "confidence": confidence,
+        "violations": confirmed + unconfirmed,
+        "confirmed_violations": confirmed,
+        "unconfirmed_violations": unconfirmed,
         "summary": best.get("summary", ""),
+        "judge_count": len(runs),
     }

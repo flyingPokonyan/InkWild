@@ -212,7 +212,8 @@ docker-compose.prod.yml    # prod override：生产 URL/cookie/CORS + build args
 | `LLM_COMPRESSION_MODEL` | `deepseek-chat` | O | 上下文压缩 fallback |
 | `GROK_API_KEY` | `""` | O | xAI grok |
 | `GROK_BASE_URL` | `https://api.x.ai/v1` | O | xAI 端点 |
-| `GROK_MODEL` | `grok-4.20-0309-reasoning` | O | grok 文本模型 |
+| `GROK_MODEL` | `grok-4.5` | O | grok 默认文本模型 |
+| `IP_RECOGNITION_MODEL` | `grok-chat-fast` | O | 快速 IP 识别专用模型 |
 | `GROK_IMAGE_MODEL` | `grok-imagine-image` | O | grok 图像模型 |
 | `GEMINI_OPENAI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta/openai` | O | Gemini OpenAI 兼容端点 |
 | `MODEL_PROBE_TTL_HOURS` | `168` | O | 模型探测结果缓存 |

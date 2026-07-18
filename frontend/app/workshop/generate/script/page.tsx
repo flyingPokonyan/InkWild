@@ -147,8 +147,27 @@ function GenerateScriptPageContent() {
      return () => { active = false; };
   }, [initialWorldId]);
 
-  const startTimer = () => { setElapsed(0); timerRef.current = setInterval(() => setElapsed(s => s + 1), 1000); };
-  const stopTimer = () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
+  // 墙钟计时（已用秒数向上走），与进度条无关
+  const timerStartedAtRef = useRef<number | null>(null);
+  const startTimer = (reset = true) => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (reset || timerStartedAtRef.current == null) {
+      timerStartedAtRef.current = Date.now();
+    }
+    const base = timerStartedAtRef.current;
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - base) / 1000)));
+    tick();
+    timerRef.current = setInterval(tick, 1000);
+  };
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
 
   const trackPhase = useCallback((event: AdminProgressEvent) => {
     setPhases((prev) => appendAdminPhaseEvent(prev, event));

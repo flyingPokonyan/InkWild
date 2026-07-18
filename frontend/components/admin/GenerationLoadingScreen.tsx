@@ -5,11 +5,13 @@
  *   与 images 两步）—— 世界生成 / 剧本生成 / 重新生成 共用。
  *
  * 视觉：黑底 + 中央径向呼吸光 + edge vignette；3 行文字 + 8px 暖金脉冲圆 + 1px 真进度条。
- * 数据：完全走 buildAdminLoadingSnapshot + computeWeightedProgress（真实 backend SSE phase 流）。
+ * 数据：
+ *   · 进度条 → buildAdminLoadingSnapshot + computeWeightedProgress（SSE phase 加权）
+ *   · 计时器 → 纯已用时间（elapsed 秒，向上走），与进度条无关、不估剩余
  * 字体规则：
  *   · context label / eyebrow / 错误描述 → sans t-meta（中文禁用 mono caps/micro，§1.1）
  *   · phase headline / 错误标题 → serif h2（§1.1 ② italic 高亮 / 标题级）
- *   · 进度数字（47% · 0:47）→ mono t-micro（数字走 mono 合规）
+ *   · 进度数字（47% · 3:05）→ sans tabular-nums
  * 文案规则：
  *   · 错误标题统一 "生成被中断"（不写"无法连接到叙事引擎"系统术语）
  *   · 错误描述透传 caller 的 error，无 error 时 fallback "请稍后再试。"
@@ -25,6 +27,7 @@ import {
   buildAdminLoadingSnapshot,
   computeWeightedProgress,
   EXPECTED_PHASE_SECONDS,
+  formatClock,
 } from "@/lib/admin-progress-view";
 import {
   formatStageLine,
@@ -36,12 +39,6 @@ import {
 
 // Re-export for back-compat (DraftEditorShell previously imported StageState from here).
 export type { StageKey, StageState, StageStatus };
-
-function formatElapsed(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 interface GenerationLoadingScreenProps {
   phases: AdminPhaseEntry[];
@@ -73,8 +70,8 @@ export function GenerationLoadingScreen({
   const snapshot = buildAdminLoadingSnapshot(phases);
   const current = snapshot.current;
 
-  // 阶段内时间插值：记录每个 phase 首次出现时的 elapsed，让长阶段（ip_research ~4min /
-  // images ~5min）里进度条随时间平缓爬升，而不是几十秒卡死到里程碑才猛跳。
+  // 进度条长阶段时间插值：记录每个 phase 首次出现时的 elapsed，让条随时间缓爬。
+  // 计时器本身只显示 elapsed（已用），不吃 phaseFloor / 进度 %。
   const phaseStartRef = useRef<Record<string, number>>({});
   for (const p of phases) {
     if (phaseStartRef.current[p.phase] === undefined) phaseStartRef.current[p.phase] = elapsed;
@@ -184,12 +181,12 @@ export function GenerationLoadingScreen({
                   }}
                 />
               ) : (
-                /* 已有 phase headline + 真进度条 + percent/elapsed，不再叠加默认文案 */
+                /* 已有 phase headline + 真进度条 + %/已用计时，不再叠加默认文案 */
                 <LoadingPulse variant="block" size={48} label="" />
               )}
             </div>
 
-            {/* 真进度条 + 数字 —— 错误态隐藏 */}
+            {/* 进度条（% 加权）与计时器（已用秒数）分列，互不推导 —— 错误态隐藏 */}
             {!error && (
               <div className="mt-10 flex flex-col items-center gap-4">
                 <div
@@ -222,7 +219,7 @@ export function GenerationLoadingScreen({
                 >
                   <span style={{ color: "var(--lv-ink-3)" }}>{progressPct}%</span>
                   <span style={{ margin: "0 14px", color: "var(--lv-ink-5)" }}>·</span>
-                  <span>{formatElapsed(elapsed)}</span>
+                  <span style={{ color: "var(--lv-ink-3)" }}>{formatClock(elapsed)}</span>
                 </div>
               </div>
             )}

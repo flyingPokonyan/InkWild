@@ -45,6 +45,7 @@ init_sentry()
 # How often the credit-hold sweep recovers orphaned reservations + failed
 # settlements (design §5.4). Lightweight; reuses the running event loop.
 _CREDIT_SWEEP_INTERVAL_SECONDS = 300
+_QUALITY_SWEEP_INTERVAL_SECONDS = 60
 
 
 async def _credit_sweep_loop() -> None:
@@ -61,6 +62,25 @@ async def _credit_sweep_loop() -> None:
             logger.warning("credit_sweep_failed", exc_info=True)
 
 
+async def _quality_sweep_loop() -> None:
+    """Recover pending quality jobs after process restarts."""
+    from services.model_management import resolve_slot_router
+    from services.world_quality_scorer import WorldQualityScorer
+
+    await asyncio.sleep(10)
+    while True:
+        try:
+            async with async_session() as session:
+                llm = await resolve_slot_router(session, "admin_generation")
+            await WorldQualityScorer(async_session, llm).run_pending(limit=5)
+            await asyncio.sleep(_QUALITY_SWEEP_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            break
+        except Exception:  # noqa: BLE001
+            logger.warning("quality_sweep_failed", exc_info=True)
+            await asyncio.sleep(_QUALITY_SWEEP_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
@@ -71,12 +91,18 @@ async def lifespan(_: FastAPI):
     except Exception:  # noqa: BLE001
         logger.warning("app_bootstrap_failed", exc_info=True)
     sweep_task = asyncio.create_task(_credit_sweep_loop())
+    quality_task = asyncio.create_task(_quality_sweep_loop())
     try:
         yield
     finally:
         sweep_task.cancel()
+        quality_task.cancel()
         try:
             await sweep_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await quality_task
         except asyncio.CancelledError:
             pass
 

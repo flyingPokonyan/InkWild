@@ -154,6 +154,7 @@ class LLMRouter:
         fallback_chain: list[str] | None = None,
         identity: dict[str, str | None] | None = None,
         timeout_seconds: float | None = None,
+        total_timeout_seconds: float | None = None,
         max_retries: int | None = None,
         retry_backoff_seconds: float | None = None,
         reasoning: bool | None = None,
@@ -174,6 +175,7 @@ class LLMRouter:
         # Phase 2.B.1 — first-token timeout + bounded retry. Resolved lazily
         # from settings so tests can construct routers without env.
         self._timeout_seconds = timeout_seconds
+        self._total_timeout_seconds = total_timeout_seconds
         self._max_retries = max_retries
         self._retry_backoff_seconds = retry_backoff_seconds
 
@@ -218,11 +220,27 @@ class LLMRouter:
         # stream_with_tools so the cap applies across both code paths.
         sem = await _acquire_global_concurrency_slot()
         try:
-            async for event in self._stream_json_inner(
-                messages=messages, system=system, max_tokens=max_tokens,
+            source = self._stream_json_inner(
+                messages=messages,
+                system=system,
+                max_tokens=max_tokens,
                 provider_offset=provider_offset,
-            ):
-                yield event
+            )
+            if self._total_timeout_seconds is None:
+                async for event in source:
+                    yield event
+            else:
+                try:
+                    async with asyncio.timeout(self._total_timeout_seconds):
+                        async for event in source:
+                            yield event
+                except TimeoutError:
+                    logger.warning(
+                        "llm.total_timeout",
+                        timeout_seconds=self._total_timeout_seconds,
+                        mode="json",
+                    )
+                    raise
         finally:
             sem.release()
 
@@ -319,7 +337,7 @@ class LLMRouter:
         # collapsing the provider connection pool.
         sem = await _acquire_global_concurrency_slot()
         try:
-            async for event in self._stream_with_tools_inner(
+            source = self._stream_with_tools_inner(
                 messages=messages,
                 tools=tools,
                 system=system,
@@ -328,8 +346,22 @@ class LLMRouter:
                 response_format=response_format,
                 tool_choice=tool_choice,
                 reasoning=reasoning,
-            ):
-                yield event
+            )
+            if self._total_timeout_seconds is None:
+                async for event in source:
+                    yield event
+            else:
+                try:
+                    async with asyncio.timeout(self._total_timeout_seconds):
+                        async for event in source:
+                            yield event
+                except TimeoutError:
+                    logger.warning(
+                        "llm.total_timeout",
+                        timeout_seconds=self._total_timeout_seconds,
+                        mode="tools",
+                    )
+                    raise
         finally:
             sem.release()
 

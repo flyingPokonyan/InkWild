@@ -4,18 +4,21 @@ from unittest.mock import MagicMock
 
 from schemas.research_pack import IPCanon, Passage
 from schemas.character_v2 import Character
-from schemas.shared_events import SharedEvent
 from services.shared_events_builder import build_shared_events
 
 
 def _make_router(responses: list[str]):
     fake = MagicMock()
     idx = {"n": 0}
+    systems: list[str] = []
     async def stream(*, messages, tools, system, max_tokens):
-        i = idx["n"]; idx["n"] += 1
+        systems.append(system)
+        i = idx["n"]
+        idx["n"] += 1
         yield {"type": "text_delta", "text": responses[i] if i < len(responses) else "{}"}
     fake.stream_with_tools = stream
     fake._calls = idx
+    fake._systems = systems
     return fake
 
 
@@ -93,6 +96,39 @@ async def test_invalid_involved_npcs_filtered():
     )
     assert "幽灵NPC" not in events[0].involved_npcs
     assert set(events[0].involved_npcs) == {"A", "B"}
+
+
+@pytest.mark.asyncio
+async def test_invalid_perception_npcs_filtered_but_valid_information_gap_kept():
+    passages = [Passage(id="p1", text="x", tags=[], source="tavily")]
+    chars = [_char("A"), _char("B")]
+    router_resp = json.dumps({
+        "events": [{
+            "id": "e1",
+            "title": "T",
+            "summary": "S",
+            "involved_npcs": ["A", "B"],
+            "perceptions": {
+                "A": {"knows": "真相", "believes": "B 无辜", "feels": "警惕"},
+                "B": {"knows": "表象", "believes": "A 有罪", "feels": "愤怒"},
+                "幽灵NPC": {"knows": "全部", "believes": "", "feels": ""},
+            },
+            "source_passage_ids": ["p1"],
+        }]
+    })
+    router = _make_router([router_resp])
+    events = await build_shared_events(
+        description="x",
+        ip_canon=IPCanon(),
+        characters=chars,
+        passages=passages,
+        llm_router=router,
+    )
+
+    assert "perceptions（必填" in router._systems[0]
+    assert "knows / believes / feels" in router._systems[0]
+    assert set(events[0].perceptions) == {"A", "B"}
+    assert events[0].perceptions["A"].knows != events[0].perceptions["B"].knows
 
 
 @pytest.mark.asyncio

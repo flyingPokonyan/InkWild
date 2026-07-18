@@ -5,6 +5,7 @@ import pytest
 
 from schemas.research_pack import IPCanon, Passage
 from services.research_pack_builder import (
+    build_research_pack,
     probe_ip_canon,
     slice_admin_note_to_passages,
 )
@@ -77,7 +78,7 @@ class _ErrorRouter:
     async def stream_with_tools(self, **kwargs) -> AsyncIterator[dict]:
         raise RuntimeError("LLM 5xx")
         # make this an async generator
-        yield  # noqa: unreachable
+        yield
 
 
 @pytest.mark.asyncio
@@ -107,3 +108,31 @@ async def test_probe_ip_canon_handles_llm_exception():
     fake_router = _ErrorRouter()
     canon = await probe_ip_canon("desc", llm_router=fake_router)
     assert canon.canonical_names == []
+
+
+@pytest.mark.asyncio
+async def test_dedicated_ip_path_skips_duplicate_probe_and_summary():
+    class Broker:
+        summarize_calls = 0
+
+        async def collect_passages(self, _request, *, max_chars):
+            assert max_chars == 600
+            return [Passage(id="web-1", text="原始证据", source="tavily")]
+
+        async def summarize_passages(self, _passages):
+            self.summarize_calls += 1
+            return "不应调用"
+
+    broker = Broker()
+    pack = await build_research_pack(
+        description="已确认的 IP",
+        broker=broker,
+        llm_router=_ErrorRouter(),
+        max_passages=8,
+        max_passage_chars=600,
+        probe_canon=False,
+        summarize=False,
+    )
+    assert broker.summarize_calls == 0
+    assert pack.ip_canon == IPCanon()
+    assert {p.source for p in pack.passages} == {"admin_note", "tavily"}

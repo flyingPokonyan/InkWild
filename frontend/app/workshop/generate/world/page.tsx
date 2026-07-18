@@ -101,9 +101,20 @@ export default function GenerateWorldPage() {
     };
   }, []);
 
-  const startTimer = () => {
-    setElapsed(0);
-    timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
+  // 墙钟计时（已用秒数向上走）：不依赖进度条、不估剩余；避免 setInterval +1 在后台节流漂移。
+  const timerStartedAtRef = useRef<number | null>(null);
+  const startTimer = (reset = true) => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (reset || timerStartedAtRef.current == null) {
+      timerStartedAtRef.current = Date.now();
+    }
+    const base = timerStartedAtRef.current;
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - base) / 1000)));
+    tick();
+    timerRef.current = setInterval(tick, 1000);
   };
   const stopTimer = () => {
     if (timerRef.current) {
@@ -214,6 +225,8 @@ export default function GenerateWorldPage() {
         const { task_id } = await continueWorldDraftGeneration(draft.draft_id, mode);
         setPhases([]);
         setIpRecognition(null);
+        // Phase B 继续同一只计时器（不 reset），全程已用时间连贯
+        startTimer(false);
         const phaseB = await runTaskStream(task_id);
         if (!phaseB.didComplete) {
           stopTimer();

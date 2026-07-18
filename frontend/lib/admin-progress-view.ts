@@ -34,11 +34,10 @@ const PHASE_LABELS: Record<string, string> = {
   script_images: "剧本配图",
 };
 
-// 世界生成阶段权重（v2 _STAGE_INDEX 顺序）。**按真实耗时标定**（甄嬛传 IP 世界实测，见
-// EXPECTED_PHASE_SECONDS）：ip_research(~4.4min) + images(~4.6min) 合计占全程 ~82%，其余
-// 十来个阶段大多几秒到几十秒——所以这两步给绝对大头，别的给小头，进度条才不会"飞过廉价阶段、
-// 卡死在这两步"。ip_research 仅 IP/复刻世界出现（原创跳过，见 computeWeightedProgress 里
-// 的动态 totalWeight 剔除）。阶段内的长时间停顿由时间插值（phaseFloors）平滑，见组件。
+// 世界生成阶段权重（v2 _STAGE_INDEX 顺序）。**按真实耗时标定**（见 EXPECTED_PHASE_SECONDS）：
+// ip_research + images 合计占全程大头，其余阶段给小头，进度条才不会"飞过廉价阶段、卡死在这两步"。
+// ip_research 仅 IP/复刻世界出现（原创跳过，见 computeWeightedProgress 里的动态 totalWeight 剔除）。
+// 阶段内的长时间停顿由时间插值（phaseFloors）平滑，见组件。
 const WORLD_PHASE_WEIGHTS: Record<string, number> = {
   boot:             2,
   ip_research:     40,
@@ -59,16 +58,38 @@ const WORLD_PHASE_WEIGHTS: Record<string, number> = {
   validating:       1,
 };
 
-// 各阶段实测典型耗时（秒，世界生成）。仅用于"阶段内时间插值"——在长阶段里让进度条随时间
-// 平缓爬升，不再几十秒纹丝不动到里程碑猛跳。只列值得插值的较长阶段，其余太短无需插值。
+// 各阶段典型耗时（秒）。
+// - 进度条：仅长阶段做 phaseFloor 时间插值（见 GenerationLoadingScreen）
+// - 倒计时：按「未完成阶段剩余期望」求和，**不**用 progress% 反推（避免 40% 进度却只剩 3 分钟的假 ETA）
+// 2026-07 长安十二时辰等大 IP：ip_research 常 10–15min；images 多图并行也要约 5–7min。
 export const EXPECTED_PHASE_SECONDS: Record<string, number> = {
-  ip_research:  260,
-  images:       280,
-  characters:    45,
-  research_pack: 40,
-  lore_pack:     25,
-  free_start_stages: 60, // 多弧线角色：1 次挑选 + 至多 3 次逐角色生成，串行
+  boot:              15,
+  ip_research:      720, // ~12min，大 IP 联网抽取 + 归并
+  research_pack:     60,
+  world_base:        30,
+  lore_dimensions:   25,
+  character_roster:  25,
+  lore_pack:         40,
+  characters:        90,
+  shared_events:     30,
+  relations_pack:    20,
+  events_data:       40,
+  playable:          30,
+  free_start_stages: 90,
+  critic:            45,
+  visual_brief:      25,
+  images:           400, // hero/cover/角色/结局等多张
+  validating:        15,
+  // script pipeline
+  script_base:       45,
+  events:            60,
+  endings:           40,
+  script_visual_brief: 25,
+  script_images:     90,
 };
+
+/** 未单独标定的阶段默认期望秒数（倒计时用，避免漏阶段把剩余估成 0） */
+export const DEFAULT_PHASE_SECONDS = 20;
 
 // 剧本生成 8 阶段权重（v2 _SCRIPT_STAGE_INDEX 顺序），总和 100。
 const SCRIPT_PHASE_WEIGHTS: Record<string, number> = {
@@ -281,6 +302,96 @@ function isScriptPhase(phases: AdminPhaseEntry[]): boolean {
   return phases.some((p) => p.phase === "script_base" || p.phase === "events" || p.phase === "endings");
 }
 
+function isPhaseDone(status: AdminPhaseEntry["status"]): boolean {
+  return status === "done" || status === "warning";
+}
+
+function expectedSecondsForPhase(phase: string): number {
+  return EXPECTED_PHASE_SECONDS[phase] ?? DEFAULT_PHASE_SECONDS;
+}
+
+/**
+ * 判断原创世界是否已跳过 ip_research（与进度权重剔除规则一致）。
+ */
+export function isIpResearchSkipped(phases: AdminPhaseEntry[]): boolean {
+  if (isScriptPhase(phases)) return false;
+  const present = new Set(phases.map((p) => p.phase));
+  return (
+    !present.has("ip_research") &&
+    (present.has("research_pack") || present.has("world_base"))
+  );
+}
+
+/**
+ * 剩余时间倒计时（秒）——**不依赖进度条百分比**。
+ *
+ * 算法：对 pipeline 中每个未跳过阶段
+ * - 已完成 → 0
+ * - 正在跑 → max(0, 期望秒 − 该阶段已耗时)
+ * - 尚未开始 → 完整期望秒
+ *
+ * `phaseStartedAtElapsed`：phase → 首次出现时的全局 elapsed（秒）。
+ * 超时后返回 0（UI 可显示「即将完成」），不出现负数。
+ */
+export function computeRemainingSeconds(
+  phases: AdminPhaseEntry[],
+  elapsed: number,
+  phaseStartedAtElapsed: Record<string, number> = {},
+): number {
+  const isScript = isScriptPhase(phases);
+  const order = isScript ? SCRIPT_PHASE_ORDER : WORLD_PHASE_ORDER;
+  const ipResearchSkipped = isIpResearchSkipped(phases);
+
+  // 每个 phase 取最新状态（同 phase 多事件时后面覆盖前面）
+  const latestStatus: Record<string, AdminPhaseEntry["status"]> = {};
+  for (const entry of phases) {
+    latestStatus[entry.phase] = entry.status;
+  }
+
+  // 还没有任何 phase 事件：按整条世界/剧本预算倒计时
+  if (phases.length === 0) {
+    const budget = order.reduce((sum, phase) => {
+      if (phase === "ip_research") return sum; // 未识别前不预支 IP 研究大头，避免原创被高估
+      return sum + expectedSecondsForPhase(phase);
+    }, 0);
+    // 未开始前给一个保守下限（原创 ~8min）；有 IP 识别后会在 phase 出现时重算
+    const conservative = Math.max(budget, 8 * 60);
+    return Math.max(0, conservative - Math.max(0, elapsed));
+  }
+
+  let remaining = 0;
+  for (const phase of order) {
+    if (phase === "ip_research" && ipResearchSkipped) continue;
+
+    const status = latestStatus[phase];
+    const expected = expectedSecondsForPhase(phase);
+
+    if (status === undefined) {
+      // 尚未开始：若是世界管线且还在很早的阶段，仍计入后续预算
+      remaining += expected;
+      continue;
+    }
+    if (isPhaseDone(status) || status === "error") {
+      continue;
+    }
+    // running（或其它中间态）
+    const startedAt = phaseStartedAtElapsed[phase];
+    const inPhase =
+      startedAt === undefined ? 0 : Math.max(0, elapsed - startedAt);
+    remaining += Math.max(0, expected - inPhase);
+  }
+
+  return Math.max(0, Math.round(remaining));
+}
+
+/** mm:ss 格式化（倒计时 / 已用时共用） */
+export function formatClock(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${r.toString().padStart(2, "0")}`;
+}
+
 /**
  * 根据当前 phases 计算加权进度百分比 (0–99)。
  *
@@ -302,13 +413,7 @@ export function computeWeightedProgress(
   const weights = isScript ? SCRIPT_PHASE_WEIGHTS : WORLD_PHASE_WEIGHTS;
   const order = isScript ? SCRIPT_PHASE_ORDER : WORLD_PHASE_ORDER;
 
-  const present = new Set(phases.map((p) => p.phase));
-  // 原创世界：ip_research 在 research_pack/world_base 之前是严格顺序步（非并行），
-  // 所以"已进入 research_pack/world_base 但 ip_research 从未出现" = 确定跳过 → 剔除权重。
-  const ipResearchSkipped =
-    !isScript &&
-    !present.has("ip_research") &&
-    (present.has("research_pack") || present.has("world_base"));
+  const ipResearchSkipped = isIpResearchSkipped(phases);
 
   const totalWeight = order.reduce((sum, p) => {
     if (p === "ip_research" && ipResearchSkipped) return sum;

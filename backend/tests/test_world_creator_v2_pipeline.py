@@ -6,11 +6,14 @@ concurrency, record_intermediate calls, and result payload shape.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from schemas.research_pack import Passage
 from services.world_creator_agent_v2 import WorldCreatorAgentV2
 
 
@@ -45,6 +48,284 @@ def _build_v2_agent_with_mocks():
         image_gen=None,
         broker=fake_broker,
     )
+
+
+@pytest.mark.asyncio
+async def test_world_base_does_not_stack_transport_retry(monkeypatch):
+    class APITimeoutError(Exception):
+        pass
+
+    agent = _build_v2_agent_with_mocks()
+    agent._last_ip_pack = None
+    agent._fidelity_mode = "none"
+    agent._stage_errors = {}
+    collect = AsyncMock(side_effect=APITimeoutError("router exhausted"))
+    monkeypatch.setattr("services.world_creator_agent_v2._collect_stream_text", collect)
+    monkeypatch.setattr(
+        agent,
+        "_resolve_world_name",
+        AsyncMock(return_value="兜底世界"),
+    )
+
+    result = await agent._generate_world_base("desc", "genre", "era")
+
+    assert collect.await_count == 1
+    assert result["name"] == "兜底世界"
+
+
+@pytest.mark.asyncio
+async def test_world_base_retries_unparseable_json_once(monkeypatch):
+    agent = _build_v2_agent_with_mocks()
+    agent._last_ip_pack = None
+    agent._fidelity_mode = "none"
+    agent._stage_errors = {}
+    collect = AsyncMock(side_effect=[
+        "not-json",
+        json.dumps({"name": "候选", "locations": [{"name": "地点"}]}),
+    ])
+    monkeypatch.setattr("services.world_creator_agent_v2._collect_stream_text", collect)
+    monkeypatch.setattr(
+        agent,
+        "_resolve_world_name",
+        AsyncMock(return_value="有效世界"),
+    )
+
+    result = await agent._generate_world_base("desc", "genre", "era")
+
+    assert collect.await_count == 2
+    assert result["name"] == "有效世界"
+
+
+@pytest.mark.asyncio
+async def test_character_detail_builder_receives_only_supported_contract(monkeypatch):
+    """Scale belongs to roster planning, not the character-detail builder API."""
+    from schemas.character_v2 import Character, CharacterRosterEntry
+    from schemas.research_pack import IPCanon, ResearchPack
+    from schemas.world_generation import WorldSpec, derive_scale_plan
+
+    agent = _build_v2_agent_with_mocks()
+    agent._world_spec = WorldSpec(
+        generation_run_id="run-1",
+        description="desc",
+        scale=derive_scale_plan(canon_character_count=24),
+    )
+    agent._last_ip_pack = None
+    agent._fidelity_mode = "none"
+    builder = AsyncMock(return_value=[Character(name="甄嬛", personality="谨慎")])
+    monkeypatch.setattr(
+        "services.world_creator_agent_v2.build_characters_in_batches", builder
+    )
+
+    events = [
+        event
+        async for event in agent._run_characters(
+            "desc",
+            IPCanon(),
+            [CharacterRosterEntry(name="甄嬛", role_tag="主角")],
+            [],
+            ResearchPack(summary="", passages=[], ip_canon=IPCanon()),
+        )
+    ]
+
+    assert events[-1]["code"] == "completed"
+    assert "scale_plan" not in builder.await_args.kwargs
+    assert builder.await_args.kwargs["batch_size"] == 6
+
+
+@pytest.mark.asyncio
+async def test_events_builder_uses_three_entry_batches(monkeypatch):
+    from schemas.lore_pack import LorePack
+    from schemas.research_pack import IPCanon
+    from schemas.world_generation import WorldSpec, derive_scale_plan
+
+    agent = _build_v2_agent_with_mocks()
+    agent._world_spec = WorldSpec(
+        generation_run_id="run-events",
+        description="desc",
+        scale=derive_scale_plan(canon_character_count=24),
+    )
+    builder = AsyncMock(return_value=[])
+    monkeypatch.setattr("services.world_creator_agent_v2.build_events_data", builder)
+
+    events = [
+        event
+        async for event in agent._run_events_data(
+            "desc", IPCanon(), [], [], [], LorePack()
+        )
+    ]
+
+    assert events[-1]["code"] == "completed"
+    assert builder.await_args.kwargs["target_count"] == 12
+    assert builder.await_args.kwargs["batch_size"] == 3
+
+
+@pytest.mark.asyncio
+async def test_ip_research_uses_routed_broker_web_searcher(monkeypatch):
+    """IP research must reuse the admin-routed searcher, never legacy GROK_* env."""
+    routed_web_searcher = object()
+    broker = MagicMock()
+    broker.tavily = None
+    broker.web_searcher = routed_web_searcher
+    agent = WorldCreatorAgentV2(llm=object(), image_gen=None, broker=broker)
+    agent._fidelity_mode = "strict"
+    agent._pre_recognition = SimpleNamespace(
+        kind="known_ip",
+        ip_name="测试作品",
+        ip_type="novel",
+    )
+    agent._draft_id = None
+
+    pack = MagicMock()
+    pack.ip_name = "测试作品"
+    pack.characters = []
+    pack.places = []
+    pack.passages = [
+        Passage(id="p1", text="source", source="grok_search", tags=["citation:https://example.com"])
+    ]
+    pack.must_have_character_names.return_value = ["主角"]
+    pack.model_dump.return_value = {}
+    captured: dict[str, object] = {}
+
+    async def fake_build_ip_knowledge_pack(**kwargs):
+        captured.update(kwargs)
+        return pack
+
+    monkeypatch.setattr(
+        "services.ip_research_pipeline.build_ip_knowledge_pack",
+        fake_build_ip_knowledge_pack,
+    )
+
+    events = [event async for event in agent._run_ip_research()]
+
+    assert captured["grok_provider"] is routed_web_searcher
+    assert events[-1]["phase"] == "ip_research"
+    assert events[-1]["code"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_strict_ip_research_failure_stops_before_generation(monkeypatch):
+    from services.ip_research_pipeline import IPPackUnderfilledError
+
+    broker = MagicMock()
+    broker.tavily = None
+    broker.web_searcher = object()
+    agent = WorldCreatorAgentV2(llm=object(), image_gen=None, broker=broker)
+    agent._fidelity_mode = "strict"
+    agent._pre_recognition = SimpleNamespace(
+        kind="known_ip",
+        ip_name="测试作品",
+        ip_type="novel",
+    )
+    agent._draft_id = None
+
+    async def fail_build(**_kwargs):
+        raise IPPackUnderfilledError("测试作品", 2, 100)
+
+    monkeypatch.setattr(
+        "services.ip_research_pipeline.build_ip_knowledge_pack",
+        fail_build,
+    )
+    events: list[dict] = []
+
+    with pytest.raises(IPPackUnderfilledError):
+        async for event in agent._run_ip_research():
+            events.append(event)
+
+    assert any(event.get("code") == "ip_pack_underfilled" for event in events)
+    assert not any(event.get("code") == "completed" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_strict_ip_research_without_evidence_stops(monkeypatch):
+    broker = MagicMock()
+    broker.tavily = None
+    broker.web_searcher = object()
+    agent = WorldCreatorAgentV2(llm=object(), image_gen=None, broker=broker)
+    agent._fidelity_mode = "strict"
+    agent._pre_recognition = SimpleNamespace(
+        kind="known_ip",
+        ip_name="测试作品",
+        ip_type="novel",
+    )
+    agent._draft_id = None
+    pack = MagicMock()
+    pack.ip_name = "测试作品"
+    pack.characters = [object()] * 12
+    pack.places = []
+    pack.passages = []
+    pack.must_have_character_names.return_value = ["主角"]
+
+    async def build_without_evidence(**_kwargs):
+        return pack
+
+    monkeypatch.setattr(
+        "services.ip_research_pipeline.build_ip_knowledge_pack",
+        build_without_evidence,
+    )
+    events: list[dict] = []
+
+    with pytest.raises(RuntimeError, match="no source evidence"):
+        async for event in agent._run_ip_research():
+            events.append(event)
+
+    assert any(event.get("code") == "ip_pack_no_evidence" for event in events)
+    assert not any(event.get("code") == "completed" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_strict_ip_research_without_citations_stops(monkeypatch):
+    broker = MagicMock()
+    broker.tavily = None
+    broker.web_searcher = object()
+    agent = WorldCreatorAgentV2(llm=object(), image_gen=None, broker=broker)
+    agent._fidelity_mode = "strict"
+    agent._pre_recognition = SimpleNamespace(kind="known_ip", ip_name="测试作品", ip_type="novel")
+    agent._draft_id = None
+    pack = MagicMock()
+    pack.ip_name = "测试作品"
+    pack.characters = [object()] * 12
+    pack.places = []
+    pack.passages = [Passage(id="p1", text="uncited", source="grok_search", tags=["query:test"])]
+    pack.must_have_character_names.return_value = ["主角"]
+
+    async def build_without_citations(**_kwargs):
+        return pack
+
+    monkeypatch.setattr("services.ip_research_pipeline.build_ip_knowledge_pack", build_without_citations)
+    events: list[dict] = []
+    with pytest.raises(RuntimeError, match="no citations"):
+        async for event in agent._run_ip_research():
+            events.append(event)
+
+    assert any(event.get("code") == "ip_pack_no_citations" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_loose_ip_research_failure_degrades_with_warning(monkeypatch):
+    broker = MagicMock()
+    broker.tavily = None
+    broker.web_searcher = object()
+    agent = WorldCreatorAgentV2(llm=object(), image_gen=None, broker=broker)
+    agent._fidelity_mode = "loose"
+    agent._pre_recognition = SimpleNamespace(
+        kind="known_ip",
+        ip_name="测试作品",
+        ip_type="novel",
+    )
+    agent._draft_id = None
+
+    async def fail_build(**_kwargs):
+        raise RuntimeError("upstream unavailable")
+
+    monkeypatch.setattr(
+        "services.ip_research_pipeline.build_ip_knowledge_pack",
+        fail_build,
+    )
+    events = [event async for event in agent._run_ip_research()]
+
+    assert any(event.get("code") == "ip_pack_build_failed" for event in events)
+    assert events[-1]["code"] == "completed"
+    assert events[-1]["meta"]["characters"] == 0
 
 
 @pytest.mark.asyncio
@@ -430,7 +711,6 @@ async def test_pipeline_concurrent_c1_c2_stages():
         call_order.append("roster_done")
         return []
 
-    from schemas.character_v2 import Character
     from schemas.lore_pack import LorePack
     from schemas.research_pack import IPCanon, ResearchPack
     from schemas.shared_events import RelationsPack
@@ -662,8 +942,6 @@ async def test_pipeline_playable_filtered_from_image_targets():
 # Stage I image tests
 # =============================================================================
 
-import contextlib
-
 
 def _make_builder_patches(chars):
     """Return list of patch context managers for all builder functions."""
@@ -752,14 +1030,16 @@ def _stage_payload(label: str) -> dict:
 
 @pytest.mark.asyncio
 async def test_free_start_stages_prioritizes_primary_playable_characters():
-    """Regression: top playable protagonists must be attempted before LLM-selected arc fillers."""
+    """Regression: top playable protagonists are generated in one batch."""
     from schemas.character_v2 import Character
 
     fake_llm = _SequencedTextLLM([
-        {"arc_characters": ["元载", "龙波"]},
-        _stage_payload("张小敬"),
-        _stage_payload("李必"),
-        _stage_payload("徐宾"),
+        {
+            "characters": [
+                {"character_name": name, **_stage_payload(name)}
+                for name in ("张小敬", "李必", "徐宾")
+            ]
+        },
     ])
     agent = WorldCreatorAgentV2(llm=fake_llm, image_gen=None, broker=None)
     characters = [
@@ -790,6 +1070,7 @@ async def test_free_start_stages_prioritizes_primary_playable_characters():
     assert "元载" not in names
     assert "龙波" not in names
     assert not [e for e in events if e.get("type") == "warning"]
+    assert fake_llm.outputs == []
 
 
 @pytest.mark.asyncio
@@ -797,9 +1078,8 @@ async def test_free_start_stages_warns_when_primary_character_missing():
     from schemas.character_v2 import Character
 
     fake_llm = _SequencedTextLLM([
-        {"arc_characters": []},
-        {"has_arc": False, "stages": []},
-        {"has_arc": False, "stages": []},
+        {"characters": [{"character_name": "张小敬", "has_arc": False, "stages": []}]},
+        {"characters": [{"character_name": "张小敬", "has_arc": False, "stages": []}]},
     ])
     agent = WorldCreatorAgentV2(llm=fake_llm, image_gen=None, broker=None)
     characters = [

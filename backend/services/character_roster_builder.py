@@ -19,6 +19,7 @@ import structlog
 from schemas.character_v2 import Character, CharacterPeerRelation, CharacterRosterEntry
 from schemas.ip_knowledge_pack import FidelityMode, IPKnowledgePack
 from schemas.research_pack import IPCanon, Passage
+from schemas.world_generation import WorldScalePlan
 from services.world_creator_retry import is_transient
 
 logger = structlog.get_logger()
@@ -107,7 +108,7 @@ _ROSTER_SYSTEM = """你是一个互动叙事世界的人物策划助手。
 根据给定的世界描述、题材、时代和 IP 典籍，规划完整的人物花名册（roster）。
 
 输出严格 JSON，格式：
-{"roster":[{"name":"人物名","role_tag":"角色定位","faction":"派系（可空）","is_image_target":true/false},...]}
+{"roster":[{"name":"人物名","role_tag":"角色定位","faction":"派系（可空）","playable_role":true/false,"portrait_target":true/false},...]}
 
 规则（按重要性排序）：
 - **完整性第一**：宁可多收，不可漏掉核心角色。一个有名有姓、推动剧情的角色被漏掉，
@@ -117,13 +118,14 @@ _ROSTER_SYSTEM = """你是一个互动叙事世界的人物策划助手。
 - name: 符合世界风格的人物名，优先复用已知原作人名
 - role_tag: 简短定位，如"主角"/"宿敌"/"心腹"/"市井小贩"/"神秘客"
 - faction: 派系归属，无明确派系可留空字符串
-- is_image_target（= 可玩角色）：标给"玩家真正会想扮演、有独立鲜明视角、能撑起一条剧情线的主角级角色"。
+- playable_role：标给"玩家真正会想扮演、有独立鲜明视角、能撑起一条剧情线的主角级角色"。
   这是**精选的一小撮**，不是"所有重要角色"——和"必含角色 / 完整 roster"是两回事，别混。
   ✅ 设 true：主角、男女主；**主要反派（反派大女主 / BOSS / 派系老大 / 当家主母）**——反派视角是宝贵卖点；
      以及性格鲜明、处境独立、玩家有理由想扮演的关键配角（核心盟友、宿敌、王公、谋士、痴情医者等）。
   ❌ 设 false（他们是让世界鲜活的 NPC，**不是可玩角色**）：侍女 / 丫鬟 / 太监 / 随从 / 低位嫔妃（答应·常在）/
      工具人 / 路人 / 孩童 / 一次性出场。即使有戏份、即使在必含清单里，只要不是"玩家会想扮演的主角级"就设 false。
-  数量：**按世界规模浮动，宁缺毋滥**——大 IP 约 10-15 个、中小世界 3-8 个；不设硬上限，但绝不要把半数角色都标可玩。
+  数量：**按世界规模浮动**，以输入中的 WorldSpec 数量区间为准。
+- portrait_target：本次需要独立头像的角色。优先可玩角色，但头像预算与可玩资格不是同一个概念。
 - 只输出 JSON，不含任何解释文字
 """
 
@@ -194,11 +196,15 @@ def _ensure_must_have(
             continue
         if _norm_name(c.name) in existing:
             continue
+        likely_playable = any(
+            k in (c.role_in_story or "") for k in ("主角", "女主", "男主", "核心视角")
+        )
         entries.append(CharacterRosterEntry(
             name=c.name,
             role_tag=(c.role_in_story or "主要角色"),
             faction="",
-            is_image_target=True,
+            playable_role=likely_playable,
+            portrait_target=likely_playable,
         ))
         existing.add(_norm_name(c.name))
         injected.append(c.name)
@@ -224,6 +230,7 @@ async def build_character_roster(
     *,
     ip_pack: IPKnowledgePack | None = None,
     fidelity_mode: FidelityMode = "none",
+    scale_plan: WorldScalePlan | None = None,
 ) -> list[CharacterRosterEntry]:
     """Planner LLM 一次调用，产出人物花名册。
 
@@ -235,7 +242,17 @@ async def build_character_roster(
     """
     # 启发式提取数量提示
     heuristic_n = _heuristic_count(description)
-    count_hint = f"请生成恰好 {heuristic_n} 个人物。" if heuristic_n else "根据题材规模生成 12-30 个人物。"
+    if heuristic_n:
+        count_hint = f"请生成恰好 {heuristic_n} 个人物。"
+    elif scale_plan is not None:
+        count_hint = (
+            f"WorldSpec 规模={scale_plan.scale_class.value}：生成约 {scale_plan.active_roles_target} 人，"
+            f"健康区间 {scale_plan.active_roles_min}-{scale_plan.active_roles_max}；"
+            f"playable_role 目标 {scale_plan.playable_target}（区间 {scale_plan.playable_min}-{scale_plan.playable_max}），"
+            f"portrait_target 约 {scale_plan.portrait_target}。"
+        )
+    else:
+        count_hint = "根据题材规模生成 12-30 个人物。"
 
     # 整理 IP 典籍提示（legacy ip_canon path; only used when ip_pack 不参与硬约束）
     canon_hint = ""
@@ -362,7 +379,8 @@ async def build_character_roster(
                     name=item["name"],
                     role_tag=item.get("role_tag", ""),
                     faction=item.get("faction", ""),
-                    is_image_target=bool(item.get("is_image_target", False)),
+                    playable_role=bool(item.get("playable_role", item.get("is_image_target", False))),
+                    portrait_target=bool(item.get("portrait_target", item.get("is_image_target", False))),
                 ))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("roster_entry_parse_error", item=item, error=str(exc))
@@ -373,6 +391,35 @@ async def build_character_roster(
         # 删多余之后补必含：LLM 漏掉的 must_have 强制注入（strict + loose 都跑）。
         if fidelity_mode in ("strict", "loose") and ip_pack is not None:
             entries = _ensure_must_have(entries, ip_pack)
+        if scale_plan is not None and entries:
+            selected = [e for e in entries if e.playable_role]
+            if len(selected) < scale_plan.playable_min:
+                priority_words = ("主角", "女主", "男主", "宿敌", "反派", "领袖", "谋士")
+                candidates = sorted(
+                    (e for e in entries if not e.playable_role),
+                    key=lambda e: not any(k in (e.role_tag or "") for k in priority_words),
+                )
+                for entry in candidates:
+                    entry.playable_role = True
+                    selected.append(entry)
+                    if len(selected) >= scale_plan.playable_target:
+                        break
+            if len(selected) > scale_plan.playable_max:
+                keep = {e.name for e in selected[: scale_plan.playable_max]}
+                for entry in entries:
+                    entry.playable_role = entry.name in keep
+
+            playable_entries = [e for e in entries if e.playable_role]
+            portrait_names = [e.name for e in playable_entries if e.portrait_target]
+            for entry in playable_entries:
+                if len(portrait_names) >= scale_plan.portrait_target:
+                    break
+                if entry.name not in portrait_names:
+                    portrait_names.append(entry.name)
+            portrait_keep = set(portrait_names[: scale_plan.portrait_target])
+            for entry in entries:
+                entry.portrait_target = entry.name in portrait_keep
+                entry.is_image_target = entry.portrait_target
         return entries
 
     except Exception as exc:  # noqa: BLE001
@@ -394,6 +441,7 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
 {"characters":[
   {
     "name":"人物本名（与上方「姓名：」后的名字完全一致；禁止带括号/角色定位/派系）",
+    "gender":"男 或 女（原作角色按其公认性别；确实无法判断可留空）",
     "personality":"性格描写（2-3句）",
     "voice_style":"说话方式：自称/称谓、句式、口头禅，附1-2句范例台词（30-80字）；各人嗓音要可区分；若是原作角色须贴合其原作台词口吻",
     "description":"角色简介：背景、动机、关键经历（2-3句）",
@@ -416,7 +464,11 @@ _BATCH_SYSTEM = """你是一个互动叙事世界的人物详情撰写助手。
 - description / abilities / starting_inventory 对**所有角色**都要写（不只是玩家角色）；
   abilities/inventory 各 1-4 条，平凡 NPC 也要给些日常擅长与随身物（如"算账"/"看人脸色"，"算盘"/"半斤碎银"）
 - voice_style 对**所有角色**都要写，要能明显区分各人嗓音、避免千人一腔；
-  若世界背景表明基于已知作品（IP 复刻），原作角色的 personality 开头点明身份锚（如「《作品名》中的<角色>」）、voice_style 贴合原作口吻
+  若世界背景表明基于已知作品（IP 复刻），voice_style 须贴合原作角色的台词口吻
+- **personality / description 用世界内的第三人称当下视角直接写人物本身**：他是谁、此刻处境、性格、动机与所求。
+  ❌ 禁止元指涉开头，例如「《甄嬛传》中的女主角…」「本作中的角色…」「作为原作里的…」——这是百科腔、破坏沉浸感。
+  正典锚定只用来确保你写对这个人，别让"这是某作品里的角色"这句话本身出现在成品里。
+- **gender 必填**：原作角色按其公认性别填「男」或「女」；确实无法判断时留空字符串
 - schedule 与 initial_location 的值**必须是给定地点列表中已有的地点名**（地点列表为空时可留空字符串）。
   写"地点"不要写"活动"：❌"校场练兵"/"独酌弄墨"/"巡营"（这是在干什么）→ ✅"校场"/"书房"/"军营"（这是在哪）。
   人物在某地做什么，靠 personality/knowledge 体现，schedule 只填地点名。
@@ -657,6 +709,9 @@ async def _process_batch(
                 role_tag=entry.role_tag,
                 faction=entry.faction,
                 is_image_target=entry.is_image_target,
+                playable_role=entry.playable_role,
+                portrait_target=entry.portrait_target,
+                gender=(item.get("gender") or "").strip(),
                 personality=item.get("personality", ""),
                 voice_style=item.get("voice_style", ""),
                 secret=item.get("secret", ""),

@@ -30,6 +30,11 @@ class WorldQualityScore(Base):
     task_id: Mapped[str] = mapped_column(Uuid(as_uuid=False), ForeignKey("generation_tasks.id"), index=True)
     draft_id: Mapped[str | None] = mapped_column(Uuid(as_uuid=False), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(20), default="world")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    payload_revision: Mapped[int] = mapped_column(Integer, default=0)
+    payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # ---- 硬指标（Python，0 成本，可纵向趋势对比）----
     character_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -55,12 +60,14 @@ class WorldQualityScore(Base):
     overall_score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
 
     # ---- 软评门控（P0 两数门控，替代旧 cap-to-55）----
-    # blocking_flags: 软裁判触底的维度（如 ["ip_consistency=4","collision=3"]），空=无硬伤。
-    # shippable: 无 blocking_flags 即 True。**仅建议、不硬卡发布**，admin 旁路显示红旗。
+    # blocking_flags: 硬契约问题 + 软裁判触底维度，空=当前版本可公开。
+    # shippable: 无 blocking_flags 即 True；publish gate 使用该版本化结论。
     blocking_flags: Mapped[list | None] = mapped_column(_JSONB, nullable=True, default=None)
     shippable: Mapped[bool] = mapped_column(default=True, index=True)
 
     detail: Mapped[dict | None] = mapped_column(_JSONB, nullable=True, default=None)
 
     scored_at: Mapped[datetime] = mapped_column(default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

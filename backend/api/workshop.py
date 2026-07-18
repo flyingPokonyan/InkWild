@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -250,6 +251,13 @@ def _serialize_generation_task(
         "kind": task.kind,
         "draft_type": task.draft_type,
         "draft_id": str(task.draft_id),
+        "generation_run_id": str(task.generation_run_id) if task.generation_run_id else None,
+        "root_task_id": str(task.root_task_id) if task.root_task_id else None,
+        "parent_task_id": str(task.parent_task_id) if task.parent_task_id else None,
+        "world_spec": task.world_spec,
+        "world_spec_version": task.world_spec_version,
+        "payload_revision": task.payload_revision,
+        "payload_hash": task.payload_hash,
         "status": task.status,
         "current_phase": task.current_phase,
         "current_code": task.current_code,
@@ -277,14 +285,21 @@ async def _load_latest_generation_task(
     *,
     draft_type: str,
     draft_id: str,
+    include_refine: bool = False,
 ) -> tuple[GenerationTask | None, list[GenerationTaskEvent]]:
-    task = (
-        await db.execute(
-            select(GenerationTask)
-            .where(GenerationTask.draft_type == draft_type, GenerationTask.draft_id == draft_id)
-            .order_by(GenerationTask.created_at.desc())
+    stmt = (
+        select(GenerationTask)
+        .where(GenerationTask.draft_type == draft_type, GenerationTask.draft_id == draft_id)
+        .order_by(GenerationTask.created_at.desc())
+    )
+    # refine（AI 精修）任务复用同一张表，但它不是"生成任务"。默认排除它——否则草稿
+    # 详情会把最新的 refine task 当成生成任务返回，编辑器拿 refine 事件去水合生成
+    # 时间线导致加载失败/进不去。只有精修自身的幂等检查才显式 include_refine=True。
+    if not include_refine:
+        stmt = stmt.where(
+            func.coalesce(GenerationTask.request_payload.op("->>")("phase"), "") != "refine"
         )
-    ).scalars().first()
+    task = (await db.execute(stmt)).scalars().first()
     if not task:
         return None, []
     events = (
@@ -307,6 +322,9 @@ def _world_draft_detail(
         "id": str(draft.id),
         "world_id": str(draft.world_id) if draft.world_id else None,
         "payload": _world_payload_for_response(draft.payload),
+        "payload_revision": draft.payload_revision,
+        "payload_hash": draft.payload_hash,
+        "quality_status": draft.quality_status,
         "updated_at": serialize_utc_datetime(draft.updated_at),
         "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
@@ -362,6 +380,12 @@ class CreateWorldGenerationTaskRequest(BaseModel):
 
 class ContinueWorldGenerationRequest(BaseModel):
     fidelity_mode: FidelityMode
+
+
+class RefineWorldDraftRequest(BaseModel):
+    # 要精修的质检 code 列表（如 ["timeline_coverage_gap","ai_smell"]）；空 = 修 payload
+    # 里 quality_warnings 命中的全部可修项。
+    targets: list[str] = []
 
 
 class CreateScriptGenerationTaskRequest(BaseModel):
@@ -461,8 +485,20 @@ def _persist_world_draft_image_url(draft: WorldDraft, *, target: str, url: str) 
         payload["world_characters"] = characters
     else:
         return
-    draft.payload = _normalize_world_payload(payload)
+    _set_versioned_world_payload(draft, _normalize_world_payload(payload))
     flag_modified(draft, "payload")
+
+
+def _set_versioned_world_payload(draft: WorldDraft, payload: dict) -> None:
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if draft.payload_hash == payload_hash:
+        draft.payload = payload
+        return
+    draft.payload = payload
+    draft.payload_revision = int(draft.payload_revision or 0) + 1
+    draft.payload_hash = payload_hash
+    draft.quality_status = "stale"
 
 
 def _persist_script_draft_image_url(draft: ScriptDraft, *, url: str) -> None:
@@ -735,6 +771,89 @@ async def continue_world_draft_generation(
         "data": {"task_id": new_task_id, "draft_id": str(draft.id)},
         "message": "ok",
     }
+
+
+@router.post("/world-drafts/{draft_id}/refine")
+async def refine_world_draft(
+    draft_id: str,
+    body: RefineWorldDraftRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """AI 精修：对草稿 payload 做定向内容重写。启动一个 refine 任务，SSE 复用
+    /generation-tasks/{task_id}/stream 消费；完成后 completed 事件带 meta.changes /
+    meta.rechecked，前端重拉 draft.payload 刷新。"""
+    _require_can_create(user)
+
+    draft = await db.get(WorldDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    _assert_owner(draft, user, "world draft")
+
+    last_task, _ = await _load_latest_generation_task(
+        db, draft_type="world_draft", draft_id=str(draft.id), include_refine=True
+    )
+    # 幂等：已有精修任务在跑就拒绝
+    if (
+        last_task is not None
+        and (last_task.request_payload or {}).get("phase") == "refine"
+        and last_task.status in {"pending", "running"}
+    ):
+        raise HTTPException(status_code=409, detail="A refine task is already running for this draft")
+
+    service = _get_generation_task_service()
+    try:
+        async with _get_task_limit_lock(user):
+            task_id = await service.start_world_refine_task(
+                draft_id=str(draft.id),
+                targets=body.targets,
+                user_id=str(user.id),
+            )
+    except GenerationTaskLimitExceeded as exc:
+        raise _generation_task_limit_error(exc) from exc
+
+    await db.commit()
+    service.launch_world_refine(task_id)
+    return {"code": 0, "data": {"task_id": task_id, "draft_id": str(draft.id)}, "message": "ok"}
+
+
+@router.post("/world-drafts/{draft_id}/refine/undo")
+async def undo_world_draft_refine(
+    draft_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """撤销上一次精修：从最近 refine 任务的 pre_refine_snapshot 恢复 draft.payload。"""
+    _require_can_create(user)
+
+    draft = await db.get(WorldDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="draft not found")
+    _assert_owner(draft, user, "world draft")
+
+    # 找最近一个带快照的 refine 任务
+    tasks_result = await db.execute(
+        select(GenerationTask)
+        .where(
+            GenerationTask.draft_type == "world_draft",
+            GenerationTask.draft_id == str(draft.id),
+        )
+        .order_by(GenerationTask.created_at.desc())
+    )
+    snapshot = None
+    for task in tasks_result.scalars().all():
+        if (task.request_payload or {}).get("phase") != "refine":
+            continue
+        snap = (task.intermediate_state or {}).get("pre_refine_snapshot")
+        if isinstance(snap, dict) and isinstance(snap.get("payload"), dict):
+            snapshot = snap["payload"]
+            break
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="no refine snapshot to undo")
+
+    _set_versioned_world_payload(draft, snapshot)
+    await db.commit()
+    return {"code": 0, "data": {"draft_id": str(draft.id)}, "message": "ok"}
 
 
 # ---------------------------------------------------------------------------
@@ -1204,11 +1323,43 @@ async def update_world_draft(
     if not draft:
         raise HTTPException(status_code=404, detail="世界草稿不存在")
     _assert_owner(draft, user, "world draft")
-    draft.payload = _normalize_world_payload(req.payload)
+    _set_versioned_world_payload(draft, _normalize_world_payload(req.payload))
     await db.commit()
     await db.refresh(draft)
     task, events = await _load_latest_generation_task(db, draft_type="world_draft", draft_id=str(draft.id))
     return {"code": 0, "data": _world_draft_detail(draft, generation_task=task, generation_events=events)}
+
+
+@router.post("/world-drafts/{draft_id}/quality-check", status_code=202)
+async def request_world_draft_quality_check(
+    draft_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    draft = await db.get(WorldDraft, draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="世界草稿不存在")
+    _assert_owner(draft, user, "world draft")
+    task, _ = await _load_latest_generation_task(
+        db, draft_type="world_draft", draft_id=str(draft.id)
+    )
+    if task is None or (task.request_payload or {}).get("phase") == PHASE_A:
+        raise HTTPException(status_code=409, detail="没有可用于质检的完整生成任务")
+    try:
+        job_id = await _get_generation_task_service().request_world_quality(str(task.id))
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="质检模型初始化超时") from exc
+    await db.refresh(draft)
+    return {
+        "code": 0,
+        "data": {
+            "draft_id": str(draft.id),
+            "payload_revision": draft.payload_revision,
+            "quality_status": draft.quality_status,
+            "enqueued": job_id is not None,
+        },
+        "message": "ok",
+    }
 
 
 @router.delete("/world-drafts/{draft_id}")
