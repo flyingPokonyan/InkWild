@@ -9,7 +9,7 @@ from typing import Any
 import uuid
 
 import structlog
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -539,6 +539,67 @@ class GenerationTaskService:
             self._launch(self._score_world_quality(job_id, llm_router))
         return job_id
 
+    async def _carry_forward_quality(self, draft_id: str, task_id: str) -> None:
+        """精修后不重新打分，把精修前最近一次质量判定原样复制到当前（新）版本。
+
+        质量门只认"精确匹配当前 payload_revision/hash 且 status∈{passed,waived}"的分。
+        精修 bump 了版本，若不处理旧分不再匹配 → 卡 stale 发不出去。judge 有 run-to-run
+        方差，真去重打分会把生成时已 passed 的稿子抖成 needs_review。故沿用生成结论：
+        找当前版本以外最近的一条分，复制成当前版本的一条 carried 分，并同步 draft.quality_status。
+        找不到历史分（理论上不该发生）则保持 stale，走正常人工复核。
+        """
+        from models.world_quality_score import WorldQualityScore
+
+        async with self.session_factory() as session:
+            draft = await session.get(WorldDraft, draft_id)
+            if draft is None or not draft.payload_hash:
+                return
+            prev = (
+                await session.execute(
+                    select(WorldQualityScore)
+                    .where(WorldQualityScore.draft_id == draft_id)
+                    .where(
+                        or_(
+                            WorldQualityScore.payload_revision != draft.payload_revision,
+                            func.coalesce(WorldQualityScore.payload_hash, "") != draft.payload_hash,
+                        )
+                    )
+                    .order_by(WorldQualityScore.scored_at.desc())
+                )
+            ).scalars().first()
+            if prev is None:
+                return
+            carried = WorldQualityScore(
+                task_id=task_id,
+                draft_id=draft_id,
+                kind=prev.kind,
+                status=prev.status,
+                payload_revision=draft.payload_revision,
+                payload_hash=draft.payload_hash,
+                character_count=prev.character_count,
+                playable_count=prev.playable_count,
+                must_have_total=prev.must_have_total,
+                must_have_covered=prev.must_have_covered,
+                events_count=prev.events_count,
+                shared_events_count=prev.shared_events_count,
+                structure_score=prev.structure_score,
+                soft_ip_consistency=prev.soft_ip_consistency,
+                soft_collision=prev.soft_collision,
+                soft_tension=prev.soft_tension,
+                soft_summary=prev.soft_summary,
+                backfill_count=prev.backfill_count,
+                prune_count=prev.prune_count,
+                soft_warning_count=prev.soft_warning_count,
+                overall_score=prev.overall_score,
+                blocking_flags=prev.blocking_flags,
+                shippable=prev.shippable,
+                detail={"carried_from_revision": prev.payload_revision, "reason": "refine_no_rescore"},
+                finished_at=utcnow(),
+            )
+            session.add(carried)
+            draft.quality_status = prev.status
+            await session.commit()
+
     async def _run_world_generation(self, task_id: str) -> None:
         """AOP wrapper: attribute every nested LLM/image call to this task.
 
@@ -864,6 +925,10 @@ class GenerationTaskService:
                     if draft is not None:
                         self._write_versioned_world_payload(draft, result.payload)
                         await session.commit()
+                # 精修不重新打分：把生成时那次质量判定原样带到新版本，让质量门沿用生成结论
+                # （passed 保持 passed）。judge 有 run-to-run 方差，重打分会把已 passed 的稿子
+                # 抖成 needs_review；精修是按需的锦上添花、且有自己的复检，不该反过来卡发布。
+                await self._carry_forward_quality(draft_id, task_id)
                 await self._record_event(
                     task_id,
                     {
@@ -876,12 +941,6 @@ class GenerationTaskService:
                 )
 
             await self._record_event(task_id, {"type": "done"})
-
-            # 重新打分必须在 done 之后：_enqueue_world_quality 要求 task.status=succeeded
-            # （done 事件才把状态置 succeeded）。放在 done 前是空操作 → 精修改了 payload、
-            # quality_status 被标 stale 却从不重新打分 → 卡在质量门无法发布。
-            if result.changed:
-                await self._enqueue_world_quality(task_id, llm)
         except asyncio.TimeoutError:
             logger.exception("world_refine_timed_out", task_id=task_id)
             await self._record_event(task_id, {"type": "error", "message": "精修超时，请重试", "phase": "refine", "code": "refine_timeout"})
