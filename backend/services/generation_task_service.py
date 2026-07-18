@@ -864,8 +864,6 @@ class GenerationTaskService:
                     if draft is not None:
                         self._write_versioned_world_payload(draft, result.payload)
                         await session.commit()
-                # payload 变了，之前的质量分作废 → 重新打分
-                await self._enqueue_world_quality(task_id, llm)
                 await self._record_event(
                     task_id,
                     {
@@ -878,6 +876,12 @@ class GenerationTaskService:
                 )
 
             await self._record_event(task_id, {"type": "done"})
+
+            # 重新打分必须在 done 之后：_enqueue_world_quality 要求 task.status=succeeded
+            # （done 事件才把状态置 succeeded）。放在 done 前是空操作 → 精修改了 payload、
+            # quality_status 被标 stale 却从不重新打分 → 卡在质量门无法发布。
+            if result.changed:
+                await self._enqueue_world_quality(task_id, llm)
         except asyncio.TimeoutError:
             logger.exception("world_refine_timed_out", task_id=task_id)
             await self._record_event(task_id, {"type": "error", "message": "精修超时，请重试", "phase": "refine", "code": "refine_timeout"})
