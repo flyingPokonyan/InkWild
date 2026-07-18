@@ -95,6 +95,9 @@ export interface DraftEditorShellProps<P, D extends BaseDraftDetail> {
     kind: "world" | "script";
     /** flush 待保存编辑（图片重抽前调用，确保后端读到最新字段） */
     saveNow: () => Promise<void>;
+    /** 主体内长任务（如 AI 精修）进行中时置 true —— shell 据此暂停 autosave、
+     * 禁用保存/发布，避免与服务端回写打架。 */
+    setBusy: (busy: boolean) => void;
   }) => ReactNode;
   /** 各 section 的 rail meta（id / label / 计数函数） */
   buildRail: (payload: P) => RailSection[];
@@ -153,6 +156,8 @@ export function DraftEditorShell<P, D extends BaseDraftDetail>(
   const [ipRecognition, setIpRecognition] = useState<IPRecognitionEvent["meta"] | null>(null);
   const [cardDecided, setCardDecided] = useState(false);
   const [continueError, setContinueError] = useState<string | null>(null);
+  // 主体内长任务（AI 精修）进行中：暂停 autosave、禁用保存/发布，防回写竞争。
+  const [refineBusy, setRefineBusy] = useState(false);
   const continueInFlightRef = useRef(false);
   const continueRetryRef = useRef(0);
   const MAX_CONTINUE_RETRIES = 3;
@@ -298,7 +303,7 @@ export function DraftEditorShell<P, D extends BaseDraftDetail>(
     [draftId, endpoints],
   );
 
-  const autosaveActive = !!payload && !generationTask;
+  const autosaveActive = !!payload && !generationTask && !refineBusy;
   const { state, manualSave, isDirty } = useAutosave<P>({
     payload: payload as P,
     save: saveImpl,
@@ -345,8 +350,14 @@ export function DraftEditorShell<P, D extends BaseDraftDetail>(
 
   // ---------- keyboard shortcuts ----------
   useKeyboardShortcuts({
-    onSave: () => void manualSave(),
-    onPublish: () => setConfirm("publish"),
+    onSave: () => {
+      if (refineBusy) return;
+      void manualSave();
+    },
+    onPublish: () => {
+      if (refineBusy) return;
+      setConfirm("publish");
+    },
   });
 
   // ---------- beforeunload ----------
@@ -600,12 +611,18 @@ export function DraftEditorShell<P, D extends BaseDraftDetail>(
         modeGlyph={modeGlyph}
         backTo={backTo}
         state={state}
-        saving={state.status === "saving"}
+        saving={state.status === "saving" || refineBusy}
         publishing={publishing}
         discarding={discarding}
         isDirty={isDirty}
-        onManualSave={() => void manualSave()}
-        onPublish={() => setConfirm("publish")}
+        onManualSave={() => {
+          if (refineBusy) return;
+          void manualSave();
+        }}
+        onPublish={() => {
+          if (refineBusy) return;
+          setConfirm("publish");
+        }}
         onDiscard={() => setConfirm("discard")}
         onBackAttempt={() => {
           if (!isDirty) return false;
@@ -755,7 +772,7 @@ export function DraftEditorShell<P, D extends BaseDraftDetail>(
             </div>
           )}
 
-          {renderBody({ payload, setPayload, rail, detail, draftId, kind, saveNow })}
+          {renderBody({ payload, setPayload, rail, detail, draftId, kind, saveNow, setBusy: setRefineBusy })}
         </main>
 
         {layout === "split" && (
@@ -808,7 +825,7 @@ export function DraftEditorShell<P, D extends BaseDraftDetail>(
           <button
             type="button"
             onClick={() => void manualSave()}
-            disabled={state.status === "saving" || (!isDirty && state.status !== "error")}
+            disabled={refineBusy || state.status === "saving" || (!isDirty && state.status !== "error")}
             className="lv-editor-mobile-action"
           >
             <Save size={16} strokeWidth={1.75} aria-hidden />

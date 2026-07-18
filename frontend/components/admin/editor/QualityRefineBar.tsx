@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getWorldDraftDetail,
@@ -50,6 +50,10 @@ interface Props {
   payload: WorldDraftPayload;
   /** 精修/撤销落库后，用服务端最新 payload 同步编辑器状态 */
   onRefined: (payload: WorldDraftPayload) => void;
+  /** 精修进行中（含后台复检）置 true，让 shell 暂停 autosave、禁用保存/发布 */
+  onBusyChange?: (busy: boolean) => void;
+  /** 挂载时若已有在跑的精修任务 id（重进草稿页），自动重连其 SSE 流恢复进度 */
+  initialRefineTaskId?: string | null;
 }
 
 function normCode(code: string): string {
@@ -78,32 +82,61 @@ function parseWarnings(payload: WorldDraftPayload): WarnItem[] {
   return items;
 }
 
-export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
+export function QualityRefineBar({
+  draftId,
+  payload,
+  onRefined,
+  onBusyChange,
+  initialRefineTaskId,
+}: Props) {
   const [view, setView] = useState<View>("warnings");
   const [expanded, setExpanded] = useState(false);
   const [stage, setStage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RefineMeta | null>(null);
+  // 复检退后台：completed 后 result 先出，复检仍在跑时为 true，recheck_done 落定为 false。
+  const [rechecking, setRechecking] = useState(false);
 
   const warnings = useMemo(() => parseWarnings(payload), [payload]);
   const refinable = warnings.filter((w) => w.refinable);
   const manual = warnings.length - refinable.length;
 
-  const runRefine = useCallback(
-    async (targets: string[]) => {
-      setError(null);
-      setStage("正在准备精修…");
+  const syncDetail = useCallback(() => {
+    getWorldDraftDetail(draftId)
+      .then((d) => onRefined(d.payload))
+      .catch(() => {});
+  }, [draftId, onRefined]);
+
+  // 连一条精修任务的 SSE 流并驱动 UI —— 既供新发起（runRefine）也供重进恢复（挂载 effect）复用。
+  // afterSeq=0 会重放全部历史事件，重进时据此重建 completed/recheck_done 状态。
+  const streamRefineTask = useCallback(
+    async (taskId: string, afterSeq: number) => {
       setView("refining");
-      let meta: RefineMeta | null = null;
+      onBusyChange?.(true);
       let errored = false;
       try {
-        const { task_id } = await refineWorldDraft(draftId, targets);
         await streamAdminEvents(
-          `/api/workshop/generation-tasks/${task_id}/stream?after_seq=0`,
+          `/api/workshop/generation-tasks/${taskId}/stream?after_seq=${afterSeq}`,
           {
             onProgress: (e) => {
               if (e.message) setStage(e.message);
-              if (e.code === "completed" && e.meta) meta = e.meta as unknown as RefineMeta;
+              // completed：主体改动已落库，先把结果给用户（复检还在后台跑）。
+              if (e.code === "completed" && e.meta) {
+                const meta = e.meta as unknown as RefineMeta;
+                setResult(meta);
+                setExpanded(true);
+                setRechecking(Boolean(meta.changed));
+                setView("result");
+                syncDetail(); // 同步改动后的内容（此时 warnings 尚未刷新）
+              }
+              // recheck_done：复检落定，刷新复检结论 + quality_warnings。
+              if (e.code === "recheck_done") {
+                const rechecked =
+                  (e.meta as { rechecked?: RefineMeta["rechecked"] } | undefined)?.rechecked ?? [];
+                setResult((r) => (r ? { ...r, rechecked } : r));
+                setRechecking(false);
+                syncDetail();
+              }
             },
             onError: (m) => {
               errored = true;
@@ -112,21 +145,49 @@ export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
           },
         );
         if (errored) {
-          setView("warnings");
-          return;
+          setRechecking(false);
+          // 已出结果就停在 result（错误只发生在复检段）；否则退回质检条。
+          setView((v) => (v === "result" ? "result" : "warnings"));
         }
-        const detail = await getWorldDraftDetail(draftId);
-        onRefined(detail.payload);
-        setResult(meta);
-        setExpanded(true);
-        setView("result");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "精修失败");
+        setRechecking(false);
+        setView((v) => (v === "result" ? "result" : "warnings"));
+      } finally {
+        onBusyChange?.(false); // 锁到 done（含复检）才释放
+      }
+    },
+    [onBusyChange, syncDetail],
+  );
+
+  const runRefine = useCallback(
+    async (targets: string[]) => {
+      setError(null);
+      setStage("正在准备精修…");
+      setView("refining");
+      onBusyChange?.(true);
+      let taskId: string;
+      try {
+        taskId = (await refineWorldDraft(draftId, targets)).task_id;
       } catch (err) {
         setError(err instanceof Error ? err.message : "精修失败");
         setView("warnings");
+        onBusyChange?.(false);
+        return;
       }
+      await streamRefineTask(taskId, 0);
     },
-    [draftId, onRefined],
+    [draftId, onBusyChange, streamRefineTask],
   );
+
+  // 重进草稿页时若已有在跑的精修任务，自动重连恢复（只连一次）。
+  const reconnectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialRefineTaskId || reconnectedRef.current === initialRefineTaskId) return;
+    reconnectedRef.current = initialRefineTaskId;
+    setStage("正在恢复精修进度…");
+    void streamRefineTask(initialRefineTaskId, 0);
+  }, [initialRefineTaskId, streamRefineTask]);
 
   const runUndo = useCallback(async () => {
     setError(null);
@@ -135,6 +196,7 @@ export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
       const detail = await getWorldDraftDetail(draftId);
       onRefined(detail.payload);
       setResult(null);
+      setRechecking(false);
       setView("warnings");
     } catch (err) {
       setError(err instanceof Error ? err.message : "撤销失败");
@@ -188,7 +250,13 @@ export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
             </button>
           )}
           {view === "result" && (
-            <button type="button" className="qr-btn qr-ghost" onClick={runUndo}>
+            <button
+              type="button"
+              className="qr-btn qr-ghost"
+              onClick={runUndo}
+              disabled={rechecking}
+              title={rechecking ? "复检完成后可撤销" : undefined}
+            >
               撤销
             </button>
           )}
@@ -236,9 +304,16 @@ export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
             <div className="lv-t-meta qr-more">…另有 {result.changes.length - 6} 处</div>
           )}
           <div className="qr-recheck lv-t-meta">
-            {result && result.rechecked.length === 0
-              ? "✓ 复检未再发现硬伤"
-              : `复检后仍存在 ${result?.rechecked.length} 项（可再修一轮或人工处理）`}
+            {rechecking ? (
+              <span className="qr-recheck-live">
+                <span className="qr-pulse" aria-hidden />
+                复检中…（改动已应用，可继续等待或稍后查看）
+              </span>
+            ) : result && result.rechecked.length === 0 ? (
+              "✓ 复检未再发现硬伤"
+            ) : (
+              `复检后仍存在 ${result?.rechecked.length} 项（可再修一轮或人工处理）`
+            )}
           </div>
         </div>
       )}
@@ -299,6 +374,7 @@ export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
         .qr-solid:hover { background: var(--lv-ink-2); }
         .qr-ghost { background: transparent; color: var(--lv-ink-3); border: 1px solid var(--lv-line-2); }
         .qr-ghost:hover { background: rgba(255,255,255,.04); color: var(--lv-ink); }
+        .qr-btn:disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
         .qr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--lv-s-2); }
         .qr-item { display: flex; align-items: flex-start; gap: var(--lv-s-3); }
         .qr-dot-r { color: var(--lv-ink-3); font-size: 11px; margin-top: 3px; flex-shrink: 0; }
@@ -314,6 +390,7 @@ export function QualityRefineBar({ draftId, payload, onRefined }: Props) {
         .qr-after { color: var(--lv-ink); }
         .qr-more { color: var(--lv-ink-3); }
         .qr-recheck { color: var(--lv-ink-3); }
+        .qr-recheck-live { display: inline-flex; align-items: center; gap: 6px; color: var(--lv-ink-2); }
         .qr-error { color: var(--lv-danger); }
       `}</style>
     </div>

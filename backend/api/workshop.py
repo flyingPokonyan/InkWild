@@ -312,11 +312,27 @@ async def _load_latest_generation_task(
     return task, list(events)
 
 
+async def _load_active_refine_task(db: AsyncSession, draft_id: str) -> GenerationTask | None:
+    """在跑的精修任务（pending/running）—— 供草稿页重进时重连精修 SSE 流恢复进度。"""
+    stmt = (
+        select(GenerationTask)
+        .where(
+            GenerationTask.draft_type == "world_draft",
+            GenerationTask.draft_id == draft_id,
+            func.coalesce(GenerationTask.request_payload.op("->>")("phase"), "") == "refine",
+            GenerationTask.status.in_(("pending", "running")),
+        )
+        .order_by(GenerationTask.created_at.desc())
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
 def _world_draft_detail(
     draft: WorldDraft,
     *,
     generation_task: GenerationTask | None = None,
     generation_events: list[GenerationTaskEvent] | None = None,
+    active_refine_task: GenerationTask | None = None,
 ) -> dict:
     return {
         "id": str(draft.id),
@@ -328,6 +344,15 @@ def _world_draft_detail(
         "updated_at": serialize_utc_datetime(draft.updated_at),
         "created_at": serialize_utc_datetime(draft.created_at),
         "generation_task": _serialize_generation_task(generation_task, generation_events),
+        "active_refine_task": (
+            {
+                "id": str(active_refine_task.id),
+                "status": active_refine_task.status,
+                "last_event_seq": active_refine_task.last_event_seq,
+            }
+            if active_refine_task
+            else None
+        ),
     }
 
 
@@ -1309,7 +1334,13 @@ async def get_world_draft(
         raise HTTPException(status_code=404, detail="世界草稿不存在")
     _assert_owner(draft, user, "world draft")
     task, events = await _load_latest_generation_task(db, draft_type="world_draft", draft_id=str(draft.id))
-    return {"code": 0, "data": _world_draft_detail(draft, generation_task=task, generation_events=events)}
+    active_refine = await _load_active_refine_task(db, str(draft.id))
+    return {
+        "code": 0,
+        "data": _world_draft_detail(
+            draft, generation_task=task, generation_events=events, active_refine_task=active_refine
+        ),
+    }
 
 
 @router.put("/world-drafts/{draft_id}")

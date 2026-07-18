@@ -70,12 +70,14 @@ export default function AdminWorldDraftPage() {
       generationOperationLabel="世界生成中"
       generationSubjectLabel={(p) => (p.name ? `概念：${p.name}` : "AI 正在整理世界概念")}
       renderPreview={(p) => <WorldPreviewPane payload={p} />}
-      renderBody={({ payload, setPayload, draftId, saveNow }) => (
+      renderBody={({ payload, setPayload, draftId, saveNow, setBusy, detail }) => (
         <WorldEditorBody
           payload={payload}
           setPayload={setPayload}
           draftId={draftId}
           saveNow={saveNow}
+          setBusy={setBusy}
+          activeRefineTaskId={detail.active_refine_task?.id ?? null}
         />
       )}
     />
@@ -87,9 +89,11 @@ interface BodyProps {
   setPayload: (updater: (current: Payload) => Payload) => void;
   draftId: string;
   saveNow: () => Promise<void>;
+  setBusy: (busy: boolean) => void;
+  activeRefineTaskId: string | null;
 }
 
-function WorldEditorBody({ payload, setPayload, draftId, saveNow }: BodyProps) {
+function WorldEditorBody({ payload, setPayload, draftId, saveNow, setBusy, activeRefineTaskId }: BodyProps) {
   const tw = useTranslations("admin.editor.world");
   const tCovers = useTranslations("admin.editor.covers");
 
@@ -125,6 +129,8 @@ function WorldEditorBody({ payload, setPayload, draftId, saveNow }: BodyProps) {
       <QualityRefineBar
         draftId={draftId}
         payload={payload}
+        onBusyChange={setBusy}
+        initialRefineTaskId={activeRefineTaskId}
         onRefined={(next) => setPayload(() => next)}
       />
       <EditorSection

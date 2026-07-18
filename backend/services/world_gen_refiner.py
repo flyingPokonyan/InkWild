@@ -198,11 +198,15 @@ async def refine_world_payload(
     targets: list[str],
     llm_router: Any,
     progress: ProgressCb | None = None,
+    recheck: bool = True,
 ) -> RefineResult:
     """对 world payload 做定向精修。返回新 payload（原地修改的拷贝）+ 改动 + 复检结果。
 
     ``targets`` 为要修的 warning code 列表（如 ["timeline_coverage_gap","ai_smell"]）；空则从
     payload 的 quality_warnings 推断全部可修项。
+
+    ``recheck=False`` 时跳过修后复检 —— 任务层可先把 completed(改动) 发给前端，复检退到
+    后台单独跑（见 ``recheck_and_refresh``），用户不必干等那 1~2 分钟。
     """
     payload = json.loads(json.dumps(payload))  # 深拷贝，不动入参
     target_set = set(targets)
@@ -241,8 +245,29 @@ async def refine_world_payload(
         for part in await asyncio.gather(*jobs):
             changes += part
 
-    # 修后复检一次：确定性 + 一次 judge（judge 失败降级为空，不阻塞）
-    await _emit("rechecking", "正在复检修订结果…")
+    rechecked: list[QualityFlag] = []
+    if recheck:
+        rechecked = await recheck_and_refresh(
+            payload, changed=bool(changes), llm_router=llm_router, progress=progress
+        )
+
+    return RefineResult(changed=bool(changes), payload=payload, changes=changes, rechecked=rechecked)
+
+
+async def recheck_and_refresh(
+    payload: dict,
+    *,
+    changed: bool,
+    llm_router: Any,
+    progress: ProgressCb | None = None,
+) -> list[QualityFlag]:
+    """修后复检（确定性 + 一次 judge），并在 ``changed`` 时用复检结果刷新
+    ``payload['quality_warnings']``（就地改）。judge 失败降级为空、不阻塞。
+
+    单独成函数：既供 ``refine_world_payload``（recheck=True）内联调用，也供任务层在
+    发出 completed 事件后单独调用（复检退后台）——两条路径复用同一套复检 + 刷新逻辑。"""
+    if progress:
+        await progress("rechecking", "正在复检修订结果…")
     rechecked: list[QualityFlag] = []
     try:
         rechecked += run_deterministic_checks(
@@ -257,7 +282,7 @@ async def refine_world_payload(
     # 用复检结果刷新 quality_warnings，否则前端质检条会一直显示已修好的旧告警。
     # 内容审核标记（moderation_flag 之类的纯字符串）精修不碰，原样保留；
     # 语义 + 确定性告警整体替换为本次复检后的真实状态。
-    if changes:
+    if changed:
         kept: list[Any] = [w for w in (payload.get("quality_warnings") or []) if isinstance(w, str)]
         for f in rechecked:
             kept.append({
@@ -267,5 +292,4 @@ async def refine_world_payload(
                 "meta": {"message": f.detail},
             })
         payload["quality_warnings"] = kept
-
-    return RefineResult(changed=bool(changes), payload=payload, changes=changes, rechecked=rechecked)
+    return rechecked

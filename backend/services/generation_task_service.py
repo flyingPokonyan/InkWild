@@ -792,7 +792,7 @@ class GenerationTaskService:
                 pop_usage_context(token)
 
     async def _run_world_refine_impl(self, task_id: str) -> None:
-        from services.world_gen_refiner import refine_world_payload
+        from services.world_gen_refiner import recheck_and_refresh, refine_world_payload
 
         request = await self._get_request_payload(task_id)
         task = await self.get_task(task_id)
@@ -828,8 +828,9 @@ class GenerationTaskService:
                     task_id, {"type": "progress", "phase": "refine", "code": code, "message": message}
                 )
 
+            # recheck=False：精修主体（事件+小传）跑完先出结果，复检退后台。
             result = await refine_world_payload(
-                payload, targets=targets, llm_router=llm, progress=_progress
+                payload, targets=targets, llm_router=llm, progress=_progress, recheck=False
             )
 
             if result.changed:
@@ -838,11 +839,9 @@ class GenerationTaskService:
                     if draft is not None:
                         self._write_versioned_world_payload(draft, result.payload)
                         await session.commit()
-                # payload 变了，之前的质量分作废 → 重新打分
-                await self._enqueue_world_quality(task_id, llm)
 
-            # 精修不发 result 事件（避免触发世界落库的 _apply_result_payload）——
-            # payload 已写回，前端收到 completed(meta) + done 后重拉 draft 即可。
+            # 先出结果（不含复检）：用户 ~3 分钟就能看到改动，不必干等复检那 1~2 分钟。
+            # 不发 result 事件（避免触发世界落库的 _apply_result_payload）——前端收 completed 即可。
             await self._record_event(
                 task_id,
                 {
@@ -853,6 +852,31 @@ class GenerationTaskService:
                     "meta": result.as_dict(),
                 },
             )
+
+            # 复检退后台：仍在本任务流内跑（编辑保持锁定），但用户已先看到改动。
+            # 复检刷新 quality_warnings 后再写回一次 + 重新打分，最后发 recheck_done。
+            if result.changed:
+                rechecked = await recheck_and_refresh(
+                    result.payload, changed=True, llm_router=llm, progress=_progress
+                )
+                async with self.session_factory() as session:
+                    draft = await session.get(WorldDraft, draft_id)
+                    if draft is not None:
+                        self._write_versioned_world_payload(draft, result.payload)
+                        await session.commit()
+                # payload 变了，之前的质量分作废 → 重新打分
+                await self._enqueue_world_quality(task_id, llm)
+                await self._record_event(
+                    task_id,
+                    {
+                        "type": "progress",
+                        "phase": "refine",
+                        "code": "recheck_done",
+                        "message": "复检完成",
+                        "meta": {"rechecked": [f.as_dict() for f in rechecked]},
+                    },
+                )
+
             await self._record_event(task_id, {"type": "done"})
         except asyncio.TimeoutError:
             logger.exception("world_refine_timed_out", task_id=task_id)

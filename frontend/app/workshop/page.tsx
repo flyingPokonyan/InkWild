@@ -1586,7 +1586,9 @@ function WorldDraftCard({
   const statusClass = isGenerating ? "generating" : isFailed ? "failed" : "draft";
 
   const handleCardClick = () => {
-    if (confirmingDelete || isGenerating) return;
+    // 生成中也允许点进去：草稿页 DraftEditorShell 会显示生成进度并重连 SSE 恢复。
+    // 之前把 isGenerating 一并挡掉 → "显示生成中但点击没反应、进不去"。
+    if (confirmingDelete) return;
     onOpen();
   };
 
@@ -1828,7 +1830,9 @@ function ScriptDraftCard({
   const statusClass = isGenerating ? "generating" : isFailed ? "failed" : "draft";
 
   const handleCardClick = () => {
-    if (confirmingDelete || isGenerating) return;
+    // 生成中也允许点进去：草稿页 DraftEditorShell 会显示生成进度并重连 SSE 恢复。
+    // 之前把 isGenerating 一并挡掉 → "显示生成中但点击没反应、进不去"。
+    if (confirmingDelete) return;
     onOpen();
   };
 

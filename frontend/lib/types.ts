@@ -425,6 +425,8 @@ export interface AdminWorldDraftDetail {
   created_at: string;
   updated_at: string;
   generation_task?: AdminGenerationTaskSummary | null;
+  /** 在跑的 AI 精修任务（pending/running）—— 重进草稿页时据此重连精修流恢复 */
+  active_refine_task?: { id: string; status: string; last_event_seq: number } | null;
 }
 
 export interface AdminScriptPublishedItem {
