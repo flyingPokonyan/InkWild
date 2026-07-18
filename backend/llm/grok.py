@@ -58,7 +58,7 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
         max_tokens: int = 2048,
         response_format: dict | None = None,
         tool_choice: str | dict | None = None,
-        reasoning: bool | None = None,  # not plumbed for xAI yet; accepted for interface parity
+        reasoning: bool | None = None,
     ) -> AsyncIterator[dict]:
         oai_messages = []
         if system:
@@ -77,12 +77,18 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
             kwargs["tool_choice"] = tool_choice if tool_choice is not None else "auto"
         if response_format:
             kwargs["response_format"] = response_format
+        # Play/realtime slots pass reasoning=False. Official xAI cannot fully
+        # disable thinking; lowest supported control is effort=low (object form).
+        if reasoning is False:
+            kwargs["extra_body"] = {"reasoning": {"effort": "low"}}
 
         stream = await self.client.chat.completions.create(**kwargs)
 
         tool_buffers: dict[int, dict] = {}
         usage = None
         finish_reason: str | None = None
+        reasoning_content_chunks = 0
+        reasoning_content_chars = 0
 
         async for chunk in stream:
             if getattr(chunk, "usage", None):
@@ -94,6 +100,11 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
                 delta = getattr(choice, "delta", None)
                 if not delta:
                     continue
+
+                reasoning_content = getattr(delta, "reasoning_content", None)
+                if isinstance(reasoning_content, str) and reasoning_content:
+                    reasoning_content_chunks += 1
+                    reasoning_content_chars += len(reasoning_content)
 
                 content = getattr(delta, "content", None)
                 if content:
@@ -135,12 +146,16 @@ class GrokProvider(LLMProvider, ImageGenerator, WebSearcher):
                 parsed_input = {}
             yield {"type": "tool_use", "name": state["name"], "input": parsed_input}
 
-        yield {
+        usage_event = {
             "type": "usage",
             "input_tokens": usage.prompt_tokens if usage else 0,
             "output_tokens": usage.completion_tokens if usage else 0,
             "finish_reason": finish_reason,
         }
+        if reasoning_content_chunks:
+            usage_event["reasoning_content_chunks"] = reasoning_content_chunks
+            usage_event["reasoning_content_chars"] = reasoning_content_chars
+        yield usage_event
 
     # -------------------------------------------------------------------
     # WebSearcher — Grok server-side Web Search via Responses API
