@@ -467,3 +467,28 @@ async def test_public_publish_rejects_unchecked_current_revision(db):
             draft_id=str(draft.id),
             actor_user_id=str(user.id),
         )
+
+
+@pytest.mark.asyncio
+async def test_admin_bypasses_quality_gate(db):
+    # Same unchecked/needs_review draft — an admin publisher is NOT blocked.
+    user = User(nickname="admin-owner", is_admin=True)
+    db.add(user)
+    await db.flush()
+    draft = WorldDraft(
+        payload=_payload(),
+        payload_revision=1,
+        payload_hash="b" * 64,
+        quality_status="needs_review",
+        created_by_user_id=user.id,
+    )
+    db.add(draft)
+    await db.commit()
+
+    world = await publish_world_draft(
+        db,
+        draft_id=str(draft.id),
+        actor_user_id=str(user.id),
+        actor_is_admin=True,
+    )
+    assert world.id is not None

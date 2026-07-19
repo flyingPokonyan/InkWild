@@ -552,6 +552,7 @@ async def publish_world_draft(
     *,
     draft_id: str,
     actor_user_id: str,
+    actor_is_admin: bool = False,
     audit_enabled: bool = False,
 ) -> World:
     """Publish a world draft to the public feed.  Actor must be the draft owner.
@@ -560,7 +561,7 @@ async def publish_world_draft(
     then materializes the draft onto the World row.
     """
     draft = await _load_owned_world_draft(db, draft_id=draft_id, actor_user_id=actor_user_id)
-    await _ensure_world_quality_gate(db, draft)
+    await _ensure_world_quality_gate(db, draft, actor_is_admin=actor_is_admin)
     target_status = next_status_on_publish(audit_enabled=audit_enabled)
     world = await _materialize_world_draft(db, draft, target_status=target_status)
     await db.commit()
@@ -568,8 +569,23 @@ async def publish_world_draft(
     return world
 
 
-async def _ensure_world_quality_gate(db: AsyncSession, draft: WorldDraft) -> None:
-    """Only the exact scored/waived payload revision may become public."""
+async def _ensure_world_quality_gate(
+    db: AsyncSession, draft: WorldDraft, *, actor_is_admin: bool = False
+) -> None:
+    """Only the exact scored/waived payload revision may become public.
+
+    Admins bypass the gate: the quality score is advisory for the site owner's
+    own curated content, never a hard block. The gate exists to vet untrusted
+    user submissions, so it still applies to regular users. The score is always
+    computed and surfaced in the review console — admins just aren't blocked.
+    """
+    if actor_is_admin:
+        publish_logger.info(
+            "quality_gate_admin_bypass",
+            draft_id=str(draft.id),
+            quality_status=getattr(draft, "quality_status", None),
+        )
+        return
     if int(draft.payload_revision or 0) <= 0:
         return  # legacy/manual draft created before versioned generation
     quality = (
@@ -1041,7 +1057,8 @@ async def approve_world_draft(db: AsyncSession, *, draft_id: str) -> World:
         raise ValueError(f"Draft {draft_id} not found")
     if draft.review_status != "submitted":
         raise ValueError("草稿不在审核中")
-    await _ensure_world_quality_gate(db, draft)
+    # Admin review approve is admin-only by construction → bypass the gate.
+    await _ensure_world_quality_gate(db, draft, actor_is_admin=True)
     world = await _materialize_world_draft(db, draft, target_status=ContentStatus.PUBLISHED)
     draft.review_status = "editing"
     draft.review_note = None

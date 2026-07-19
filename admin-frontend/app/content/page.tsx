@@ -135,30 +135,12 @@ function PendingReviews() {
     onError: (e) => setErr(e instanceof Error ? e.message : "驳回失败"),
   });
 
-  // 质量门豁免 → 立即通过发布。备注即豁免原因（后端要求 ≥3 字），记入审计日志。
-  const waiveAndPublish = useMutation({
-    mutationFn: async (it: ReviewItem) => {
-      await apiFetch(`/api/admin/reviews/world/${it.draft_id}/quality-waiver`, {
-        method: "POST",
-        body: JSON.stringify({ note: note.trim() }),
-      });
-      return apiFetch(`/api/admin/reviews/${it.kind}/${it.draft_id}/approve`, {
-        method: "POST",
-      });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin-reviews"] });
-      close();
-    },
-    onError: (e) => setErr(e instanceof Error ? e.message : "豁免并发布失败"),
-  });
-
   const items = listQuery.data?.reviews ?? [];
-  const busy = approve.isPending || reject.isPending || waiveAndPublish.isPending;
+  const busy = approve.isPending || reject.isPending;
   const quality = detailQuery.data?.quality ?? null;
   const qStatus = detailQuery.data?.quality_status ?? null;
-  // 世界且当前版本未 passed/waived → approve 会被质量门挡，露出豁免按钮。
-  const needsWaiver =
+  // 管理员审批已直接放行（后端跳过质量门），质量分只作参考展示，不再拦人。
+  const qualityAdvisory =
     selected?.kind === "world" && !!qStatus && !QUALITY_PASSED.has(qStatus);
 
   return (
@@ -301,9 +283,9 @@ function PendingReviews() {
                     ))}
                   </ul>
                 )}
-                {needsWaiver && (
+                {qualityAdvisory && (
                   <p className="dim-2" style={{ fontSize: 11.5, margin: 0 }}>
-                    未通过质量门，直接「通过并发布」会被拦。确认内容没问题的话，填写下方备注作为豁免原因，再点「豁免并发布」。
+                    以上仅为参考。管理员发布不受质量门限制，确认内容没问题即可直接「通过并发布」。
                   </p>
                 )}
               </div>
@@ -368,18 +350,14 @@ function PendingReviews() {
 
             <div className="field">
               <label className="dim-2" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
-                备注（驳回时回填给创作者；豁免质量门时作为豁免原因，需 ≥3 字）
+                驳回理由（驳回时回填给创作者，可选）
               </label>
               <textarea
                 className="input"
                 rows={3}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder={
-                  needsWaiver
-                    ? "例如：图已补齐，正典软旗为沙盒可接受取舍，予以放行"
-                    : "例如：核心设定与题材不符，请调整后重新提交"
-                }
+                placeholder="例如：核心设定与题材不符，请调整后重新提交"
               />
             </div>
 
@@ -393,23 +371,13 @@ function PendingReviews() {
               >
                 驳回
               </Btn>
-              {needsWaiver ? (
-                <Btn
-                  variant="primary"
-                  disabled={busy || note.trim().length < 3}
-                  onClick={() => selected && waiveAndPublish.mutate(selected)}
-                >
-                  豁免并发布
-                </Btn>
-              ) : (
-                <Btn
-                  variant="primary"
-                  disabled={busy}
-                  onClick={() => selected && approve.mutate(selected)}
-                >
-                  通过并发布
-                </Btn>
-              )}
+              <Btn
+                variant="primary"
+                disabled={busy}
+                onClick={() => selected && approve.mutate(selected)}
+              >
+                通过并发布
+              </Btn>
             </div>
           </div>
         ) : null}

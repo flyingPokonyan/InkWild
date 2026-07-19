@@ -1442,6 +1442,7 @@ async def publish_world_draft_endpoint(
             db,
             draft_id=draft_id,
             actor_user_id=str(user.id),
+            actor_is_admin=bool(getattr(user, "is_admin", False)),
             audit_enabled=False,
         )
     except PermissionError as e:
