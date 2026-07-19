@@ -209,6 +209,28 @@ def test_portrait_keeps_clear_face():
     assert "2:3" in p
 
 
+def test_portrait_ip_fallback_drops_ip_and_names():
+    # IP portrait blocked on 与第三方内容相似性 → de-IP'd tier must NOT name the IP
+    # world / canonical character, and paints a trademark-free original from deip_hint.
+    wb = _brief(world_name="哈利波特", art_style="复古绘本", ip_name="哈利波特")
+    ch = CharacterCoverBrief(
+        name="哈利·波特",
+        reference_anchor="《哈利波特》里的学生",
+        mood_anchor="勇敢忧郁",
+        deip_hint="黑发凌乱、绿眼、深色学院长袍的少年",
+    )
+    normal = build_character_portrait_prompt(wb, ch)
+    assert "哈利波特" in normal and "哈利·波特" in normal
+    fb = build_character_portrait_prompt(wb, ch, ip_fallback=True)
+    assert "哈利波特" not in fb and "哈利·波特" not in fb
+    assert "黑发凌乱" in fb and "原创角色" in fb
+    assert "清晰可辨的面部" in fb  # avatar crop constraint preserved
+    # no deip_hint → 4-dim descriptor still de-IP'd
+    ch2 = CharacterCoverBrief(name="X", gender="男", age_band="少年", role_class="魔法学徒")
+    fb2 = build_character_portrait_prompt(wb, ch2, ip_fallback=True)
+    assert "少年" in fb2 and "魔法学徒" in fb2 and "X" not in fb2.replace("2:3", "")
+
+
 def test_ending_card_basics():
     ending = EndingCoverBrief(title="家国并肩", description="男女主登城眺望远方。")
     p = build_ending_card_prompt(_brief(), ending)

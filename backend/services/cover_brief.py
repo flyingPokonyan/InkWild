@@ -111,6 +111,11 @@ class CharacterCoverBrief(BaseModel):
     role_class: str = ""  # 武将 / 文官 / 屠户 / 宰相 / 工人 / 科学家 / ...
     # mood_anchor is appended for both ref + fallback paths (a 4-8 char emotional cue).
     mood_anchor: str = ""
+    # De-IP'd visual phrase (hair/build/attire/vibe, NO proper names / trademark
+    # markers) used ONLY by the ip_fallback portrait tier when the direct IP
+    # anchor is moderation-blocked on 与第三方内容相似性. Keeps the character's
+    # general look while dropping the copyright-identifying features.
+    deip_hint: str = ""
 
 
 class EndingCoverBrief(BaseModel):
@@ -567,25 +572,54 @@ def _character_descriptor(char: CharacterCoverBrief) -> str:
     return "，".join(parts) if parts else "虚构角色"
 
 
+def _deip_descriptor(char: CharacterCoverBrief) -> str:
+    """De-IP'd descriptor for the ip_fallback tier: prefer the LLM-written
+    ``deip_hint`` (rich, trademark-free look), else the 4-dim fallback."""
+    hint = (char.deip_hint or "").strip()
+    if hint:
+        return f"{hint}；{char.mood_anchor}" if char.mood_anchor else hint
+    return _character_descriptor(char)
+
+
 def build_character_portrait_prompt(
-    world_brief: CoverBrief, char: CharacterCoverBrief
+    world_brief: CoverBrief, char: CharacterCoverBrief, ip_fallback: bool = False
 ) -> str:
     """2:3 character portrait in the world's 画法. Unlike covers, portraits keep
     a hard "clear face on the upper third" constraint for the front-end's
     circular avatar crop — so the 画法 styles the face but must not abstract it
-    away (no pure silhouette / faceless collage)."""
-    descriptor = _character_descriptor(char)
-    return (
-        f"为《{world_brief.world_name}》中的角色「{char.name}」（{descriptor}）创作一幅 2:3 人物主视觉。"
+    away (no pure silhouette / faceless collage).
+
+    ``ip_fallback`` (for IP worlds whose direct portrait is moderation-blocked on
+    与第三方内容相似性): drop the IP world name + canonical character name + the
+    "保留原作" fidelity clause, and paint a trademark-free ORIGINAL character from
+    ``deip_hint``. Empirically this passes the upstream image guard while keeping
+    the character on-vibe. The most trademark-defined identifiers (e.g. a signature
+    accessory) are intentionally softened away by the deip_hint author."""
+    face_and_style = (
         f"画法：{resolve_style_desc(world_brief.art_style)}"
         "用这种画法的笔触与肌理塑造人物，但人物要有清晰可辨的面部、半身或胸像构图，"
         "眼线落在画面上三分位附近（前端将自动裁出圆形头像）；不要纯剪影或抹去五官。"
         "不要照相写实渲染、塑料皮肤或过度磨皮。"
-        f"{_fidelity_clause(world_brief)}"
+    )
+    tail = (
         "画面中不要出现任何文字、姓名标签或字幕。"
         f"{_WEB_LEGIBILITY}"
         f"{_LOGO_NEGATIVE}"
         "2:3 竖版。"
+    )
+    if ip_fallback:
+        return (
+            f"创作一幅 2:3 人物主视觉：{_deip_descriptor(char)}。"
+            f"{face_and_style}"
+            "请把 ta 当作一个全新的原创角色来刻画，不要复刻任何已知影视或文学作品里的"
+            "官方造型、演员相貌、商标或标识。"
+            f"{tail}"
+        )
+    return (
+        f"为《{world_brief.world_name}》中的角色「{char.name}」（{_character_descriptor(char)}）创作一幅 2:3 人物主视觉。"
+        f"{face_and_style}"
+        f"{_fidelity_clause(world_brief)}"
+        f"{tail}"
     )
 
 

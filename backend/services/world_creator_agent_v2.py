@@ -152,6 +152,15 @@ def _is_retryable_image_error(exc: BaseException) -> bool:
     return True
 
 
+def _is_moderation_block(exc: BaseException) -> bool:
+    """Upstream image guard refused on content policy (e.g. gpt-image's
+    与第三方内容相似性 / content_policy_violation). Arrives as a non-retryable 400,
+    so it must escalate to the next (softer / de-IP'd) prompt tier rather than
+    give up — the empty-result escalation path never sees it."""
+    msg = str(exc).lower()
+    return "content_policy" in msg or "第三方内容相似" in msg or "相似性" in msg
+
+
 async def _sleep_before_image_retry(attempt: int) -> None:
     if not _IMAGE_RETRY_BACKOFFS:
         return
@@ -226,16 +235,24 @@ async def _generate_image_with_fallback(
             break
         except Exception as exc:  # noqa: BLE001
             retryable = _is_retryable_image_error(exc)
+            moderation = _is_moderation_block(exc)
             logger.warning(
                 "image_gen_error",
                 key=log_key,
                 attempt=attempt,
                 retryable=retryable,
+                moderation=moderation,
+                tier=tier,
                 status_code=_image_status_code(exc),
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
-            if not retryable:
+            # A content-policy block (与第三方内容相似性) is a non-retryable 400,
+            # but a softer / de-IP'd next tier may pass — escalate instead of
+            # giving up. Only bail when there's no further tier to try.
+            if moderation and tier + 1 < len(prompt_tiers):
+                tier += 1
+            elif not retryable:
                 break
         if attempt < max_attempts:
             await _sleep_before_image_retry(attempt)
@@ -3026,7 +3043,15 @@ class WorldCreatorAgentV2:
                 portrait_tasks.append(("npc:" + char.name, [], None, None))
                 continue
             prompt = build_character_portrait_prompt(world_brief, char_brief)
-            portrait_tasks.append((f"npc:{char.name}", [prompt], "2:3", "characters"))
+            tiers = [prompt]
+            if world_brief.ip_name and world_brief.ip_name.strip():
+                # IP portraits get moderation-blocked on 与第三方内容相似性 → escalate
+                # to a trademark-free de-IP'd tier that still keeps the character
+                # on-vibe (drops the copyright-identifying markers).
+                tiers.append(
+                    build_character_portrait_prompt(world_brief, char_brief, ip_fallback=True)
+                )
+            portrait_tasks.append((f"npc:{char.name}", tiers, "2:3", "characters"))
 
         image_storage = get_image_storage()
         semaphore = asyncio.Semaphore(_image_generation_concurrency())

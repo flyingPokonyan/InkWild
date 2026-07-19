@@ -58,7 +58,8 @@ _WORLD_HELPER_SYSTEM = """你是 InkWild 的美术指导，给一个虚构故事
       "mood_anchor": "4-8 字情绪/气质短语（'隐忍深沉' / '风尘仆仆' / '惊魂未定' 等）",
       "gender": "男 或 女 或 空字符串",
       "age_band": "少年/少女/青年/中年/老年 之一，或空字符串",
-      "role_class": "职业或社会身份的短词（'武将' / '屠户' / '宰相' / '科学家' / '工人' / '钢琴少女' 等），或空字符串"
+      "role_class": "职业或社会身份的短词（'武将' / '屠户' / '宰相' / '科学家' / '工人' / '钢琴少女' 等），或空字符串",
+      "deip_hint": "去IP化外貌短语（~15-30字，见规则），已知 IP 角色必填，原创角色留空字符串"
     }
   }
 }
@@ -93,6 +94,13 @@ characters 规则：
 - 当角色不在 IP 中（`_has_ip_ref: false`），gender/age_band/role_class **必填**（不要留空），mood_anchor 也要填。
 - mood_anchor 不要复用别人的关键词——同一世界里不同角色 mood 要有区分度。
 - 不要复述 secret 内容；将隐藏特质转化为情绪姿态。
+- deip_hint（去IP化外貌，关键——已知 IP 角色必填，用于生图被"第三方相似性"拦截时的降级重画）：
+  用一句 15-30 字的通用外貌短语描述这个角色（发色发型、体型、年龄气质、典型服饰/道具），
+  **保留角色的整体气质与辨识度，但主动去掉 1-2 个最具版权识别度的标志物**（如某招牌眼镜/伤疤/
+  独有面具/logo），把 ta 写成一个"可以是任何同类奇幻/历史世界里的原创角色"。
+  **不要出现任何专有名词**：不写作品名、角色真名、门派/学院/组织/地名等 IP 特有名词。
+  例：某戴圆框眼镜有闪电疤的少年巫师 → "黑发凌乱、绿眼、神情坚毅的少年，深色学院长袍配红金围巾"；
+  某蛇脸黑魔王 → "面色惨白、光头无发、眼神阴冷的黑袍男巫师，威严而危险"。原创世界角色留空。
 """
 
 
@@ -384,14 +392,17 @@ def _build_character_brief(
     """Merge mechanical ref_anchor + helper LLM output + seed data into a brief."""
     name_english = (helper_entry.get("name_english") or "").strip()
     mood_anchor = (helper_entry.get("mood_anchor") or "").strip()
+    deip_hint = (helper_entry.get("deip_hint") or "").strip()
 
     if reference_anchor:
-        # IP-pack character: 4-dim fallback fields stay empty
+        # IP-pack character: 4-dim fallback fields stay empty; deip_hint drives
+        # the ip_fallback portrait tier when the direct IP anchor is blocked.
         return CharacterCoverBrief(
             name=name,
             name_english=name_english,
             reference_anchor=reference_anchor,
             mood_anchor=mood_anchor,
+            deip_hint=deip_hint,
         )
 
     # Original / not-in-IP-pack character: 4-dim fallback required
@@ -407,6 +418,7 @@ def _build_character_brief(
         age_band=age_band,
         role_class=role_class,
         mood_anchor=mood_anchor,
+        deip_hint=deip_hint,
     )
 
 

@@ -316,9 +316,15 @@ async def regenerate_world_draft_image(
         )
         char_brief = char_briefs.get(char_name) or CharacterCoverBrief(name=char_name)
         base_prompt = build_character_portrait_prompt(world_brief, char_brief)
+        is_ip = bool(world_brief.ip_name and world_brief.ip_name.strip())
+        deip_prompt = (
+            build_character_portrait_prompt(world_brief, char_brief, ip_fallback=True)
+            if is_ip
+            else None
+        )
         return await _generate_one(
             image_gen=image_gen,
-            prompt_tiers=_tiers(base_prompt, None, hint, prompt),
+            prompt_tiers=_tiers(base_prompt, deip_prompt, hint, prompt),
             aspect_ratio="2:3",
             category="characters",
             name=char_name,
