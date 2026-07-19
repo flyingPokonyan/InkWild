@@ -32,6 +32,23 @@ interface ReviewDetail {
   review_note: string | null;
   world_id: string | null;
   payload: Record<string, unknown>;
+  quality_status?: string | null;
+  quality?: {
+    status: string;
+    overall_score: number;
+    blocking_flags: string[];
+  } | null;
+}
+
+// 质量门放行状态：这两个之外，approve 会被质量门 400 挡下，需先豁免。
+const QUALITY_PASSED = new Set(["passed", "waived"]);
+
+function cleanFlag(f: string): string {
+  return f
+    .replace(/^quality_review:/, "")
+    .replace(/^quality:/, "")
+    .replace(/^moderation_flag:/, "")
+    .replace(/_/g, " ");
 }
 
 const clampStyle: React.CSSProperties = {
@@ -118,8 +135,31 @@ function PendingReviews() {
     onError: (e) => setErr(e instanceof Error ? e.message : "驳回失败"),
   });
 
+  // 质量门豁免 → 立即通过发布。备注即豁免原因（后端要求 ≥3 字），记入审计日志。
+  const waiveAndPublish = useMutation({
+    mutationFn: async (it: ReviewItem) => {
+      await apiFetch(`/api/admin/reviews/world/${it.draft_id}/quality-waiver`, {
+        method: "POST",
+        body: JSON.stringify({ note: note.trim() }),
+      });
+      return apiFetch(`/api/admin/reviews/${it.kind}/${it.draft_id}/approve`, {
+        method: "POST",
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-reviews"] });
+      close();
+    },
+    onError: (e) => setErr(e instanceof Error ? e.message : "豁免并发布失败"),
+  });
+
   const items = listQuery.data?.reviews ?? [];
-  const busy = approve.isPending || reject.isPending;
+  const busy = approve.isPending || reject.isPending || waiveAndPublish.isPending;
+  const quality = detailQuery.data?.quality ?? null;
+  const qStatus = detailQuery.data?.quality_status ?? null;
+  // 世界且当前版本未 passed/waived → approve 会被质量门挡，露出豁免按钮。
+  const needsWaiver =
+    selected?.kind === "world" && !!qStatus && !QUALITY_PASSED.has(qStatus);
 
   return (
     <>
@@ -214,6 +254,61 @@ function PendingReviews() {
               </p>
             )}
 
+            {selected?.kind === "world" && qStatus && (
+              <div
+                style={{
+                  border: "1px solid var(--line)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="dim-2" style={{ fontSize: 12 }}>
+                    质量门
+                  </span>
+                  <Badge
+                    tone={
+                      QUALITY_PASSED.has(qStatus)
+                        ? "success"
+                        : qStatus === "failed"
+                          ? "danger"
+                          : "warning"
+                    }
+                  >
+                    {qStatus}
+                  </Badge>
+                  {quality && (
+                    <span className="dim" style={{ fontSize: 12 }}>
+                      综合 {Math.round(quality.overall_score)}
+                    </span>
+                  )}
+                </div>
+                {quality && quality.blocking_flags.length > 0 && (
+                  <ul
+                    style={{
+                      margin: 0,
+                      paddingLeft: 18,
+                      fontSize: 12,
+                      color: "var(--fg-secondary)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {quality.blocking_flags.map((f, i) => (
+                      <li key={i}>{cleanFlag(f)}</li>
+                    ))}
+                  </ul>
+                )}
+                {needsWaiver && (
+                  <p className="dim-2" style={{ fontSize: 11.5, margin: 0 }}>
+                    未通过质量门，直接「通过并发布」会被拦。确认内容没问题的话，填写下方备注作为豁免原因，再点「豁免并发布」。
+                  </p>
+                )}
+              </div>
+            )}
+
             {(() => {
               const warnings =
                 (detailQuery.data.payload.quality_warnings as string[] | undefined) ?? [];
@@ -273,20 +368,24 @@ function PendingReviews() {
 
             <div className="field">
               <label className="dim-2" style={{ fontSize: 12, display: "block", marginBottom: 6 }}>
-                驳回理由（驳回时回填给创作者，可选）
+                备注（驳回时回填给创作者；豁免质量门时作为豁免原因，需 ≥3 字）
               </label>
               <textarea
                 className="input"
                 rows={3}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="例如：核心设定与题材不符，请调整后重新提交"
+                placeholder={
+                  needsWaiver
+                    ? "例如：图已补齐，正典软旗为沙盒可接受取舍，予以放行"
+                    : "例如：核心设定与题材不符，请调整后重新提交"
+                }
               />
             </div>
 
             {err && <p style={{ color: "var(--danger)", fontSize: 12 }}>{err}</p>}
 
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <Btn
                 variant="danger"
                 disabled={busy}
@@ -294,13 +393,23 @@ function PendingReviews() {
               >
                 驳回
               </Btn>
-              <Btn
-                variant="primary"
-                disabled={busy}
-                onClick={() => selected && approve.mutate(selected)}
-              >
-                通过并发布
-              </Btn>
+              {needsWaiver ? (
+                <Btn
+                  variant="primary"
+                  disabled={busy || note.trim().length < 3}
+                  onClick={() => selected && waiveAndPublish.mutate(selected)}
+                >
+                  豁免并发布
+                </Btn>
+              ) : (
+                <Btn
+                  variant="primary"
+                  disabled={busy}
+                  onClick={() => selected && approve.mutate(selected)}
+                >
+                  通过并发布
+                </Btn>
+              )}
             </div>
           </div>
         ) : null}
